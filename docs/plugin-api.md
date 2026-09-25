@@ -125,7 +125,7 @@ own rAF loop and don't resize the canvas.
 | `canvas` | Full-window canvas, already sized |
 | `ctx2d` / `gl` / `gpu` / `three` | The one matching your `renderer`; others are `null` |
 | `params` | Live parameter values |
-| `assets` | `url(path)`, `text`, `json`, `image` (→ `ImageBitmap`), `arrayBuffer`; paths are repo-relative |
+| `assets` | `url(path)`, `text`, `json`, `image` (→ `ImageBitmap`), `arrayBuffer`; paths are repo-relative. `..` segments, leading `/`, backslashes and URL schemes are rejected |
 | `size` | `{ width, height, cssWidth, cssHeight, dpr }`; `width`/`height` are drawing-buffer pixels |
 | `renderScale` | 0.5–1, lowered automatically in Auto quality when frames run over budget |
 | `quality` | `auto`, `high`, `balanced`, `battery` |
@@ -163,16 +163,19 @@ keep (`myCopy.set(audio.bands)`).
 | `bass`, `mid`, `treb` | number | 1.0 = recent average for that band (≈0–2, MilkDrop style) |
 | `bassAtt`, `midAtt`, `trebAtt` | number | Smoothed versions; good for motion |
 | `onsetStrength` | number | Onset detection function |
-| `onset` | boolean | A transient/beat landed this frame |
+| `onset` | boolean | A transient/beat landed this frame (carried forward if its audio frame was replaced before being drawn, so you see each onset exactly once) |
 | `bpm` | number | Tempo, 0 until confident |
 | `beatPhase` | number | 0–1 between predicted beats |
 | `centroid` | number | Spectral brightness, 0–1 |
 | `flux` | number | Spectral change, ≈0–1 |
 | `silent` | boolean | Source is silent (or permission missing) |
 | `frameIndex`, `sampleRate` | number | Host frame counter, source rate |
+| `hostTime` | number | Host monotonic time (s) of the newest sample in the frame |
 
-`time = { now, dt, frame }`: seconds since start, seconds since the previous frame (clamped to
-0.1), and the rendered-frame counter.
+Before the first audio frame arrives, `frame` receives a silent all-zero frame (`silent: true`).
+
+`time = { now, dt, frame }`: seconds since start (paused while hidden), seconds since the previous
+frame (clamped to 0.1; 0 on the first frame), and the rendered-frame counter.
 
 ## Rules the sandbox enforces
 
