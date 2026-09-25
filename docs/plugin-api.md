@@ -158,6 +158,7 @@ keep (`myCopy.set(audio.bands)`).
 | `bassAtt`, `midAtt`, `trebAtt` | number | Smoothed versions; good for motion |
 | `onsetStrength` | number | Onset detection function |
 | `onset` | boolean | A transient/beat landed this frame |
+| `onsetAge` | number | Seconds from the latest onset to this frame's newest sample (sub-hop accurate; ≤ 10, 10 before the first onset) |
 | `bpm` | number | Tempo, 0 until confident |
 | `beatPhase` | number | 0–1 between predicted beats |
 | `centroid` | number | Spectral brightness, 0–1 |

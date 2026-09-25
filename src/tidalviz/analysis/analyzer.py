@@ -38,6 +38,10 @@ class AnalysisContext:
         self.mag: F32 = np.zeros(self.n_bins, dtype=np.float32)  # linear amplitude, not gained
         self.gain = 1.0  # auto-gain factor for display features (set by AutoGain)
         self.silent = True  # set by Level
+        self.band_db: F32 = np.zeros(settings.n_bands, dtype=np.float32)  # set by Bands
+        self.odf = 0.0  # onset detection function value this hop (set by Onset, read by Tempo)
+        self.onset = False  # set by Onset
+        self.onset_time = 0.0  # host time of the latest onset, sub-hop accurate (set by Onset)
         self.index = 0
         self.host_time = 0.0
 

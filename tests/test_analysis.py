@@ -98,3 +98,29 @@ def test_bass_mid_treb_are_zero_in_silence():
     f = last(SyntheticSource("silence"), 1.0)
     for n in ("bass", "mid", "treb", "bassAtt", "midAtt", "trebAtt"):
         assert f.scalars[S[n]] == 0.0
+
+
+def onset_times(src: SyntheticSource, seconds: float) -> list[float]:
+    """Estimated onset times: host_time (end of the newest sample) minus onsetAge."""
+    return [f.host_time - float(f.scalars[S["onsetAge"]]) for f in frames(src, seconds) if f.onset]
+
+
+def test_onsets_fire_once_per_click_with_under_10ms_error():
+    # Error = |estimated onset time − true click time|, where the true time of click sample c
+    # is c / sr on the same clock as host_time (sample i ends at (i + 1) / sr; see helper).
+    # Every click must be detected exactly once, with no extra onsets.
+    src = SyntheticSource("click120")
+    detected = onset_times(src, 8.0)
+    clicks = [c / 48000.0 for c in src.click_positions(src.position - 2048)]
+    assert len(detected) == len(clicks), (detected, clicks)
+    errors = [abs(d - c) for d, c in zip(detected, clicks, strict=True)]
+    assert max(errors) < 0.010, errors
+
+
+def test_onsets_catch_every_kick_in_music_like_input():
+    src = SyntheticSource("demo")
+    detected = np.array(onset_times(src, 8.0))
+    kicks = np.arange(0, src.position - 2048, src.beat_period)[1:] / 48000.0
+    for k in kicks:
+        assert np.min(np.abs(detected - k)) < 0.010, k
+    assert len(detected) < 4 * len(kicks)  # kick, snare, hats — not a stream of false hits

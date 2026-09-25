@@ -126,6 +126,8 @@ class Bands:
         self._coef: F32 = np.zeros(s.n_bands, dtype=np.float32)
         self._rising = np.zeros(s.n_bands, dtype=np.bool_)
         self._state: F32 = np.zeros(s.n_bands, dtype=np.float32)
+        self.db: F32 = np.full(s.n_bands, self.DB_FLOOR - 10.0, dtype=np.float32)
+        ctx.band_db = self.db  # tilted band levels in dB, floored; Onset's input
         self._k_attack = smoothing(ctx.dt, self.ATTACK_S)
         self._k_release = smoothing(ctx.dt, self.RELEASE_S)
 
@@ -138,6 +140,7 @@ class Bands:
         np.log10(lv, out=lv)
         np.multiply(lv, 10.0, out=lv)
         np.add(lv, self._tilt, out=lv)
+        np.maximum(lv, self.DB_FLOOR - 10.0, out=self.db)
         np.subtract(lv, self.DB_FLOOR, out=lv)
         np.multiply(lv, 1.0 / (self.DB_CEIL - self.DB_FLOOR), out=lv)
         np.clip(lv, 0.0, 1.0, out=lv)
@@ -211,4 +214,9 @@ def _band_weights(edges: np.ndarray, n_bins: int, bin_hz: float) -> F32:
 
 
 def default_extractors(ctx: AnalysisContext) -> list[FeatureExtractor]:
-    return [Level(ctx), AutoGain(ctx), Waveform(ctx), Spectrum(ctx), Bands(ctx), BassMidTreb(ctx)]
+    from tidalviz.analysis.rhythm import Onset
+
+    return [
+        Level(ctx), AutoGain(ctx), Waveform(ctx), Spectrum(ctx), Bands(ctx), BassMidTreb(ctx),
+        Onset(ctx),
+    ]  # fmt: skip
