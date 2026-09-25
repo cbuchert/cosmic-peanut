@@ -67,6 +67,7 @@ export function createApp(deps) {
   /** @type {string | null} */ let installId = null;
   /** @type {ReturnType<typeof setInterval> | undefined} */ let cycleTimer;
   let connectionMessage = false;
+  /** Visualizer whose error the overlay shows. @type {string | null} */ let errorKey = null;
 
   // ---- DOM -----------------------------------------------------------------------------------
   const stage = h("div", { id: "stage", class: "stage" });
@@ -400,7 +401,7 @@ export function createApp(deps) {
   function onEvent(e) {
     switch (e.kind) {
       case "ready":
-        if (e.key === selected) errorBox.hidden = true;
+        if (e.key === errorKey) errorBox.hidden = true; // e.g. a hot reload fixed it
         break;
       case "error":
       case "fatal": {
@@ -409,6 +410,7 @@ export function createApp(deps) {
         const name = find(e.key)?.name ?? e.key;
         errorText.textContent = `${name} — ${formatError(e.error)}`;
         errorBox.hidden = false;
+        errorKey = e.key;
         log(`[${e.key}] ${formatError(e.error)}`);
         if (e.kind === "fatal") {
           if (e.wasActive) fallback(e.key);
@@ -464,16 +466,20 @@ export function createApp(deps) {
     if (!openPanel) returnFocus = doc.activeElement;
     for (const [n, el] of Object.entries(panels)) el.hidden = n !== name;
     openPanel = name;
+    root.classList.add("panel-open");
     idle.poke();
     const target = /** @type {HTMLElement | null} */ (panels[name].querySelector("input, select, button:not(.close)") ?? panels[name].querySelector("button"));
     target?.focus();
   }
 
   function closePanels() {
+    const focused = doc.activeElement;
+    if (focused instanceof HTMLElement && focused.closest(".panel")) focused.blur();
     for (const el of Object.values(panels)) el.hidden = true;
     if (openPanel && returnFocus instanceof HTMLElement && returnFocus.isConnected) returnFocus.focus();
     openPanel = null;
     returnFocus = null;
+    root.classList.remove("panel-open");
   }
 
   function dismissNotice() {

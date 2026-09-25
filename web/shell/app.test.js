@@ -168,8 +168,10 @@ describe("app: keys", () => {
     expect(lib.hidden).toBe(true);
     press("l");
     expect(lib.hidden).toBe(false);
+    expect(root.classList.contains("panel-open")).toBe(true);
     press("Escape");
     expect(lib.hidden).toBe(true);
+    expect(root.classList.contains("panel-open")).toBe(false);
   });
 
   it("P toggles the HUD and persists it", () => {
@@ -213,6 +215,16 @@ describe("app: plugin events", () => {
     expect(last("pluginError")).toEqual({ type: "pluginError", key: "builtin/orb", message: "boom", fatal: true });
     expect(host.show).toHaveBeenLastCalledWith(A, { hue: 120 });
     expect(last("select")).toEqual({ type: "select", key: "builtin/bars" });
+    host.emit({ kind: "ready", key: "builtin/bars" });
+    expect(/** @type {HTMLElement} */ (document.querySelector("#error")).hidden).toBe(false);
+  });
+
+  it("a successful hot reload of the errored visualizer clears the error", () => {
+    const { app, host } = setup();
+    app.handle(hello());
+    host.emit({ kind: "error", key: "builtin/bars", error: { type: "error", message: "x", fatal: true }, reload: true });
+    host.emit({ kind: "ready", key: "builtin/bars" });
+    expect(/** @type {HTMLElement} */ (document.querySelector("#error")).hidden).toBe(true);
   });
 
   it("a fatal error in an incoming plugin re-selects the one still running", () => {

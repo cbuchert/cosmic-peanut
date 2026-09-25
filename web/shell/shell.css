@@ -6,7 +6,7 @@
   --fg: #f2f2f5;
   --muted: rgba(235, 235, 245, 0.6);
   --faint: rgba(235, 235, 245, 0.32);
-  --glass: rgba(22, 22, 26, 0.72);
+  --glass: rgba(20, 20, 24, 0.86);
   --glass-strong: rgba(22, 22, 26, 0.9);
   --line: rgba(255, 255, 255, 0.1);
   --hover: rgba(255, 255, 255, 0.08);
@@ -253,6 +253,7 @@ input[type="color"] {
   padding: 0.5rem 0.7rem; font: 0.7rem/1.45 ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted);
   white-space: pre-wrap; word-break: break-word;
 }
+.shell.panel-open .devlog { display: none; }
 .shell.idle .devlog, .shell.overlays-hidden .devlog { opacity: 0; transition: opacity var(--fade); }
 
 /* ---- modals --------------------------------------------------------------------------------- */

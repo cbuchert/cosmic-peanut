@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { keyAction } from "./keys.js";
 
-/** @param {Partial<KeyboardEvent> & { tag?: string }} e */
-const ev = (e) => ({ key: "", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false, target: { tagName: e.tag ?? "BODY" }, ...e });
+/** @param {Partial<KeyboardEvent> & { tag?: string; inputType?: string }} e */
+const ev = (e) => ({ key: "", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false, target: { tagName: e.tag ?? "BODY", type: e.inputType }, ...e });
 
 describe("keyAction", () => {
   it("maps player keys", () => {
@@ -23,5 +23,12 @@ describe("keyAction", () => {
     expect(keyAction(ev({ key: "n", tag: "INPUT" }))).toBeNull();
     expect(keyAction(ev({ key: "n", tag: "TEXTAREA" }))).toBeNull();
     expect(keyAction(ev({ key: "Escape", tag: "INPUT" }))).toBe("escape");
+  });
+
+  it("still works while a slider, checkbox or button has focus", () => {
+    expect(keyAction(ev({ key: "n", tag: "INPUT", inputType: "range" }))).toBe("next");
+    expect(keyAction(ev({ key: "l", tag: "INPUT", inputType: "checkbox" }))).toBe("library");
+    expect(keyAction(ev({ key: "l", tag: "BUTTON" }))).toBe("library");
+    expect(keyAction(ev({ key: "n", tag: "INPUT", inputType: "url" }))).toBeNull();
   });
 });
