@@ -14,7 +14,7 @@ VIZ = {
     "bars": "builtin",
     "undertow": "builtin",
     "orbit": "builtin",
-    "template": "template",
+    "halo": "template",
 }
 OUT = Path(__file__).resolve().parent / "out"
 
