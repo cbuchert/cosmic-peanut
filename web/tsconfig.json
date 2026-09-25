@@ -10,7 +10,12 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "paths": {
+      "three": ["./node_modules/@types/three"],
+      "three/addons/*": ["./node_modules/@types/three/examples/jsm/*"],
+      "vitest": ["./node_modules/vitest"]
+    }
   },
   "include": ["sdk/**/*.js", "sdk/**/*.d.ts", "shell/**/*.js", "../plugins/**/*.js"],
   "exclude": ["node_modules", "vendor"]
