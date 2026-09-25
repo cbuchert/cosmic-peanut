@@ -9,6 +9,7 @@
 import { createAudioFrame, decodeInto, peekFlags } from "./frame.js";
 import { createAssets } from "./assets.js";
 import { describeError, formatLog } from "./diagnostics.js";
+import { createQualityController } from "./quality.js";
 
 /** @typedef {import("./tidalviz").Visualizer} Visualizer */
 /** @typedef {import("./tidalviz").VisualizerContext} VisualizerContext */
@@ -62,6 +63,9 @@ function sanitizeParams(v) {
   return out;
 }
 
+/** Default DPR cap per quality preset (0 = native). */
+const PRESET_DPR = { auto: 0, high: 0, balanced: 1.5, battery: 1 };
+
 /** @param {RuntimeDeps} deps */
 export function createRuntime(deps) {
   const { port, manifest, canvas } = deps;
@@ -71,30 +75,81 @@ export function createRuntime(deps) {
   /** @type {QualityMode} */
   let quality = "auto";
   let reduceFlashing = true;
-  let renderScale = 1;
   let visible = init.visible !== false;
+  let maxDpr = 0; // 0 = native devicePixelRatio
+  let fpsCap = 0; // 0 = uncapped
+  const DISPLAY_MS = 1000 / 60;
+  const qc = createQualityController({ budgetMs: DISPLAY_MS });
+  let renderScale = qc.scale;
 
   /** @type {Record<string, import("./tidalviz").ParamValue>} */
   const params = {};
   for (const spec of manifest.params ?? []) params[spec.id] = spec.default;
   Object.assign(params, sanitizeParams(init.params));
 
-  applySettings(init);
-
   // ---- size ------------------------------------------------------------------------------
   let cssWidth = deps.cssSize.width, cssHeight = deps.cssSize.height;
   const size = { width: 1, height: 1, cssWidth: 0, cssHeight: 0, dpr: 1 };
+  /** @type {import("./tidalviz").ThreeHandles | null} */
+  let three = null;
 
-  function applySize() {
-    const dpr = deps.devicePixelRatio() * renderScale;
+  /** Recompute ctx.size and the drawing buffer. @returns {boolean} whether anything changed */
+  function applySize(force = false) {
+    const native = deps.devicePixelRatio() || 1;
+    const dpr = (maxDpr > 0 ? Math.min(native, maxDpr) : native) * renderScale;
+    const width = Math.max(1, Math.round(cssWidth * dpr));
+    const height = Math.max(1, Math.round(cssHeight * dpr));
+    if (!force && width === size.width && height === size.height && dpr === size.dpr &&
+        cssWidth === size.cssWidth && cssHeight === size.cssHeight) return false;
     size.cssWidth = cssWidth;
     size.cssHeight = cssHeight;
     size.dpr = dpr;
-    size.width = Math.max(1, Math.round(cssWidth * dpr));
-    size.height = Math.max(1, Math.round(cssHeight * dpr));
-    canvas.width = size.width;
-    canvas.height = size.height;
+    size.width = width;
+    size.height = height;
+    if (three) {
+      three.renderer.setSize(width, height, false); // pixel ratio is pinned to 1
+      const cam = /** @type {import("three").PerspectiveCamera} */ (three.camera);
+      if (cam.isPerspectiveCamera) {
+        cam.aspect = cssWidth / Math.max(1, cssHeight);
+        cam.updateProjectionMatrix();
+      }
+    } else {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    return true;
   }
+
+  /** Re-apply size and tell the plugin when it changed. */
+  function resize() {
+    if (!applySize()) return;
+    const p = plugin;
+    if (p?.resize) guard(() => p.resize?.(size));
+  }
+
+  /**
+   * Apply settings from init or a `settings` message. Invalid fields are ignored. When the
+   * message sets `quality` without `maxDpr`/`fpsCap`, the preset's values are used.
+   * @param {Record<string, unknown>} m
+   */
+  function applySettings(m) {
+    if (typeof m.reduceFlashing === "boolean") reduceFlashing = m.reduceFlashing;
+    if (m.quality === "auto" || m.quality === "high" || m.quality === "balanced" || m.quality === "battery") {
+      quality = m.quality;
+      qc.enabled = quality === "auto";
+      qc.reset();
+      if (m.maxDpr === undefined) maxDpr = PRESET_DPR[quality];
+      if (m.fpsCap === undefined) fpsCap = quality === "battery" ? 30 : 0;
+    }
+    if (m.maxDpr === null || (typeof m.maxDpr === "number" && m.maxDpr >= 0)) maxDpr = m.maxDpr ?? 0;
+    if (m.fpsCap === null || (typeof m.fpsCap === "number" && m.fpsCap >= 0)) fpsCap = m.fpsCap ?? 0;
+    if (typeof m.renderScaleMax === "number" && m.renderScaleMax > 0) {
+      qc.setMax(Math.min(1, Math.max(0.5, m.renderScaleMax)));
+    }
+    qc.setBudget(fpsCap > 0 ? 1000 / fpsCap : DISPLAY_MS);
+    renderScale = qc.scale;
+  }
+  applySettings(init);
 
   // ---- plugin ----------------------------------------------------------------------------
   /** @type {VisualizerContext | null} */
@@ -132,16 +187,20 @@ export function createRuntime(deps) {
   /** @param {number} ts */
   function tick(ts) {
     rafId = deps.raf(tick);
+    // fps cap: skip display frames that come earlier than the cap allows (2 ms vsync slack)
+    if (fpsCap > 0 && lastTs >= 0 && ts - lastTs < 1000 / fpsCap - 2) return;
+    const intervalMs = lastTs < 0 ? 0 : ts - lastTs;
     if (pending) {
       decodeInto(audio, pending);
       pending = null;
     }
-    const elapsed = lastTs < 0 ? 0 : (ts - lastTs) / 1000;
+    const elapsed = intervalMs / 1000;
     lastTs = ts;
     time.now += elapsed;
     time.dt = Math.min(0.1, elapsed);
     try {
       /** @type {Visualizer} */ (plugin).frame(audio, time);
+      if (three?.autoRender) three.renderer.render(three.scene, three.camera);
       consecutiveErrors = 0;
     } catch (err) {
       time.frame++;
@@ -150,6 +209,10 @@ export function createRuntime(deps) {
       return;
     }
     time.frame++;
+    if (intervalMs > 0 && qc.enabled && qc.sample(ts, intervalMs) !== renderScale) {
+      renderScale = qc.scale;
+      resize();
+    }
     if (!readySent) {
       readySent = true;
       port.postMessage({ type: "ready" });
@@ -181,6 +244,8 @@ export function createRuntime(deps) {
   async function createPlugin() {
     applySize();
     const handles = await deps.createContext(manifest.renderer, canvas);
+    three = handles.three;
+    if (three) applySize(true);
     const assets = createAssets(deps.base, { fetch: deps.fetch, createImageBitmap: deps.createImageBitmap });
     ctx = {
       apiVersion: 1,
@@ -232,14 +297,6 @@ export function createRuntime(deps) {
     }
   }
 
-  /** @param {Record<string, unknown>} m */
-  function applySettings(m) {
-    if (typeof m.reduceFlashing === "boolean") reduceFlashing = m.reduceFlashing;
-    if (m.quality === "auto" || m.quality === "high" || m.quality === "balanced" || m.quality === "battery") {
-      quality = m.quality;
-    }
-  }
-
   function dispose() {
     stopLoop();
     dead = true;
@@ -271,6 +328,7 @@ export function createRuntime(deps) {
       }
       case "settings":
         applySettings(data);
+        if (plugin) resize();
         return;
       case "visibility":
         if (typeof data.visible !== "boolean") return;
@@ -291,6 +349,16 @@ export function createRuntime(deps) {
     /** Errors outside create/frame (window `error`, `unhandledrejection`). @param {unknown} err */
     reportError(err) {
       postError(err, false);
+    },
+    /**
+     * The canvas's CSS size changed (ResizeObserver).
+     * @param {number} width
+     * @param {number} height
+     */
+    setCssSize(width, height) {
+      cssWidth = width;
+      cssHeight = height;
+      if (plugin) resize();
     },
   };
 }

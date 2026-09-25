@@ -312,3 +312,142 @@ describe("runtime port messages", () => {
     expect(h.pendingRaf()).toBe(1);
   });
 });
+
+describe("runtime sizing and quality", () => {
+  it("caps the DPR with maxDpr (null = native)", async () => {
+    const h = harness({ init: { maxDpr: 1.5 }, dpr: 2 });
+    await h.rt.start();
+    expect(h.create.mock.calls[0][0].size).toMatchObject({ width: 1200, height: 900, dpr: 1.5 });
+  });
+
+  it("settings.maxDpr re-sizes and calls resize(size) with ctx.size", async () => {
+    const plugin = { frame: vi.fn(), resize: vi.fn() };
+    const h = harness({ plugin, dpr: 2 });
+    await h.rt.start();
+    const ctx = h.create.mock.calls[0][0];
+    h.rt.handleMessage({ type: "settings", maxDpr: 1 });
+    expect(plugin.resize).toHaveBeenCalledTimes(1);
+    expect(plugin.resize.mock.calls[0][0]).toBe(ctx.size);
+    expect(ctx.size).toMatchObject({ width: 800, height: 600, dpr: 1 });
+    expect([h.canvas.width, h.canvas.height]).toEqual([800, 600]);
+  });
+
+  it("setCssSize updates ctx.size before resize, and skips no-op resizes", async () => {
+    const plugin = { frame: vi.fn(), resize: vi.fn() };
+    const h = harness({ plugin, dpr: 1 });
+    await h.rt.start();
+    const ctx = h.create.mock.calls[0][0];
+    plugin.resize.mockImplementation((/** @type {any} */ s) => expect(s.cssWidth).toBe(1024));
+    h.rt.setCssSize(1024, 768);
+    h.rt.setCssSize(1024, 768);
+    expect(plugin.resize).toHaveBeenCalledTimes(1);
+    expect(ctx.size).toEqual({ width: 1024, height: 768, cssWidth: 1024, cssHeight: 768, dpr: 1 });
+  });
+
+  it("renderScaleMax caps the render scale", async () => {
+    const h = harness({ init: { renderScaleMax: 0.75 }, dpr: 2 });
+    await h.rt.start();
+    const ctx = h.create.mock.calls[0][0];
+    expect(ctx.renderScale).toBe(0.75);
+    expect(ctx.size).toMatchObject({ width: 1200, dpr: 1.5 });
+  });
+
+  it("auto quality lowers renderScale after 2 s over budget and resizes", async () => {
+    const plugin = { frame: vi.fn(), resize: vi.fn() };
+    const h = harness({ plugin, dpr: 1 });
+    await h.rt.start();
+    const ctx = h.create.mock.calls[0][0];
+    for (let t = 0; t <= 2600; t += 40) h.tick(t);
+    expect(ctx.renderScale).toBeCloseTo(0.9);
+    expect(ctx.size).toMatchObject({ width: 720, height: 540 });
+    expect(plugin.resize).toHaveBeenCalled();
+  });
+
+  it("non-auto quality never adapts", async () => {
+    const h = harness({ init: { quality: "high" }, dpr: 1 });
+    await h.rt.start();
+    const ctx = h.create.mock.calls[0][0];
+    for (let t = 0; t <= 5000; t += 40) h.tick(t);
+    expect(ctx.renderScale).toBe(1);
+  });
+
+  it("switching quality away from auto restores full scale", async () => {
+    const h = harness({ dpr: 1 });
+    await h.rt.start();
+    const ctx = h.create.mock.calls[0][0];
+    for (let t = 0; t <= 2600; t += 40) h.tick(t);
+    expect(ctx.renderScale).toBeLessThan(1);
+    h.rt.handleMessage({ type: "settings", quality: "balanced" });
+    expect(ctx.renderScale).toBe(1);
+    expect(ctx.size.width).toBe(800);
+  });
+
+  it("fpsCap skips display frames to hold the cap", async () => {
+    const h = harness({ init: { fpsCap: 30 } });
+    await h.rt.start();
+    for (let i = 0; i < 60; i++) h.tick((i * 1000) / 60);
+    expect(h.plugin.frame).toHaveBeenCalledTimes(30);
+    expect(h.pendingRaf()).toBe(1);
+    h.rt.handleMessage({ type: "settings", fpsCap: null });
+    for (let i = 60; i < 120; i++) h.tick((i * 1000) / 60);
+    expect(h.plugin.frame).toHaveBeenCalledTimes(90);
+  });
+});
+
+describe("runtime quality presets", () => {
+  it("derives maxDpr/fpsCap from the quality preset when the message omits them", async () => {
+    const h = harness({ init: { quality: "battery", maxDpr: undefined, fpsCap: undefined }, dpr: 2 });
+    await h.rt.start();
+    const ctx = h.create.mock.calls[0][0];
+    expect(ctx.size.dpr).toBe(1);
+    for (let i = 0; i < 60; i++) h.tick((i * 1000) / 60);
+    expect(h.plugin.frame).toHaveBeenCalledTimes(30);
+    h.rt.handleMessage({ type: "settings", quality: "balanced" });
+    expect(ctx.size.dpr).toBe(1.5);
+    h.rt.handleMessage({ type: "settings", quality: "high" });
+    expect(ctx.size.dpr).toBe(2);
+    h.rt.handleMessage({ type: "settings", quality: "battery", maxDpr: 2 });
+    expect(ctx.size.dpr).toBe(2);
+  });
+});
+
+describe("runtime three", () => {
+  const fakeThree = () => ({
+    THREE: {},
+    renderer: { setSize: vi.fn(), render: vi.fn(), dispose: vi.fn() },
+    scene: { name: "default" },
+    camera: { isPerspectiveCamera: true, aspect: 1, updateProjectionMatrix: vi.fn() },
+    autoRender: true,
+  });
+
+  it("sizes the renderer (pixel ratio 1) and camera aspect", async () => {
+    const three = fakeThree();
+    const h = harness({ contexts: { ctx2d: null, three }, manifest: { renderer: "three" }, dpr: 2 });
+    await h.rt.start();
+    expect(three.renderer.setSize).toHaveBeenLastCalledWith(1600, 1200, false);
+    expect(three.camera.aspect).toBeCloseTo(800 / 600);
+    h.rt.setCssSize(400, 400);
+    expect(three.renderer.setSize).toHaveBeenLastCalledWith(800, 800, false);
+    expect(three.camera.aspect).toBe(1);
+    expect(three.camera.updateProjectionMatrix).toHaveBeenCalled();
+  });
+
+  it("auto-renders the current scene/camera after frame unless autoRender is false", async () => {
+    const three = fakeThree();
+    const h = harness({ contexts: { ctx2d: null, three }, manifest: { renderer: "three" } });
+    await h.rt.start();
+    const ctx = h.create.mock.calls[0][0];
+    const order = /** @type {string[]} */ ([]);
+    h.plugin.frame.mockImplementation(() => order.push("frame"));
+    three.renderer.render.mockImplementation(() => order.push("render"));
+    h.tick(16);
+    expect(order).toEqual(["frame", "render"]);
+    const myScene = { name: "mine" };
+    ctx.three.scene = myScene;
+    h.tick(32);
+    expect(three.renderer.render).toHaveBeenLastCalledWith(myScene, three.camera);
+    ctx.three.autoRender = false;
+    h.tick(48);
+    expect(three.renderer.render).toHaveBeenCalledTimes(2);
+  });
+});
