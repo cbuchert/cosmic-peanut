@@ -6,7 +6,8 @@ const BASE = "http://127.0.0.1:5000/r/abc/";
 
 /**
  * Build a runtime around fakes. `plugin` is what create() returns (or a function of ctx).
- * @param {{ plugin?: any, create?: (ctx: any) => any, init?: any, manifest?: any, contexts?: any, dpr?: number }} [o]
+ * @param {{ plugin?: any, create?: (ctx: any) => any, init?: any, manifest?: any, contexts?: any, dpr?: number,
+ *   createContext?: any }} [o]
  */
 function harness(o = {}) {
   /** @type {any[]} */
@@ -27,7 +28,7 @@ function harness(o = {}) {
     canvas: /** @type {any} */ (canvas),
     cssSize: { width: 800, height: 600 },
     loadEntry: async () => ({ default: create }),
-    createContext: async () => ({ ctx2d: /** @type {any} */ ({ fake2d: true }), gl: null, gpu: null, three: null, ...o.contexts }),
+    createContext: o.createContext ?? (async () => ({ ctx2d: /** @type {any} */ ({ fake2d: true }), gl: null, gpu: null, three: null, ...o.contexts })),
     raf: (/** @type {(ts: number) => void} */ cb) => {
       const id = nextId++;
       callbacks.set(id, cb);
@@ -139,5 +140,86 @@ describe("runtime lifecycle", () => {
     expect(times[2].now).toBeCloseTo(0.516);
     expect(times[2].dt).toBe(0.1);
     expect(times[2].frame).toBe(2);
+  });
+});
+
+describe("runtime errors", () => {
+  const errors = (/** @type {any[]} */ posted) => posted.filter((m) => m.type === "error");
+
+  it("reports a throwing create as fatal with file and line, and never starts the loop", async () => {
+    const h = harness({
+      create: () => {
+        const e = new Error("boom");
+        e.stack = `create@${BASE}src/main.js:7:3`;
+        throw e;
+      },
+    });
+    await h.rt.start();
+    expect(errors(h.posted)).toEqual([{ type: "error", message: "Error: boom", file: "src/main.js", line: 7, fatal: true }]);
+    expect(h.pendingRaf()).toBe(0);
+  });
+
+  it("reports a rejecting async create as fatal", async () => {
+    const h = harness({ create: async () => Promise.reject(new TypeError("async boom")) });
+    await h.rt.start();
+    expect(errors(h.posted)[0]).toMatchObject({ message: "TypeError: async boom", fatal: true });
+  });
+
+  it("reports a create that returns no frame function as fatal", async () => {
+    const h = harness({ create: () => ({}) });
+    await h.rt.start();
+    expect(errors(h.posted)[0]).toMatchObject({ message: expect.stringMatching(/frame/), fatal: true });
+  });
+
+  it("reports context creation failures as fatal without loading the plugin", async () => {
+    const h = harness({
+      createContext: async () => {
+        throw new Error("WebGPU is unavailable; use fallback 'pulse-2d'");
+      },
+    });
+    await h.rt.start();
+    expect(errors(h.posted)[0]).toMatchObject({ message: expect.stringMatching(/pulse-2d/), fatal: true });
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("stops after 3 consecutive frame errors; only the third is fatal", async () => {
+    const plugin = { frame: vi.fn(() => { throw new Error("frame boom"); }) };
+    const h = harness({ plugin });
+    await h.rt.start();
+    h.tick(16);
+    h.tick(32);
+    expect(errors(h.posted).map((e) => e.fatal)).toEqual([false, false]);
+    h.tick(48);
+    expect(errors(h.posted).map((e) => e.fatal)).toEqual([false, false, true]);
+    expect(errors(h.posted)[2].message).toBe("Error: frame boom");
+    expect(h.pendingRaf()).toBe(0);
+    h.tick(64);
+    expect(plugin.frame).toHaveBeenCalledTimes(3);
+    expect(h.types()).not.toContain("ready");
+  });
+
+  it("resets the consecutive count after a good frame", async () => {
+    let n = 0;
+    const plugin = { frame: vi.fn(() => { if (n++ % 2 === 0) throw new Error("flaky"); }) };
+    const h = harness({ plugin });
+    await h.rt.start();
+    for (let i = 1; i <= 10; i++) h.tick(i * 16);
+    expect(errors(h.posted).every((e) => !e.fatal)).toBe(true);
+    expect(plugin.frame).toHaveBeenCalledTimes(10);
+  });
+
+  it("reports async errors (window error / unhandledrejection) as non-fatal", async () => {
+    const h = harness();
+    await h.rt.start();
+    h.rt.reportError(new RangeError("later"));
+    expect(errors(h.posted)).toHaveLength(1);
+    expect(errors(h.posted)[0]).toMatchObject({ type: "error", message: "RangeError: later", fatal: false });
+  });
+
+  it("ctx.log posts plain text", async () => {
+    const h = harness();
+    await h.rt.start();
+    h.create.mock.calls[0][0].log("hi", 1, { a: 2 });
+    expect(h.posted).toContainEqual({ type: "log", text: 'hi 1 {"a":2}' });
   });
 });

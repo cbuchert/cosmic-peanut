@@ -8,6 +8,7 @@
 
 import { createAudioFrame, decodeInto, peekFlags } from "./frame.js";
 import { createAssets } from "./assets.js";
+import { describeError, formatLog } from "./diagnostics.js";
 
 /** @typedef {import("./tidalviz").Visualizer} Visualizer */
 /** @typedef {import("./tidalviz").VisualizerContext} VisualizerContext */
@@ -103,6 +104,23 @@ export function createRuntime(deps) {
   /** @type {Visualizer | null} */
   let plugin = null;
   let readySent = false;
+  let dead = false; // fatal error or disposed: never render again
+  let consecutiveErrors = 0;
+
+  /**
+   * @param {unknown} err
+   * @param {boolean} fatal
+   */
+  function postError(err, fatal) {
+    port.postMessage({ type: "error", ...describeError(err, deps.base), fatal });
+  }
+
+  /** @param {unknown} err */
+  function fail(err) {
+    dead = true;
+    stopLoop();
+    postError(err, true);
+  }
 
   const audio = createAudioFrame();
   /** @type {ArrayBuffer | null} newest undecoded frame */
@@ -124,8 +142,15 @@ export function createRuntime(deps) {
     lastTs = ts;
     time.now += elapsed;
     time.dt = Math.min(0.1, elapsed);
-    const p = /** @type {Visualizer} */ (plugin);
-    p.frame(audio, time);
+    try {
+      /** @type {Visualizer} */ (plugin).frame(audio, time);
+      consecutiveErrors = 0;
+    } catch (err) {
+      time.frame++;
+      if (++consecutiveErrors >= 3) fail(err);
+      else postError(err, false);
+      return;
+    }
     time.frame++;
     if (!readySent) {
       readySent = true;
@@ -133,13 +158,29 @@ export function createRuntime(deps) {
     }
   }
 
+  function stopLoop() {
+    if (rafId) deps.caf(rafId);
+    rafId = 0;
+  }
+
   function startLoop() {
-    if (rafId || !plugin || !visible) return;
+    if (rafId || !plugin || !visible || dead) return;
     lastTs = -1;
     rafId = deps.raf(tick);
   }
 
+  /** Create the context and the plugin, then start the loop. Never rejects: failures are fatal. */
   async function start() {
+    try {
+      await createPlugin();
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    startLoop();
+  }
+
+  async function createPlugin() {
     applySize();
     const handles = await deps.createContext(manifest.renderer, canvas);
     const assets = createAssets(deps.base, { fetch: deps.fetch, createImageBitmap: deps.createImageBitmap });
@@ -165,12 +206,20 @@ export function createRuntime(deps) {
       get reduceFlashing() {
         return reduceFlashing;
       },
-      log() {},
+      log(...args) {
+        port.postMessage({ type: "log", text: formatLog(args) });
+      },
     };
     const mod = await deps.loadEntry();
+    if (typeof mod.default !== "function") {
+      throw new Error(`${manifest.entry}: the default export must be a create(ctx) function`);
+    }
     const create = /** @type {import("./tidalviz").CreateVisualizer} */ (mod.default);
-    plugin = await create(ctx);
-    startLoop();
+    const vis = await create(ctx);
+    if (!isObject(vis) || typeof vis.frame !== "function") {
+      throw new Error("create(ctx) must return an object with a frame(audio, time) function");
+    }
+    plugin = vis;
   }
 
   /** @param {unknown} data a port message */
@@ -185,5 +234,12 @@ export function createRuntime(deps) {
     }
   }
 
-  return { start, handleMessage };
+  return {
+    start,
+    handleMessage,
+    /** Errors outside create/frame (window `error`, `unhandledrejection`). @param {unknown} err */
+    reportError(err) {
+      postError(err, false);
+    },
+  };
 }
