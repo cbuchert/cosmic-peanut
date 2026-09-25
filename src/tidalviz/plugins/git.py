@@ -168,7 +168,10 @@ class GitFetcher:
         try:
             repo, commit, count = self._fetch_objects(url, ref, temp / "objects")
             checkout = temp / "checkout"
-            warnings = self._checkout(repo, commit, checkout, deadline)
+            try:
+                warnings = self._checkout(repo, commit, checkout, deadline)
+            except OSError as e:
+                raise FetchError(f"can't check out {url}: {e.strerror or e}") from e
             repo.close()
             shutil.rmtree(temp / "objects", ignore_errors=True)
             return FetchResult(
@@ -251,6 +254,10 @@ class GitFetcher:
         warnings: list[str] = []
         links: list[tuple[str, str]] = []
         files = total = 0
+        # macOS file systems are case-insensitive: two entries that differ only in case would
+        # silently overwrite each other (or let a symlink stand in for a directory).
+        seen_files: set[str] = set()
+        seen_dirs: set[str] = set()
         store = repo.object_store
         dest.mkdir()
         for entry in iter_tree_contents(store, commit.tree):
@@ -258,6 +265,16 @@ class GitFetcher:
                 raise FetchError(f"checkout timed out after {self.limits.timeout_s:.0f} s")
             path = entry.path.decode("utf-8", "replace")
             _check_path(path)
+            folded = path.casefold()
+            prefixes = ["/".join(folded.split("/")[:i]) for i in range(1, folded.count("/") + 1)]
+            if (
+                folded in seen_files
+                or folded in seen_dirs
+                or any(d in seen_files for d in prefixes)
+            ):
+                raise LimitError(f"paths differ only in case: {path}")
+            seen_files.add(folded)
+            seen_dirs.update(prefixes)
             mode = entry.mode
             if S_ISGITLINK(mode):
                 warnings.append(f"Ignored git submodule {path}")

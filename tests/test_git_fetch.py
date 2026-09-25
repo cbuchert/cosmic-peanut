@@ -316,3 +316,13 @@ def test_timeout(tmp_path: Path) -> None:
             f.fetch(URL, None)
     finally:
         release.set()
+
+
+def test_case_colliding_paths_rejected(fetcher: GitFetcher, origin: Path) -> None:
+    porcelain.init(str(origin))
+    commit_tree(
+        origin, {**plugin_entries("a"), "X/evil.js": (0o100644, b"x"), "x": (0o120000, b"src")}
+    )
+    with pytest.raises(LimitError, match="case"):
+        fetcher.fetch(URL, None)
+    assert list(fetcher.cache_dir.glob("*")) == []
