@@ -56,6 +56,11 @@ export interface AudioFrame {
   readonly trebAtt: number;
   /** Onset detection function, 0 = nothing, ~1 = strong transient. */
   readonly onsetStrength: number;
+  /**
+   * Seconds from the latest onset to this frame's newest sample, accurate to ~1 ms (frames are
+   * 10.7 ms apart). Keeps growing between onsets; capped at 10, and 10 before the first onset.
+   */
+  readonly onsetAge: number;
   /** Tempo estimate in BPM, 0 until confident. */
   readonly bpm: number;
   /** 0–1 position between predicted beats (0 = on the beat). 0 while bpm is 0. */

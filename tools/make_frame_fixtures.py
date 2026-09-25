@@ -36,6 +36,7 @@ def build(*, stereo: bool) -> AudioFrame:
         0.3125,
         0.125,
     ]
+    f.scalars[13] = 0.0625  # onsetAge
     f.bands[:] = np.arange(64, dtype=np.float32) / 64
     f.spectrum[:] = (np.arange(1024, dtype=np.float32) % 32) / 32
     f.waveform[:] = (np.arange(512, dtype=np.float32) - 256) / 256

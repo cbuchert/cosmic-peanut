@@ -30,6 +30,10 @@ function assertMatchesGolden(audio, json) {
   expect(audio.stereo).toBe(json.stereo);
   expect(json.scalarNames.slice(0, SCALAR_NAMES.length)).toEqual(SCALAR_NAMES);
   SCALAR_NAMES.forEach((name, i) => expect(audio[name], name).toBe(json.scalars[i]));
+  // Every named (non-reserved) scalar the host writes must be exposed on the frame.
+  json.scalarNames.forEach((/** @type {string} */ name, /** @type {number} */ i) => {
+    if (!name.startsWith("reserved")) expect(audio[name], name).toBe(json.scalars[i]);
+  });
   expect(Array.from(audio.scalars)).toEqual(json.scalars);
   expect(Array.from(audio.bands)).toEqual(json.bands);
   expect(Array.from(audio.spectrum)).toEqual(json.spectrum);

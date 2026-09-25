@@ -10,7 +10,7 @@ F32 = NDArray[np.float32]
 SCALAR_NAMES: tuple[str, ...] = (
     "rms", "peak", "bass", "mid", "treb", "bassAtt", "midAtt", "trebAtt",
     "onsetStrength", "bpm", "beatPhase", "centroid", "flux",
-    "reserved13", "reserved14", "reserved15",
+    "onsetAge", "reserved14", "reserved15",
 )  # fmt: skip
 SCALAR_INDEX: dict[str, int] = {name: i for i, name in enumerate(SCALAR_NAMES)}
 

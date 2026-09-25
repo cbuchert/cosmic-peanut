@@ -20,7 +20,7 @@ export const FLAG_STEREO = 4;
 /** Scalar order of the v1 frame. New scalars are appended. */
 export const SCALAR_NAMES = /** @type {const} */ ([
   "rms", "peak", "bass", "mid", "treb", "bassAtt", "midAtt", "trebAtt",
-  "onsetStrength", "bpm", "beatPhase", "centroid", "flux",
+  "onsetStrength", "bpm", "beatPhase", "centroid", "flux", "onsetAge",
 ]);
 
 export class FrameError extends Error {
@@ -92,6 +92,7 @@ export class DecodedFrame {
   get beatPhase() { return this.scalars[10]; }
   get centroid() { return this.scalars[11]; }
   get flux() { return this.scalars[12]; }
+  get onsetAge() { return this.scalars[13]; }
 }
 
 /** A silent all-zero frame (what plugins see before the first real frame arrives). */

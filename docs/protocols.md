@@ -44,7 +44,8 @@ Scalar order (indices are stable; new scalars are appended, which does not bump 
 | 3 | `mid` | 10 | `beatPhase` |
 | 4 | `treb` | 11 | `centroid` |
 | 5 | `bassAtt` | 12 | `flux` |
-| 6 | `midAtt` | 13–15 | reserved (0) |
+| 6 | `midAtt` | 13 | `onsetAge` |
+|  |  | 14–15 | reserved (0) |
 
 Decoders must use the counts from the header, not constants. The golden fixture pair
 `tests/fixtures/frame_v1_{mono,stereo}.{bin,json}` is produced by the Python encoder
