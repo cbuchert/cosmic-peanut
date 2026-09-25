@@ -209,3 +209,15 @@ async def test_ws_with_bad_host_is_421(server: ShellServer) -> None:
                 headers={"Host": f"localhost:{server.port}"},
             )
     assert err.value.status == 421
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["/shell/dev/mock_host.py", "/shell/app.test.js"])
+async def test_shell_dev_and_test_files_are_not_served(
+    http: aiohttp.ClientSession, web_dir: Path, target: str
+) -> None:
+    (web_dir / "shell" / "dev").mkdir()
+    (web_dir / "shell" / "dev" / "mock_host.py").write_text("dev only")
+    (web_dir / "shell" / "app.test.js").write_text("test only")
+    async with http.get(target) as r:
+        assert r.status == 404

@@ -33,3 +33,9 @@ def resolve_under(base: Path, raw: str) -> Path | None:
     if not target.is_relative_to(root) or not target.is_file():
         return None
     return target
+
+
+def is_dev_only(raw: str) -> bool:
+    """True for web files that exist for development only: `dev/` harnesses and `*.test.js`."""
+    path = unquote(raw)
+    return path.split("/", 1)[0] == "dev" or path.endswith(".test.js")

@@ -7,6 +7,7 @@ from aiohttp import web
 
 from tidalviz.server.base import LocalServer, file_response, plugin_csp, raw_tail
 from tidalviz.server.bootstrap import bootstrap_html
+from tidalviz.server.paths import is_dev_only
 from tidalviz.server.registry_view import RegistryView
 
 _DEV = web.RequestKey("dev", bool)
@@ -56,7 +57,10 @@ class PluginServer(LocalServer):
         return await file_response(base, raw_tail(request, 2))
 
     async def _sdk_file(self, request: web.Request) -> web.Response:
-        return await file_response(self._sdk_dir, raw_tail(request, 1))
+        tail = raw_tail(request, 1)
+        if is_dev_only(tail):
+            raise web.HTTPNotFound()
+        return await file_response(self._sdk_dir, tail)
 
     async def _three_file(self, request: web.Request) -> web.Response:
         return await file_response(self._three_dir, raw_tail(request, 2))

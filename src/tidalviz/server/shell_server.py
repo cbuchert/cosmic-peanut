@@ -6,6 +6,7 @@ from pathlib import Path
 from aiohttp import web
 
 from tidalviz.server.base import LocalServer, file_response, raw_tail, shell_csp
+from tidalviz.server.paths import is_dev_only
 from tidalviz.transport.control import MAX_MESSAGE_BYTES, ControlChannel
 from tidalviz.transport.hub import FrameHub
 
@@ -54,7 +55,10 @@ class ShellServer(LocalServer):
         return await file_response(self._shell_dir, "index.html")
 
     async def _shell_file(self, request: web.Request) -> web.Response:
-        return await file_response(self._shell_dir, raw_tail(request, 1))
+        tail = raw_tail(request, 1)
+        if is_dev_only(tail):
+            raise web.HTTPNotFound()
+        return await file_response(self._shell_dir, tail)
 
     async def _config(self, request: web.Request) -> web.Response:
         self._require_token(request)

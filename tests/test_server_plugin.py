@@ -246,3 +246,15 @@ async def test_post_is_rejected_with_headers(
     async with http.post("/r/builtin/main.js") as r:
         assert r.status == 405
         assert_plugin_headers(r.headers, server.origin)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["/sdk/dev/harness.html", "/sdk/frame.test.js"])
+async def test_sdk_dev_and_test_files_are_not_served(
+    http: aiohttp.ClientSession, web_dir: Path, target: str
+) -> None:
+    (web_dir / "sdk" / "dev").mkdir()
+    (web_dir / "sdk" / "dev" / "harness.html").write_text("dev only")
+    (web_dir / "sdk" / "frame.test.js").write_text("test only")
+    async with http.get(target) as r:
+        assert r.status == 404
