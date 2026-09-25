@@ -1,0 +1,1221 @@
+{
+ "cfg": {
+  "duration": 9.0,
+  "hang": true,
+  "csp": "hash",
+  "probe_strict": false,
+  "browser": "pywebview",
+  "size": [
+   1280,
+   720
+  ],
+  "minimize": false,
+  "hangRequested": true,
+  "fullscreen": false,
+  "iframe": "cross",
+  "sandbox": "allow-scripts",
+  "features": [
+   "SiteIsolationEnabled=1"
+  ],
+  "click": false
+ },
+ "clock": {
+  "shellVsPython": null,
+  "iframeVsShell": null
+ },
+ "shellInfo": null,
+ "iframeInfo": null,
+ "canvasSizes": null,
+ "iframeTimeout": false,
+ "bench": null,
+ "latencyMs": {
+  "hostSend_to_shellWsRecv": null,
+  "shellWsRecv_to_iframeRecv": null,
+  "hostSend_to_iframeRecv": null,
+  "iframeRecv_to_rafConsume": null,
+  "hostSend_to_rafConsume": null,
+  "iframeRecv_to_nextRaf_allFrames": null,
+  "hostSend_to_nextRaf_allFrames": null
+ },
+ "frames": {
+  "sent": 1217,
+  "shellRecv": 0,
+  "iframeRecv": 0,
+  "consumed": null,
+  "skippedBeforeRaf": null,
+  "pySendLateMs": {
+   "p50": 1.035,
+   "p95": 1.091,
+   "p99": 1.16,
+   "n": 1217,
+   "mean": 0.935,
+   "max": 2.465,
+   "min": 0.006
+  }
+ },
+ "raf": {
+  "iframeHz": null,
+  "iframeFrameMs": null,
+  "droppedVsMedian": null,
+  "spanS": null,
+  "drawCpuMs": null,
+  "shellRafCount": 0,
+  "shellHz": null,
+  "shellFrameMs": null,
+  "iframeRafPerSecond": [],
+  "shellRafPerSecond": []
+ },
+ "shellMainThread": {
+  "forwardPostMessageMs": null,
+  "wholeOnMessageMs": null
+ },
+ "heartbeat": {
+  "count": 6,
+  "gapMs": {
+   "p50": 500.224,
+   "p95": 500.394,
+   "p99": 500.405,
+   "n": 5,
+   "mean": 500.218,
+   "max": 500.408,
+   "min": 499.967
+  },
+  "afterHang": {
+   "hangAtS": 3.82,
+   "lastBeforeHangS": 3.4,
+   "count": 0,
+   "firstAfterS": null
+  },
+  "timesS": [
+   0.9,
+   1.4,
+   1.9,
+   2.4,
+   2.9,
+   3.4
+  ]
+ },
+ "visibility": {
+  "shell": null,
+  "iframe": null
+ },
+ "probe": null,
+ "events": [
+  [
+   0.43,
+   "ws-open",
+   {
+    "origin": "http://127.0.0.1:51808"
+   }
+  ],
+  [
+   0.77,
+   "info",
+   {
+    "type": "info",
+    "info": {
+     "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+     "dpr": 2,
+     "inner": [
+      1280,
+      692
+     ],
+     "screen": [
+      1800,
+      1169
+     ],
+     "timeOrigin": 1790372988182,
+     "dateVsPerf": 1,
+     "crossOriginIsolated": false,
+     "hasPywebview": "undefined",
+     "perfNowStepsMs": [
+      1
+     ]
+    },
+    "bench": {
+     "n": 2000,
+     "transferUsPerMsg": 3,
+     "copyUsPerMsg": 2.5
+    },
+    "clock": {
+     "offset": 0.880859375,
+     "rtt": 0
+    }
+   }
+  ],
+  [
+   0.78,
+   "probe",
+   {
+    "type": "probe",
+    "origin": "null",
+    "data": {
+     "probe": true,
+     "page": "?csp=hash",
+     "kind": "loaded",
+     "origin": "null",
+     "href": "http://127.0.0.1:51807/v/spike/?csp=hash",
+     "supportsImportMap": true
+    }
+   }
+  ],
+  [
+   0.82,
+   "iframe:ready",
+   {
+    "type": "iframe:ready",
+    "data": {
+     "type": "ready",
+     "info": {
+      "cfg": {
+       "hang": true,
+       "mode": "hash",
+       "probeOnly": false
+      },
+      "origin": "null",
+      "dep": "dep-via-importmap-ok",
+      "depError": null,
+      "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+      "dpr": 2,
+      "inner": [
+       1280,
+       692
+      ],
+      "timeOrigin": 1790372988630,
+      "hasGpu": true,
+      "gpuAdapter": {
+       "features": 18,
+       "info": {
+        "vendor": "apple",
+        "arch": "apple"
+       }
+      },
+      "webgl2": true,
+      "glRenderer": "Apple GPU",
+      "glVersion": "WebGL 2.0",
+      "floatTex": true
+     }
+    }
+   }
+  ],
+  [
+   0.82,
+   "nsclick-sent",
+   {
+    "isKey": true
+   }
+  ],
+  [
+   3.28,
+   "probe",
+   {
+    "type": "probe",
+    "origin": "null",
+    "data": {
+     "probe": true,
+     "page": "?csp=hash",
+     "kind": "status",
+     "moduleRan": true,
+     "dep": "dep-via-importmap-ok",
+     "depError": null
+    }
+   }
+  ]
+ ],
+ "pluginFetches": [
+  {
+   "path": "/sdk/probe.js",
+   "origin": null
+  },
+  {
+   "path": "/sdk/sdk.js",
+   "origin": "null"
+  },
+  {
+   "path": "/sdk/util.js",
+   "origin": "null"
+  },
+  {
+   "path": "/lib/dep.js",
+   "origin": "null"
+  }
+ ],
+ "webkitProcs": {
+  "first": [
+   {
+    "pid": 61723,
+    "ppid": 1,
+    "cpu": 2.3,
+    "rssMb": 40,
+    "comm": "com.apple.WebKit.Networking.Development"
+   },
+   {
+    "pid": 61724,
+    "ppid": 1,
+    "cpu": 3.7,
+    "rssMb": 70,
+    "comm": "com.apple.WebKit.GPU.Development"
+   },
+   {
+    "pid": 61725,
+    "ppid": 1,
+    "cpu": 6.4,
+    "rssMb": 119,
+    "comm": "com.apple.WebKit.WebContent.Development"
+   },
+   {
+    "pid": 61732,
+    "ppid": 1,
+    "cpu": 6.9,
+    "rssMb": 33,
+    "comm": "com.apple.WebKit.GPU"
+   },
+   {
+    "pid": 61733,
+    "ppid": 1,
+    "cpu": 6.5,
+    "rssMb": 67,
+    "comm": "com.apple.WebKit.Networking"
+   },
+   {
+    "pid": 61735,
+    "ppid": 1,
+    "cpu": 10.8,
+    "rssMb": 63,
+    "comm": "com.apple.WebKit.WebContent"
+   },
+   {
+    "pid": 61771,
+    "ppid": 1,
+    "cpu": 11.4,
+    "rssMb": 40,
+    "comm": "com.apple.WebKit.Networking.Development"
+   },
+   {
+    "pid": 61774,
+    "ppid": 1,
+    "cpu": 24.8,
+    "rssMb": 72,
+    "comm": "com.apple.WebKit.GPU.Development"
+   },
+   {
+    "pid": 61776,
+    "ppid": 1,
+    "cpu": 23.2,
+    "rssMb": 115,
+    "comm": "com.apple.WebKit.WebContent.Development"
+   },
+   {
+    "pid": 61806,
+    "ppid": 1,
+    "cpu": 14.6,
+    "rssMb": 53,
+    "comm": "com.apple.WebKit.Networking.Development"
+   },
+   {
+    "pid": 61807,
+    "ppid": 1,
+    "cpu": 14.1,
+    "rssMb": 53,
+    "comm": "com.apple.WebKit.GPU.Development"
+   },
+   {
+    "pid": 61811,
+    "ppid": 1,
+    "cpu": 5.1,
+    "rssMb": 64,
+    "comm": "com.apple.WebKit.WebContent.Development"
+   }
+  ],
+  "peakCount": 12,
+  "timeline": [
+   [
+    {
+     "pid": 61723,
+     "ppid": 1,
+     "cpu": 2.3,
+     "rssMb": 40,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61724,
+     "ppid": 1,
+     "cpu": 3.7,
+     "rssMb": 70,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61725,
+     "ppid": 1,
+     "cpu": 6.4,
+     "rssMb": 119,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61732,
+     "ppid": 1,
+     "cpu": 6.9,
+     "rssMb": 33,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 61733,
+     "ppid": 1,
+     "cpu": 6.5,
+     "rssMb": 67,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 61735,
+     "ppid": 1,
+     "cpu": 10.8,
+     "rssMb": 63,
+     "comm": "com.apple.WebKit.WebContent"
+    },
+    {
+     "pid": 61771,
+     "ppid": 1,
+     "cpu": 11.4,
+     "rssMb": 40,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61774,
+     "ppid": 1,
+     "cpu": 24.8,
+     "rssMb": 72,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61776,
+     "ppid": 1,
+     "cpu": 23.2,
+     "rssMb": 115,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61806,
+     "ppid": 1,
+     "cpu": 14.6,
+     "rssMb": 53,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61807,
+     "ppid": 1,
+     "cpu": 14.1,
+     "rssMb": 53,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61811,
+     "ppid": 1,
+     "cpu": 5.1,
+     "rssMb": 64,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    }
+   ],
+   [
+    {
+     "pid": 61723,
+     "ppid": 1,
+     "cpu": 0.4,
+     "rssMb": 40,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61724,
+     "ppid": 1,
+     "cpu": 1.0,
+     "rssMb": 70,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61725,
+     "ppid": 1,
+     "cpu": 3.2,
+     "rssMb": 120,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61732,
+     "ppid": 1,
+     "cpu": 2.4,
+     "rssMb": 33,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 61733,
+     "ppid": 1,
+     "cpu": 1.8,
+     "rssMb": 67,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 61735,
+     "ppid": 1,
+     "cpu": 3.9,
+     "rssMb": 63,
+     "comm": "com.apple.WebKit.WebContent"
+    },
+    {
+     "pid": 61771,
+     "ppid": 1,
+     "cpu": 0.1,
+     "rssMb": 40,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61774,
+     "ppid": 1,
+     "cpu": 7.7,
+     "rssMb": 73,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61776,
+     "ppid": 1,
+     "cpu": 4.0,
+     "rssMb": 117,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61806,
+     "ppid": 1,
+     "cpu": 2.7,
+     "rssMb": 42,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61807,
+     "ppid": 1,
+     "cpu": 6.2,
+     "rssMb": 79,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61811,
+     "ppid": 1,
+     "cpu": 7.4,
+     "rssMb": 132,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    }
+   ],
+   [
+    {
+     "pid": 61723,
+     "ppid": 1,
+     "cpu": 0.3,
+     "rssMb": 40,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61724,
+     "ppid": 1,
+     "cpu": 0.9,
+     "rssMb": 71,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61725,
+     "ppid": 1,
+     "cpu": 3.0,
+     "rssMb": 121,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61732,
+     "ppid": 1,
+     "cpu": 2.7,
+     "rssMb": 33,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 61733,
+     "ppid": 1,
+     "cpu": 2.0,
+     "rssMb": 67,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 61735,
+     "ppid": 1,
+     "cpu": 3.7,
+     "rssMb": 64,
+     "comm": "com.apple.WebKit.WebContent"
+    },
+    {
+     "pid": 61771,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 40,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61774,
+     "ppid": 1,
+     "cpu": 7.7,
+     "rssMb": 74,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61776,
+     "ppid": 1,
+     "cpu": 3.5,
+     "rssMb": 117,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    }
+   ],
+   [
+    {
+     "pid": 61723,
+     "ppid": 1,
+     "cpu": 2.5,
+     "rssMb": 41,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61724,
+     "ppid": 1,
+     "cpu": 1.4,
+     "rssMb": 75,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61725,
+     "ppid": 1,
+     "cpu": 5.2,
+     "rssMb": 125,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61732,
+     "ppid": 1,
+     "cpu": 0.4,
+     "rssMb": 34,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 61733,
+     "ppid": 1,
+     "cpu": 1.3,
+     "rssMb": 67,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 61735,
+     "ppid": 1,
+     "cpu": 64.5,
+     "rssMb": 64,
+     "comm": "com.apple.WebKit.WebContent"
+    },
+    {
+     "pid": 61771,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 40,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61774,
+     "ppid": 1,
+     "cpu": 15.2,
+     "rssMb": 93,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61776,
+     "ppid": 1,
+     "cpu": 8.2,
+     "rssMb": 134,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    }
+   ],
+   [
+    {
+     "pid": 61723,
+     "ppid": 1,
+     "cpu": 0.3,
+     "rssMb": 41,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61724,
+     "ppid": 1,
+     "cpu": 0.8,
+     "rssMb": 75,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61725,
+     "ppid": 1,
+     "cpu": 3.6,
+     "rssMb": 125,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61732,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 34,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 61733,
+     "ppid": 1,
+     "cpu": 0.2,
+     "rssMb": 67,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 61735,
+     "ppid": 1,
+     "cpu": 98.6,
+     "rssMb": 66,
+     "comm": "com.apple.WebKit.WebContent"
+    },
+    {
+     "pid": 61771,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 40,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61774,
+     "ppid": 1,
+     "cpu": 15.5,
+     "rssMb": 93,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61776,
+     "ppid": 1,
+     "cpu": 5.5,
+     "rssMb": 134,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    }
+   ],
+   [
+    {
+     "pid": 61723,
+     "ppid": 1,
+     "cpu": 0.2,
+     "rssMb": 41,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61724,
+     "ppid": 1,
+     "cpu": 0.9,
+     "rssMb": 75,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61725,
+     "ppid": 1,
+     "cpu": 2.9,
+     "rssMb": 125,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61732,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 34,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 61733,
+     "ppid": 1,
+     "cpu": 1.0,
+     "rssMb": 67,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 61735,
+     "ppid": 1,
+     "cpu": 100.0,
+     "rssMb": 68,
+     "comm": "com.apple.WebKit.WebContent"
+    },
+    {
+     "pid": 61771,
+     "ppid": 1,
+     "cpu": 0.1,
+     "rssMb": 40,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61774,
+     "ppid": 1,
+     "cpu": 16.2,
+     "rssMb": 94,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61776,
+     "ppid": 1,
+     "cpu": 6.7,
+     "rssMb": 138,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    }
+   ],
+   [
+    {
+     "pid": 61723,
+     "ppid": 1,
+     "cpu": 0.2,
+     "rssMb": 41,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61724,
+     "ppid": 1,
+     "cpu": 0.6,
+     "rssMb": 75,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61725,
+     "ppid": 1,
+     "cpu": 3.0,
+     "rssMb": 125,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61732,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 34,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 61733,
+     "ppid": 1,
+     "cpu": 0.9,
+     "rssMb": 67,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 61735,
+     "ppid": 1,
+     "cpu": 100.0,
+     "rssMb": 69,
+     "comm": "com.apple.WebKit.WebContent"
+    },
+    {
+     "pid": 61771,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 40,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61774,
+     "ppid": 1,
+     "cpu": 15.1,
+     "rssMb": 94,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61776,
+     "ppid": 1,
+     "cpu": 5.6,
+     "rssMb": 138,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    }
+   ],
+   [
+    {
+     "pid": 61723,
+     "ppid": 1,
+     "cpu": 0.5,
+     "rssMb": 42,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61724,
+     "ppid": 1,
+     "cpu": 0.8,
+     "rssMb": 78,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61725,
+     "ppid": 1,
+     "cpu": 4.8,
+     "rssMb": 148,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61732,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 34,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 61733,
+     "ppid": 1,
+     "cpu": 1.1,
+     "rssMb": 67,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 61735,
+     "ppid": 1,
+     "cpu": 99.1,
+     "rssMb": 71,
+     "comm": "com.apple.WebKit.WebContent"
+    },
+    {
+     "pid": 61771,
+     "ppid": 1,
+     "cpu": 0.6,
+     "rssMb": 42,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61774,
+     "ppid": 1,
+     "cpu": 2.6,
+     "rssMb": 84,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 62004,
+     "ppid": 1,
+     "cpu": 7.1,
+     "rssMb": 116,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    }
+   ],
+   [
+    {
+     "pid": 61723,
+     "ppid": 1,
+     "cpu": 0.2,
+     "rssMb": 42,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61724,
+     "ppid": 1,
+     "cpu": 0.6,
+     "rssMb": 78,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61725,
+     "ppid": 1,
+     "cpu": 3.4,
+     "rssMb": 151,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61732,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 34,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 61733,
+     "ppid": 1,
+     "cpu": 0.9,
+     "rssMb": 67,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 61735,
+     "ppid": 1,
+     "cpu": 100.0,
+     "rssMb": 72,
+     "comm": "com.apple.WebKit.WebContent"
+    },
+    {
+     "pid": 61771,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 42,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61774,
+     "ppid": 1,
+     "cpu": 1.3,
+     "rssMb": 84,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 62004,
+     "ppid": 1,
+     "cpu": 2.4,
+     "rssMb": 117,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    }
+   ],
+   [
+    {
+     "pid": 61723,
+     "ppid": 1,
+     "cpu": 0.2,
+     "rssMb": 42,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61724,
+     "ppid": 1,
+     "cpu": 0.4,
+     "rssMb": 78,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61725,
+     "ppid": 1,
+     "cpu": 2.7,
+     "rssMb": 151,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61732,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 34,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 61733,
+     "ppid": 1,
+     "cpu": 0.8,
+     "rssMb": 67,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 61735,
+     "ppid": 1,
+     "cpu": 100.0,
+     "rssMb": 73,
+     "comm": "com.apple.WebKit.WebContent"
+    },
+    {
+     "pid": 61771,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 42,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61774,
+     "ppid": 1,
+     "cpu": 5.4,
+     "rssMb": 98,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 62004,
+     "ppid": 1,
+     "cpu": 5.4,
+     "rssMb": 130,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    }
+   ],
+   [
+    {
+     "pid": 61723,
+     "ppid": 1,
+     "cpu": 1.2,
+     "rssMb": 42,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61724,
+     "ppid": 1,
+     "cpu": 0.8,
+     "rssMb": 78,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61725,
+     "ppid": 1,
+     "cpu": 3.8,
+     "rssMb": 153,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61732,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 34,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 61733,
+     "ppid": 1,
+     "cpu": 1.1,
+     "rssMb": 67,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 61735,
+     "ppid": 1,
+     "cpu": 99.4,
+     "rssMb": 75,
+     "comm": "com.apple.WebKit.WebContent"
+    },
+    {
+     "pid": 61771,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 42,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61774,
+     "ppid": 1,
+     "cpu": 6.8,
+     "rssMb": 100,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 62004,
+     "ppid": 1,
+     "cpu": 2.9,
+     "rssMb": 132,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    }
+   ],
+   [
+    {
+     "pid": 61723,
+     "ppid": 1,
+     "cpu": 0.3,
+     "rssMb": 42,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61724,
+     "ppid": 1,
+     "cpu": 0.7,
+     "rssMb": 78,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61725,
+     "ppid": 1,
+     "cpu": 2.8,
+     "rssMb": 153,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61732,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 34,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 61733,
+     "ppid": 1,
+     "cpu": 1.2,
+     "rssMb": 67,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 61735,
+     "ppid": 1,
+     "cpu": 100.1,
+     "rssMb": 76,
+     "comm": "com.apple.WebKit.WebContent"
+    },
+    {
+     "pid": 61771,
+     "ppid": 1,
+     "cpu": 2.9,
+     "rssMb": 42,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61774,
+     "ppid": 1,
+     "cpu": 9.3,
+     "rssMb": 99,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 62004,
+     "ppid": 1,
+     "cpu": 7.7,
+     "rssMb": 131,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    }
+   ],
+   [
+    {
+     "pid": 61723,
+     "ppid": 1,
+     "cpu": 0.2,
+     "rssMb": 42,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61724,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 78,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 61725,
+     "ppid": 1,
+     "cpu": 0.7,
+     "rssMb": 153,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    },
+    {
+     "pid": 61732,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 34,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 61733,
+     "ppid": 1,
+     "cpu": 0.8,
+     "rssMb": 67,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 61735,
+     "ppid": 1,
+     "cpu": 100.0,
+     "rssMb": 78,
+     "comm": "com.apple.WebKit.WebContent"
+    },
+    {
+     "pid": 61771,
+     "ppid": 1,
+     "cpu": 0.0,
+     "rssMb": 42,
+     "comm": "com.apple.WebKit.Networking.Development"
+    },
+    {
+     "pid": 61774,
+     "ppid": 1,
+     "cpu": 6.6,
+     "rssMb": 100,
+     "comm": "com.apple.WebKit.GPU.Development"
+    },
+    {
+     "pid": 62004,
+     "ppid": 1,
+     "cpu": 1.9,
+     "rssMb": 133,
+     "comm": "com.apple.WebKit.WebContent.Development"
+    }
+   ]
+  ]
+ }
+}

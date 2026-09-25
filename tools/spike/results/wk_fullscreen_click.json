@@ -1,0 +1,821 @@
+{
+ "cfg": {
+  "duration": 14.0,
+  "hang": false,
+  "csp": "hash",
+  "probe_strict": false,
+  "browser": "pywebview",
+  "size": [
+   1280,
+   720
+  ],
+  "minimize": false,
+  "fullscreen": true,
+  "iframe": "cross",
+  "sandbox": "allow-scripts",
+  "features": [],
+  "click": false
+ },
+ "clock": {
+  "shellVsPython": {
+   "offset": 0.8349609375,
+   "rtt": 0
+  },
+  "iframeVsShell": {
+   "offset": 0,
+   "rtt": 0
+  }
+ },
+ "shellInfo": {
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+  "dpr": 2,
+  "inner": [
+   1280,
+   692
+  ],
+  "screen": [
+   1800,
+   1169
+  ],
+  "timeOrigin": 1790372656549,
+  "dateVsPerf": 1,
+  "crossOriginIsolated": false,
+  "hasPywebview": "undefined",
+  "perfNowStepsMs": [
+   1
+  ]
+ },
+ "iframeInfo": {
+  "cfg": {
+   "hang": false,
+   "mode": "hash",
+   "probeOnly": false
+  },
+  "origin": "null",
+  "dep": "dep-via-importmap-ok",
+  "depError": null,
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+  "dpr": 2,
+  "inner": [
+   1800,
+   1130
+  ],
+  "timeOrigin": 1790372657000,
+  "hasGpu": true,
+  "gpuAdapter": {
+   "features": 18,
+   "info": {
+    "vendor": "apple",
+    "arch": "apple"
+   }
+  },
+  "webgl2": true,
+  "glRenderer": "Apple GPU",
+  "glVersion": "WebGL 2.0",
+  "floatTex": true,
+  "canvas": [
+   3600,
+   2260
+  ]
+ },
+ "canvasSizes": [
+  [
+   1790372657045,
+   2560,
+   1384,
+   1280,
+   692,
+   2
+  ],
+  [
+   1790372657904,
+   2560,
+   1440,
+   1280,
+   720,
+   2
+  ],
+  [
+   1790372658486,
+   3600,
+   2260,
+   1800,
+   1130,
+   2
+  ]
+ ],
+ "iframeTimeout": false,
+ "bench": {
+  "n": 2000,
+  "transferUsPerMsg": 0.5,
+  "copyUsPerMsg": 1
+ },
+ "latencyMs": {
+  "hostSend_to_shellWsRecv": {
+   "p50": 1.105,
+   "p95": 2.424,
+   "p99": 3.121,
+   "n": 1109,
+   "mean": 1.225,
+   "max": 7.49,
+   "min": -0.012
+  },
+  "shellWsRecv_to_iframeRecv": {
+   "p50": 0.0,
+   "p95": 1.0,
+   "p99": 1.0,
+   "n": 1109,
+   "mean": -0.086,
+   "max": 2.0,
+   "min": -1.0
+  },
+  "hostSend_to_iframeRecv": {
+   "p50": 1.066,
+   "p95": 2.502,
+   "p99": 3.58,
+   "n": 1109,
+   "mean": 1.139,
+   "max": 8.49,
+   "min": -0.556
+  },
+  "iframeRecv_to_rafConsume": {
+   "p50": 5.0,
+   "p95": 10.0,
+   "p99": 11.0,
+   "n": 782,
+   "mean": 5.465,
+   "max": 14.0,
+   "min": 0.0
+  },
+  "hostSend_to_rafConsume": {
+   "p50": 6.586,
+   "p95": 11.568,
+   "p99": 12.665,
+   "n": 782,
+   "mean": 6.574,
+   "max": 14.784,
+   "min": 0.237
+  },
+  "iframeRecv_to_nextRaf_allFrames": {
+   "p50": 8.0,
+   "p95": 15.0,
+   "p99": 19.0,
+   "n": 1109,
+   "mean": 7.634,
+   "max": 23.0,
+   "min": 0.0
+  },
+  "hostSend_to_nextRaf_allFrames": {
+   "p50": 8.752,
+   "p95": 16.579,
+   "p99": 19.846,
+   "n": 1109,
+   "mean": 8.773,
+   "max": 23.387,
+   "min": -0.426
+  }
+ },
+ "frames": {
+  "sent": 1220,
+  "shellRecv": 1219,
+  "iframeRecv": 1219,
+  "consumed": 817,
+  "skippedBeforeRaf": 402,
+  "pySendLateMs": {
+   "p50": 1.057,
+   "p95": 1.195,
+   "p99": 1.367,
+   "n": 1220,
+   "mean": 0.999,
+   "max": 6.508,
+   "min": 0.005
+  }
+ },
+ "raf": {
+  "iframeHz": 66.67,
+  "iframeFrameMs": {
+   "p50": 15.0,
+   "p95": 18.0,
+   "p99": 23.0,
+   "n": 785,
+   "mean": 15.061,
+   "max": 25.0,
+   "min": 9.0
+  },
+  "droppedVsMedian": 13,
+  "spanS": 11.823,
+  "drawCpuMs": {
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99": 1.0,
+   "n": 841,
+   "mean": 0.037,
+   "max": 1.0,
+   "min": 0.0
+  },
+  "shellRafCount": 865,
+  "shellHz": 66.67,
+  "shellFrameMs": {
+   "p50": 15.0,
+   "p95": 18.0,
+   "p99": 23.0,
+   "n": 785,
+   "mean": 15.061,
+   "max": 25.0,
+   "min": 9.0
+  },
+  "iframeRafPerSecond": [
+   13,
+   38,
+   51,
+   60,
+   67,
+   70,
+   68,
+   66,
+   66,
+   64,
+   68,
+   67,
+   68,
+   66,
+   9
+  ],
+  "shellRafPerSecond": [
+   37,
+   38,
+   51,
+   60,
+   67,
+   70,
+   68,
+   66,
+   66,
+   64,
+   68,
+   67,
+   67,
+   67,
+   9
+  ]
+ },
+ "shellMainThread": {
+  "forwardPostMessageMs": {
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99": 0.82,
+   "n": 1219,
+   "mean": 0.011,
+   "max": 1.0,
+   "min": 0.0
+  },
+  "wholeOnMessageMs": {
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99": 1.0,
+   "n": 1219,
+   "mean": 0.015,
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
+ "heartbeat": {
+  "count": 27,
+  "gapMs": {
+   "p50": 503.829,
+   "p95": 504.92,
+   "p99": 510.226,
+   "n": 26,
+   "mean": 503.209,
+   "max": 511.958,
+   "min": 496.632
+  },
+  "afterHang": null
+ },
+ "visibility": {
+  "shell": [
+   [
+    1790372656656,
+    "visible",
+    false
+   ],
+   [
+    1790372657915,
+    "hidden",
+    true
+   ],
+   [
+    1790372658476,
+    "visible",
+    false
+   ]
+  ],
+  "iframe": [
+   [
+    1790372657026,
+    "visible"
+   ],
+   [
+    1790372657915,
+    "hidden"
+   ],
+   [
+    1790372658476,
+    "visible"
+   ]
+  ]
+ },
+ "probe": [
+  {
+   "at": 1790372657011,
+   "origin": "null",
+   "probe": true,
+   "page": "?csp=hash",
+   "kind": "loaded",
+   "href": "http://127.0.0.1:50628/v/spike/?csp=hash",
+   "supportsImportMap": true
+  },
+  {
+   "at": 1790372659511,
+   "origin": "null",
+   "probe": true,
+   "page": "?csp=hash",
+   "kind": "status",
+   "moduleRan": true,
+   "dep": "dep-via-importmap-ok",
+   "depError": null
+  }
+ ],
+ "events": [
+  [
+   0.42,
+   "ws-open",
+   {
+    "origin": "http://127.0.0.1:50629"
+   }
+  ],
+  [
+   0.75,
+   "info",
+   {
+    "type": "info",
+    "info": {
+     "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+     "dpr": 2,
+     "inner": [
+      1280,
+      692
+     ],
+     "screen": [
+      1800,
+      1169
+     ],
+     "timeOrigin": 1790372656549,
+     "dateVsPerf": 1,
+     "crossOriginIsolated": false,
+     "hasPywebview": "undefined",
+     "perfNowStepsMs": [
+      1
+     ]
+    },
+    "bench": {
+     "n": 2000,
+     "transferUsPerMsg": 0.5,
+     "copyUsPerMsg": 1
+    },
+    "clock": {
+     "offset": 0.8349609375,
+     "rtt": 0
+    }
+   }
+  ],
+  [
+   0.76,
+   "probe",
+   {
+    "type": "probe",
+    "origin": "null",
+    "data": {
+     "probe": true,
+     "page": "?csp=hash",
+     "kind": "loaded",
+     "origin": "null",
+     "href": "http://127.0.0.1:50628/v/spike/?csp=hash",
+     "supportsImportMap": true
+    }
+   }
+  ],
+  [
+   0.8,
+   "iframe:ready",
+   {
+    "type": "iframe:ready",
+    "data": {
+     "type": "ready",
+     "info": {
+      "cfg": {
+       "hang": false,
+       "mode": "hash",
+       "probeOnly": false
+      },
+      "origin": "null",
+      "dep": "dep-via-importmap-ok",
+      "depError": null,
+      "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+      "dpr": 2,
+      "inner": [
+       1280,
+       692
+      ],
+      "timeOrigin": 1790372657000,
+      "hasGpu": true,
+      "gpuAdapter": {
+       "features": 18,
+       "info": {
+        "vendor": "apple",
+        "arch": "apple"
+       }
+      },
+      "webgl2": true,
+      "glRenderer": "Apple GPU",
+      "glVersion": "WebGL 2.0",
+      "floatTex": true
+     }
+    }
+   }
+  ],
+  [
+   0.8,
+   "nsclick-sent",
+   {
+    "isKey": true
+   }
+  ],
+  [
+   1.63,
+   "fullscreen-on",
+   null
+  ],
+  [
+   3.26,
+   "probe",
+   {
+    "type": "probe",
+    "origin": "null",
+    "data": {
+     "probe": true,
+     "page": "?csp=hash",
+     "kind": "status",
+     "moduleRan": true,
+     "dep": "dep-via-importmap-ok",
+     "depError": null
+    }
+   }
+  ]
+ ],
+ "pluginFetches": [
+  {
+   "path": "/sdk/probe.js",
+   "origin": null
+  },
+  {
+   "path": "/sdk/sdk.js",
+   "origin": "null"
+  },
+  {
+   "path": "/sdk/util.js",
+   "origin": "null"
+  },
+  {
+   "path": "/lib/dep.js",
+   "origin": "null"
+  }
+ ],
+ "webkitProcs": {
+  "first": [
+   {
+    "pid": 56150,
+    "ppid": 1,
+    "cpu": 8.1,
+    "rssMb": 33,
+    "comm": "com.apple.WebKit.GPU"
+   },
+   {
+    "pid": 56151,
+    "ppid": 1,
+    "cpu": 5.1,
+    "rssMb": 22,
+    "comm": "com.apple.WebKit.Networking"
+   },
+   {
+    "pid": 56152,
+    "ppid": 1,
+    "cpu": 11.1,
+    "rssMb": 105,
+    "comm": "com.apple.WebKit.WebContent"
+   }
+  ],
+  "peakCount": 3,
+  "timeline": [
+   [
+    {
+     "pid": 56150,
+     "ppid": 1,
+     "cpu": 8.1,
+     "rssMb": 33,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 56151,
+     "ppid": 1,
+     "cpu": 5.1,
+     "rssMb": 22,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 56152,
+     "ppid": 1,
+     "cpu": 11.1,
+     "rssMb": 105,
+     "comm": "com.apple.WebKit.WebContent"
+    }
+   ],
+   [
+    {
+     "pid": 56150,
+     "ppid": 1,
+     "cpu": 5.2,
+     "rssMb": 36,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 56151,
+     "ppid": 1,
+     "cpu": 3.2,
+     "rssMb": 22,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 56152,
+     "ppid": 1,
+     "cpu": 4.2,
+     "rssMb": 105,
+     "comm": "com.apple.WebKit.WebContent"
+    }
+   ],
+   [
+    {
+     "pid": 56150,
+     "ppid": 1,
+     "cpu": 6.2,
+     "rssMb": 37,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 56151,
+     "ppid": 1,
+     "cpu": 3.7,
+     "rssMb": 22,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 56152,
+     "ppid": 1,
+     "cpu": 6.4,
+     "rssMb": 106,
+     "comm": "com.apple.WebKit.WebContent"
+    }
+   ],
+   [
+    {
+     "pid": 56150,
+     "ppid": 1,
+     "cpu": 1.8,
+     "rssMb": 38,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 56151,
+     "ppid": 1,
+     "cpu": 1.8,
+     "rssMb": 22,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 56152,
+     "ppid": 1,
+     "cpu": 3.3,
+     "rssMb": 106,
+     "comm": "com.apple.WebKit.WebContent"
+    }
+   ],
+   [
+    {
+     "pid": 56150,
+     "ppid": 1,
+     "cpu": 5.1,
+     "rssMb": 38,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 56151,
+     "ppid": 1,
+     "cpu": 2.9,
+     "rssMb": 22,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 56152,
+     "ppid": 1,
+     "cpu": 7.8,
+     "rssMb": 106,
+     "comm": "com.apple.WebKit.WebContent"
+    }
+   ],
+   [
+    {
+     "pid": 56150,
+     "ppid": 1,
+     "cpu": 2.7,
+     "rssMb": 38,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 56151,
+     "ppid": 1,
+     "cpu": 2.4,
+     "rssMb": 22,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 56152,
+     "ppid": 1,
+     "cpu": 4.0,
+     "rssMb": 107,
+     "comm": "com.apple.WebKit.WebContent"
+    }
+   ],
+   [
+    {
+     "pid": 56150,
+     "ppid": 1,
+     "cpu": 3.7,
+     "rssMb": 39,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 56151,
+     "ppid": 1,
+     "cpu": 3.4,
+     "rssMb": 22,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 56152,
+     "ppid": 1,
+     "cpu": 5.6,
+     "rssMb": 107,
+     "comm": "com.apple.WebKit.WebContent"
+    }
+   ],
+   [
+    {
+     "pid": 56150,
+     "ppid": 1,
+     "cpu": 4.3,
+     "rssMb": 39,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 56151,
+     "ppid": 1,
+     "cpu": 3.5,
+     "rssMb": 22,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 56152,
+     "ppid": 1,
+     "cpu": 6.3,
+     "rssMb": 107,
+     "comm": "com.apple.WebKit.WebContent"
+    }
+   ],
+   [
+    {
+     "pid": 56150,
+     "ppid": 1,
+     "cpu": 3.4,
+     "rssMb": 39,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 56151,
+     "ppid": 1,
+     "cpu": 3.2,
+     "rssMb": 22,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 56152,
+     "ppid": 1,
+     "cpu": 5.4,
+     "rssMb": 108,
+     "comm": "com.apple.WebKit.WebContent"
+    }
+   ],
+   [
+    {
+     "pid": 56150,
+     "ppid": 1,
+     "cpu": 6.2,
+     "rssMb": 39,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 56151,
+     "ppid": 1,
+     "cpu": 5.1,
+     "rssMb": 22,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 56152,
+     "ppid": 1,
+     "cpu": 8.8,
+     "rssMb": 108,
+     "comm": "com.apple.WebKit.WebContent"
+    }
+   ],
+   [
+    {
+     "pid": 56150,
+     "ppid": 1,
+     "cpu": 4.8,
+     "rssMb": 39,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 56151,
+     "ppid": 1,
+     "cpu": 4.4,
+     "rssMb": 22,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 56152,
+     "ppid": 1,
+     "cpu": 7.1,
+     "rssMb": 108,
+     "comm": "com.apple.WebKit.WebContent"
+    }
+   ],
+   [
+    {
+     "pid": 56150,
+     "ppid": 1,
+     "cpu": 3.5,
+     "rssMb": 39,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 56151,
+     "ppid": 1,
+     "cpu": 3.0,
+     "rssMb": 22,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 56152,
+     "ppid": 1,
+     "cpu": 5.0,
+     "rssMb": 108,
+     "comm": "com.apple.WebKit.WebContent"
+    }
+   ],
+   [
+    {
+     "pid": 56150,
+     "ppid": 1,
+     "cpu": 6.0,
+     "rssMb": 39,
+     "comm": "com.apple.WebKit.GPU"
+    },
+    {
+     "pid": 56151,
+     "ppid": 1,
+     "cpu": 5.3,
+     "rssMb": 22,
+     "comm": "com.apple.WebKit.Networking"
+    },
+    {
+     "pid": 56152,
+     "ppid": 1,
+     "cpu": 8.9,
+     "rssMb": 108,
+     "comm": "com.apple.WebKit.WebContent"
+    }
+   ]
+  ]
+ }
+}

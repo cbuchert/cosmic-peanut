@@ -1,0 +1,11 @@
+{
+  "apiVersion": 1,
+  "visualizers": [
+    { "id": "bars", "name": "Bars 2D", "entry": "src/bars.js", "renderer": "2d",
+      "params": [{ "id": "hue", "type": "number", "label": "Hue", "min": 0, "max": 360, "default": 200 }] },
+    { "id": "glpulse", "name": "GL Pulse", "entry": "src/glpulse.js", "renderer": "webgl2" },
+    { "id": "boom", "name": "Throws", "entry": "src/boom.js", "renderer": "2d" },
+    { "id": "cube", "name": "Three Cube", "entry": "src/cube.js", "renderer": "three", "libs": ["three"] },
+    { "id": "gpu", "name": "GPU", "entry": "src/gpu.js", "renderer": "webgpu", "fallback": "bars" }
+  ]
+}
