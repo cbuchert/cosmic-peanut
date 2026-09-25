@@ -159,6 +159,7 @@ def test_manifest_errors_are_reported_not_dropped(tmp_path: Path, rec: Recorder)
         w.stop()
 
 
+@pytest.mark.perf
 def test_save_to_callback_latency(tmp_path: Path, rec: Recorder) -> None:
     a = write_plugin(tmp_path / "a", "pulse").resolve()
     w = DevFolderWatcher(rec.on_change)

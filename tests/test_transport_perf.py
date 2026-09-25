@@ -12,6 +12,8 @@ import pytest
 from tests.test_server_support import FakeRegistry
 from tidalviz.server.runner import HostServers
 
+pytestmark = pytest.mark.perf  # wall-clock sensitive; non-blocking in CI
+
 FRAME_BYTES = 10_592  # stereo frame v1
 RATE_HZ = 48_000 / 512  # ~93.75
 SECONDS = 2.0

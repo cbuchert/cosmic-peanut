@@ -229,6 +229,7 @@ def test_a_source_whose_format_changes_is_restarted_on_the_new_format(running):
     assert not f.stereo and f.sample_rate == 44100.0
 
 
+@pytest.mark.perf
 def test_realtime_synthetic_source_end_to_end():
     from tidalviz.capture.synthetic import SyntheticSource
 

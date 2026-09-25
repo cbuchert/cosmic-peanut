@@ -62,4 +62,5 @@ addopts = "-q"
 markers = [
   "live: needs real system audio and capture permission (deselect with -m 'not live')",
   "e2e: Playwright end-to-end",
+  "perf: wall-clock performance checks (run locally; non-blocking on shared CI runners)",
 ]

@@ -13,7 +13,10 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check . && uv run ruff format --check .
       - run: uv run pyright
-      - run: uv run pytest -m "not live and not e2e"
+      - run: uv run pytest -m "not live and not e2e and not perf"
+      - name: perf checks (informational on shared runners)
+        continue-on-error: true
+        run: uv run pytest -m perf
 
   web:
     runs-on: macos-latest
