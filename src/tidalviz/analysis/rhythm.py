@@ -123,20 +123,19 @@ class Tempo:
         self._env: F32 = np.zeros(h, dtype=np.float32)  # circular
         self._pos = 0
         self._frames = 0
-        self._lin: F32 = np.zeros(2 * h, dtype=np.float32)  # time-ordered, zero padded
-        self._spec = np.zeros(h + 1, dtype=np.complex64)
-        self._pow: F32 = np.zeros(h + 1, dtype=np.float32)
-        self._acf: F32 = np.zeros(2 * h, dtype=np.float32)
-        self._acfm: F32 = np.zeros(2 * h, dtype=np.float32)  # 3-tap max of _acf
+        # float64/complex128 throughout: numpy's FFT then needs no scratch allocations.
+        self._lin = np.zeros(2 * h, dtype=np.float64)  # time-ordered, zero padded
+        self._spec = np.zeros(h + 1, dtype=np.complex128)
+        self._pow = np.zeros(h + 1, dtype=np.float64)
+        self._acf = np.zeros(2 * h, dtype=np.float64)
+        self._acfm = np.zeros(2 * h, dtype=np.float64)  # 3-tap max of _acf
         lo = math.floor(self._fps * 60.0 / self.MAX_BPM)
         hi = math.ceil(self._fps * 60.0 / self.MIN_BPM)
         self._lags = np.arange(lo, hi + 1)
         bpm = 60.0 * self._fps / self._lags
-        self._prior: F32 = np.exp(
-            -0.5 * (np.log2(bpm / self.PRIOR_BPM) / self.PRIOR_OCTAVES) ** 2
-        ).astype(np.float32)
-        self._score: F32 = np.zeros(self._lags.size, dtype=np.float32)
-        self._tmp: F32 = np.zeros(self._lags.size, dtype=np.float32)
+        self._prior = np.exp(-0.5 * (np.log2(bpm / self.PRIOR_BPM) / self.PRIOR_OCTAVES) ** 2)
+        self._score = np.zeros(self._lags.size, dtype=np.float64)
+        self._tmp = np.zeros(self._lags.size, dtype=np.float64)
         self._period_s = 0.0  # 0 = not confident
         self._candidate = 0.0
         self._agree = 0
@@ -176,7 +175,9 @@ class Tempo:
         np.fft.rfft(self._lin, out=self._spec)
         np.abs(self._spec, out=self._pow)
         np.square(self._pow, out=self._pow)
-        np.fft.irfft(self._pow, n=2 * h, out=self._acf)
+        self._spec.imag[:] = 0.0  # |X|² as a complex array: irfft of a real array would cast
+        self._spec.real[:] = self._pow
+        np.fft.irfft(self._spec, n=2 * h, out=self._acf)
         acf = self._acf
         zero = float(acf[0])
         if zero <= 1e-12:

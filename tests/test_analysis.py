@@ -167,3 +167,80 @@ def test_beat_phase_is_zero_until_confident_then_advances_steadily_and_lands_on_
         want = (host - t) / 0.5
         d = abs((phase - want + 0.5) % 1.0 - 0.5)
         assert d < 0.04, (t, phase, want)  # 0.04 of a beat = 20 ms
+
+
+def test_centroid_of_a_1khz_sine_is_1khz_over_nyquist():
+    f = last(SyntheticSource("sine1k"), 0.5)
+    assert abs(f.scalars[S["centroid"]] - 1000.0 / 24000.0) < 0.005
+
+
+def test_centroid_is_zero_in_silence_and_brighter_for_noise():
+    assert last(SyntheticSource("silence"), 0.3).scalars[S["centroid"]] == 0.0
+    f = last(SyntheticSource("click120"), 0.27)  # right after the first (broadband) click
+    assert f.scalars[S["centroid"]] > 0.2
+
+
+def test_flux_is_near_zero_for_a_steady_tone_and_jumps_on_a_click():
+    f = last(SyntheticSource("sine1k"), 0.5)
+    assert f.scalars[S["flux"]] < 0.05
+    fl = [float(f.scalars[S["flux"]]) for f in frames(SyntheticSource("demo"), 4.0)]
+    assert max(fl) <= 1.0 and min(fl) >= 0.0
+    assert max(fl) > 0.3
+
+
+def test_default_extractors_cover_every_named_scalar_and_frame_array():
+    from tidalviz.analysis import Analyzer
+    from tidalviz.frame import SCALAR_NAMES
+
+    an = Analyzer(48000.0, 2)
+    declared = {name for ex in an.extractors for name in ex.fields}
+    named = {n for n in SCALAR_NAMES if not n.startswith("reserved")}
+    assert named <= declared
+    assert {"bands", "spectrum", "waveform", "left", "right", "onset", "silent"} <= declared
+
+
+def test_analyzer_reuses_one_frame_and_runs_custom_extractors_in_order():
+    from tidalviz.analysis import AnalysisContext, Analyzer
+    from tidalviz.capture.ring import RingBuffer
+    from tidalviz.frame import AudioFrame
+
+    calls: list[str] = []
+
+    class Mark:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.fields: tuple[str, ...] = ()
+
+        def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
+            calls.append(self.name)
+
+    an = Analyzer(48000.0, 1, extractors=[Mark("a"), Mark("b")])
+    ring = RingBuffer(4096, 1)
+    f1 = an.process(ring, 1.0)
+    f2 = an.process(ring, 2.0)
+    assert f1 is f2 and f2.index == 1 and f2.host_time == 2.0
+    assert calls == ["a", "b", "a", "b"]
+
+
+def test_hot_path_allocates_nothing_per_frame_beyond_small_scalars():
+    import tracemalloc
+
+    from tidalviz.analysis import Analyzer
+    from tidalviz.capture.ring import RingBuffer
+
+    src = SyntheticSource("demo")
+    an = Analyzer(48000.0, 2)
+    ring = RingBuffer(16384, 2)
+    blocks = [src.render(512) for _ in range(400)]
+    for b in blocks[:300]:  # warm up past tempo lock (its one-time comb allocates)
+        ring.write(b, 0.0)
+        an.process(ring, ring.written / 48000.0)
+    tracemalloc.start()
+    base, _ = tracemalloc.get_traced_memory()
+    for b in blocks[300:]:
+        ring.write(b, 0.0)
+        an.process(ring, ring.written / 48000.0)
+    cur, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    assert cur - base < 4096  # nothing retained
+    assert peak - base < 16384  # no per-frame arrays (a 2048-sample float32 array is 8 KB)

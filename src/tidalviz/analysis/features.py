@@ -202,6 +202,42 @@ class BassMidTreb:
             sc[self._idx[r + 3]] = min(att / denom, self.MAX_VALUE)
 
 
+class Centroid:
+    """Spectral centroid (magnitude-weighted mean frequency) as a fraction of Nyquist."""
+
+    fields: tuple[str, ...] = ("centroid",)
+
+    def __init__(self, ctx: AnalysisContext) -> None:
+        self._freqs_norm: F32 = (ctx.freqs / (ctx.sample_rate / 2)).astype(np.float32)
+        self._i = SCALAR_INDEX["centroid"]
+
+    def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
+        total = float(np.sum(ctx.mag))
+        c = float(np.dot(self._freqs_norm, ctx.mag)) / total if total > 1e-9 else 0.0
+        out.scalars[self._i] = 0.0 if ctx.silent else c
+
+
+class Flux:
+    """Normalized spectral change: Σ|Δmag| / (Σmag + Σprev mag), 0 (steady) – 1 (all new)."""
+
+    fields: tuple[str, ...] = ("flux",)
+
+    def __init__(self, ctx: AnalysisContext) -> None:
+        self._prev: F32 = np.zeros(ctx.n_bins, dtype=np.float32)
+        self._diff: F32 = np.zeros(ctx.n_bins, dtype=np.float32)
+        self._prev_sum = 0.0
+        self._i = SCALAR_INDEX["flux"]
+
+    def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
+        total = float(np.sum(ctx.mag))
+        np.subtract(ctx.mag, self._prev, out=self._diff)
+        np.abs(self._diff, out=self._diff)
+        denom = total + self._prev_sum
+        out.scalars[self._i] = float(np.sum(self._diff)) / denom if denom > 1e-9 else 0.0
+        np.copyto(self._prev, ctx.mag)
+        self._prev_sum = total
+
+
 def _band_weights(edges: np.ndarray, n_bins: int, bin_hz: float) -> F32:
     """(bands, bins) matrix; row b averages the power of the bins overlapping band b."""
     lo = (np.arange(n_bins) - 0.5) * bin_hz
@@ -218,5 +254,5 @@ def default_extractors(ctx: AnalysisContext) -> list[FeatureExtractor]:
 
     return [
         Level(ctx), AutoGain(ctx), Waveform(ctx), Spectrum(ctx), Bands(ctx), BassMidTreb(ctx),
-        Onset(ctx), Tempo(ctx),
+        Onset(ctx), Tempo(ctx), Centroid(ctx), Flux(ctx),
     ]  # fmt: skip

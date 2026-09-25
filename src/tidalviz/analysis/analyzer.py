@@ -30,11 +30,14 @@ class AnalysisContext:
         self.freqs: F32 = np.fft.rfftfreq(n, 1.0 / sample_rate).astype(np.float32)
         self.window: F32 = np.hanning(n).astype(np.float32)
         # Scale |rfft| so a full-scale sine reads 1.0 at its peak bin.
-        self.mag_scale = np.float32(2.0 / float(np.sum(self.window)))
+        self.mag_scale = 2.0 / float(np.sum(self.window))
         self.pcm: F32 = np.zeros((n, channels), dtype=np.float32)  # newest window, oldest first
         self.mono: F32 = np.zeros(n, dtype=np.float32)
-        self.windowed: F32 = np.zeros(n, dtype=np.float32)
-        self.spec = np.zeros(self.n_bins, dtype=np.complex64)
+        # float64 FFT: with out= numpy's pocketfft needs no scratch (float32 input allocates
+        # ~34 KB per call) and it is slightly faster (5.7 vs 6.7 µs for 2048 points on M1).
+        self.windowed = np.zeros(n, dtype=np.float64)
+        self.spec = np.zeros(self.n_bins, dtype=np.complex128)
+        self._mag64 = np.zeros(self.n_bins, dtype=np.float64)
         self.mag: F32 = np.zeros(self.n_bins, dtype=np.float32)  # linear amplitude, not gained
         self.gain = 1.0  # auto-gain factor for display features (set by AutoGain)
         self.silent = True  # set by Level
@@ -48,14 +51,17 @@ class AnalysisContext:
     def load(self, ring: RingBuffer, host_time: float) -> None:
         self.host_time = host_time
         ring.latest(self.fft_size, self.pcm)
-        if self.channels == 1:
-            np.copyto(self.mono, self.pcm[:, 0])
-        else:
-            np.mean(self.pcm, axis=1, out=self.mono)
+        # Channel sum with explicit ufuncs: np.mean(axis=1) allocates a temporary.
+        np.copyto(self.mono, self.pcm[:, 0])
+        for c in range(1, self.channels):
+            np.add(self.mono, self.pcm[:, c], out=self.mono)
+        if self.channels > 1:
+            np.multiply(self.mono, np.float32(1.0 / self.channels), out=self.mono)
         np.multiply(self.mono, self.window, out=self.windowed)
-        np.fft.rfft(self.windowed, out=self.spec)  # numpy ≥ 2: float32 in, complex64 out, no alloc
-        np.abs(self.spec, out=self.mag)
-        np.multiply(self.mag, self.mag_scale, out=self.mag)
+        np.fft.rfft(self.windowed, out=self.spec)
+        np.abs(self.spec, out=self._mag64)  # same-dtype out: a casting ufunc would buffer 8 KB
+        np.multiply(self._mag64, self.mag_scale, out=self._mag64)
+        np.copyto(self.mag, self._mag64)
 
 
 class FeatureExtractor(Protocol):
