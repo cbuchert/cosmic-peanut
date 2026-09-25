@@ -45,6 +45,7 @@ class PacedSource:
         if self._thread is not None:
             raise RuntimeError("already started")
         self._stop.clear()
+        self.failed.clear()
         self._thread = threading.Thread(
             target=self._run, args=(on_samples,), name=f"tidalviz-{self.name}", daemon=True
         )
@@ -62,13 +63,14 @@ class PacedSource:
         emitted = 0
         try:
             while not self._stop.is_set():
-                block = self.render(BLOCK)
                 emitted += BLOCK
                 if self.realtime:
                     delay = t0 + emitted / sr - time.monotonic()
                     if delay > 0 and self._stop.wait(delay):
                         break
-                on_samples(block, time.monotonic())
+                # Render only when due: rendering ahead would compete for the GIL with the
+                # analysis thread, which wakes as soon as the previous block lands.
+                on_samples(self.render(BLOCK), time.monotonic())
         except Exception:
             self.failed.set()
             raise
