@@ -244,3 +244,14 @@ def test_hot_path_allocates_nothing_per_frame_beyond_small_scalars():
     tracemalloc.stop()
     assert cur - base < 4096  # nothing retained
     assert peak - base < 16384  # no per-frame arrays (a 2048-sample float32 array is 8 KB)
+
+
+def test_bass_mid_treb_are_near_one_from_the_first_seconds():
+    # The long-term average starts as a running mean, so the first seconds after a (re)start
+    # aren't biased by whatever the very first frame happened to contain.
+    names = ("bass", "mid", "treb")
+    rows = np.array(
+        [[f.scalars[S[n]] for n in names] for f in frames(SyntheticSource("demo"), 2.0)]
+    )
+    means = rows.mean(axis=0)
+    assert np.all(np.abs(means - 1.0) < 0.2), means

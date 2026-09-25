@@ -21,16 +21,17 @@ class Level:
     fields: tuple[str, ...] = ("rms", "peak", "silent")
 
     def __init__(self, ctx: AnalysisContext) -> None:
-        self._abs: F32 = np.zeros((ctx.hop, ctx.channels), dtype=np.float32)
-        self._sq: F32 = np.zeros(ctx.hop, dtype=np.float32)
+        self._i_rms = SCALAR_INDEX["rms"]
+        self._i_peak = SCALAR_INDEX["peak"]
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
-        np.square(ctx.mono[-ctx.hop :], out=self._sq)
-        rms = math.sqrt(float(np.mean(self._sq)))
-        np.abs(ctx.pcm[-ctx.hop :], out=self._abs)
-        peak = float(np.max(self._abs))
-        out.scalars[SCALAR_INDEX["rms"]] = rms
-        out.scalars[SCALAR_INDEX["peak"]] = peak
+        hop = ctx.mono[-ctx.hop :]
+        ctx.hop_ms = float(np.dot(hop, hop)) / ctx.hop  # mean square, shared with AutoGain
+        pcm = ctx.pcm[-ctx.hop :]
+        peak = max(float(pcm.max()), -float(pcm.min()))
+        rms = math.sqrt(ctx.hop_ms)
+        out.scalars[self._i_rms] = rms
+        out.scalars[self._i_peak] = peak
         ctx.silent = out.silent = rms < SILENCE_RMS
 
 
@@ -52,7 +53,6 @@ class AutoGain:
         self._ms = 0.0  # tracked mean square
         self._frames = 0  # non-silent frames seen
         self._warmup = int(2.0 / ctx.dt)
-        self._sq: F32 = np.zeros(ctx.hop, dtype=np.float32)
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
         if not self.enabled:
@@ -60,8 +60,7 @@ class AutoGain:
             return
         if ctx.silent:
             return
-        np.square(ctx.mono[-ctx.hop :], out=self._sq)
-        ms = float(np.mean(self._sq))
+        ms = ctx.hop_ms
         k = self._k_fast if self._frames < self._warmup else self._k_slow
         self._ms = ms if self._frames == 0 else self._ms + (ms - self._ms) * k
         self._frames += 1
@@ -113,23 +112,24 @@ class Bands:
     fields: tuple[str, ...] = ("bands",)
     TILT_DB_PER_OCTAVE = 3.0
     DB_FLOOR, DB_CEIL = -70.0, -10.0
-    ATTACK_S, RELEASE_S = 0.01, 0.3
+    RELEASE_S = 0.3  # attack is instant
 
     def __init__(self, ctx: AnalysisContext) -> None:
         s = ctx.settings
         self.edges = np.geomspace(s.band_low_hz, s.band_high_hz, s.n_bands + 1)
         self.weights = _band_weights(self.edges, ctx.n_bins, ctx.bin_hz)
         centers = np.sqrt(self.edges[:-1] * self.edges[1:])
-        self._tilt: F32 = (self.TILT_DB_PER_OCTAVE * np.log2(centers / 1000.0)).astype(np.float32)
-        self._power: F32 = np.zeros(ctx.n_bins, dtype=np.float32)
-        self._level: F32 = np.zeros(s.n_bands, dtype=np.float32)
-        self._coef: F32 = np.zeros(s.n_bands, dtype=np.float32)
-        self._rising = np.zeros(s.n_bands, dtype=np.bool_)
-        self._state: F32 = np.zeros(s.n_bands, dtype=np.float32)
-        self.db: F32 = np.full(s.n_bands, self.DB_FLOOR - 10.0, dtype=np.float32)
-        ctx.band_db = self.db  # tilted band levels in dB, floored; Onset's input
-        self._k_attack = smoothing(ctx.dt, self.ATTACK_S)
-        self._k_release = smoothing(ctx.dt, self.RELEASE_S)
+        tilt_db = self.TILT_DB_PER_OCTAVE * np.log2(centers / 1000.0)
+        db_range = self.DB_CEIL - self.DB_FLOOR
+        # level = (10·log10(power) + tilt − floor) / range, as a scale and a per-band offset
+        self._scale = 10.0 / db_range
+        self._offset = (tilt_db - self.DB_FLOOR) / db_range
+        self._level_floor = -10.0 / db_range  # Onset sees levels down to floor − 10 dB
+        self._power = np.zeros(ctx.n_bins, dtype=np.float64)
+        self._level = np.zeros(s.n_bands, dtype=np.float64)
+        self._state = np.zeros(s.n_bands, dtype=np.float64)
+        self._decay = math.exp(-ctx.dt / self.RELEASE_S)
+        self.level = ctx.band_level  # tilted, unclipped 0–1 scale levels: Onset's input
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
         lv = self._level
@@ -138,19 +138,13 @@ class Bands:
         np.multiply(lv, ctx.gain * ctx.gain, out=lv)
         np.add(lv, 1e-12, out=lv)
         np.log10(lv, out=lv)
-        np.multiply(lv, 10.0, out=lv)
-        np.add(lv, self._tilt, out=lv)
-        np.maximum(lv, self.DB_FLOOR - 10.0, out=self.db)
-        np.subtract(lv, self.DB_FLOOR, out=lv)
-        np.multiply(lv, 1.0 / (self.DB_CEIL - self.DB_FLOOR), out=lv)
+        np.multiply(lv, self._scale, out=lv)
+        np.add(lv, self._offset, out=lv)
+        np.maximum(lv, self._level_floor, out=self.level)
         np.clip(lv, 0.0, 1.0, out=lv)
-        # state += (level − state) · (attack if rising else release)
-        np.greater(lv, self._state, out=self._rising)
-        np.multiply(self._rising, self._k_attack - self._k_release, out=self._coef)
-        np.add(self._coef, self._k_release, out=self._coef)
-        np.subtract(lv, self._state, out=lv)
-        np.multiply(lv, self._coef, out=lv)
-        np.add(self._state, lv, out=self._state)
+        # Instant attack, exponential release: state = max(level, state · decay)
+        np.multiply(self._state, self._decay, out=self._state)
+        np.maximum(self._state, lv, out=self._state)
         np.copyto(out.bands, self._state)
 
 
@@ -165,7 +159,7 @@ class BassMidTreb:
 
     fields: tuple[str, ...] = ("bass", "mid", "treb", "bassAtt", "midAtt", "trebAtt")
     RANGES_HZ = ((20.0, 250.0), (250.0, 4000.0), (4000.0, 16000.0))
-    AVERAGE_S, WARMUP_AVERAGE_S, WARMUP_S = 4.0, 0.5, 1.5
+    AVERAGE_S = 4.0
     ATT_S = 0.15  # symmetric, so *Att also averages 1.0
     MAX_VALUE = 10.0  # safety cap only; sharp hats legitimately read 4–6
 
@@ -178,9 +172,7 @@ class BassMidTreb:
         self._long = [0.0, 0.0, 0.0]
         self._att = [0.0, 0.0, 0.0]
         self._frames = 0
-        self._warmup = int(self.WARMUP_S / ctx.dt)
         self._k_long = smoothing(ctx.dt, self.AVERAGE_S)
-        self._k_warm = smoothing(ctx.dt, self.WARMUP_AVERAGE_S)
         self._k_att = smoothing(ctx.dt, self.ATT_S)
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
@@ -190,11 +182,12 @@ class BassMidTreb:
                 sc[i] = 0.0
             self._att = [0.0, 0.0, 0.0]
             return
-        k_long = self._k_warm if self._frames < self._warmup else self._k_long
         self._frames += 1
+        # A running mean until it would move slower than the EMA: no start-up bias.
+        k_long = max(1.0 / self._frames, self._k_long)
         for r, sl in enumerate(self._slices):
             imm = float(np.sum(ctx.mag[sl]))
-            long = imm if self._frames == 1 else self._long[r] + (imm - self._long[r]) * k_long
+            long = self._long[r] + (imm - self._long[r]) * k_long
             att = self._att[r] + (imm - self._att[r]) * self._k_att
             self._long[r], self._att[r] = long, att
             denom = max(long, 1e-9)
@@ -212,7 +205,7 @@ class Centroid:
         self._i = SCALAR_INDEX["centroid"]
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
-        total = float(np.sum(ctx.mag))
+        total = ctx.mag_sum = float(ctx.mag.sum())  # shared with Flux
         c = float(np.dot(self._freqs_norm, ctx.mag)) / total if total > 1e-9 else 0.0
         out.scalars[self._i] = 0.0 if ctx.silent else c
 
@@ -229,7 +222,7 @@ class Flux:
         self._i = SCALAR_INDEX["flux"]
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
-        total = float(np.sum(ctx.mag))
+        total = ctx.mag_sum
         np.subtract(ctx.mag, self._prev, out=self._diff)
         np.abs(self._diff, out=self._diff)
         denom = total + self._prev_sum
@@ -238,7 +231,7 @@ class Flux:
         self._prev_sum = total
 
 
-def _band_weights(edges: np.ndarray, n_bins: int, bin_hz: float) -> F32:
+def _band_weights(edges: np.ndarray, n_bins: int, bin_hz: float) -> np.ndarray:
     """(bands, bins) matrix; row b averages the power of the bins overlapping band b."""
     lo = (np.arange(n_bins) - 0.5) * bin_hz
     hi = lo + bin_hz
@@ -246,7 +239,7 @@ def _band_weights(edges: np.ndarray, n_bins: int, bin_hz: float) -> F32:
     for b in range(len(edges) - 1):
         overlap = np.clip(np.minimum(hi, edges[b + 1]) - np.maximum(lo, edges[b]), 0.0, None)
         w[b] = overlap / overlap.sum()
-    return w.astype(np.float32)
+    return w
 
 
 def default_extractors(ctx: AnalysisContext) -> list[FeatureExtractor]:

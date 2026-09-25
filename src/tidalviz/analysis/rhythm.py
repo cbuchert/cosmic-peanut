@@ -11,7 +11,7 @@ from tidalviz.frame import F32, SCALAR_INDEX, AudioFrame
 class Onset:
     """Onsets from spectral flux against an adaptive threshold.
 
-    The flux is the mean positive dB change across the 64 log bands (computed by Bands), so a
+    The flux is the mean positive level (dB) change across the 64 log bands (from Bands), so a
     kick moving a few bass bins counts as much as a hat moving hundreds of treble bins.
 
     Detection is per hop; the onset's time is then localized inside the newest 2048 samples as
@@ -30,8 +30,8 @@ class Onset:
 
     def __init__(self, ctx: AnalysisContext) -> None:
         nb = ctx.settings.n_bands
-        self._prev: F32 = np.zeros(nb, dtype=np.float32)
-        self._diff: F32 = np.zeros(nb, dtype=np.float32)
+        self._prev = np.zeros(nb, dtype=np.float64)
+        self._diff = np.zeros(nb, dtype=np.float64)
         self._hist: F32 = np.zeros(max(2, round(self.HISTORY_S / ctx.dt)), dtype=np.float32)
         self._hi = 0
         self._peak = 1e-6
@@ -51,10 +51,10 @@ class Onset:
         self._last_time: float | None = None
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
-        np.subtract(ctx.band_db, self._prev, out=self._diff)
+        np.subtract(ctx.band_level, self._prev, out=self._diff)
         np.maximum(self._diff, 0.0, out=self._diff)
-        odf = 0.0 if ctx.silent else float(np.mean(self._diff))
-        np.copyto(self._prev, ctx.band_db)
+        odf = 0.0 if ctx.silent else float(self._diff.mean())
+        np.copyto(self._prev, ctx.band_level)
 
         threshold = self.THRESHOLD_RATIO * float(np.mean(self._hist))
         threshold += self.THRESHOLD_FLOOR * self._peak
@@ -129,8 +129,8 @@ class Tempo:
         self._pow = np.zeros(h + 1, dtype=np.float64)
         self._acf = np.zeros(2 * h, dtype=np.float64)
         self._acfm = np.zeros(2 * h, dtype=np.float64)  # 3-tap max of _acf
-        lo = math.floor(self._fps * 60.0 / self.MAX_BPM)
-        hi = math.ceil(self._fps * 60.0 / self.MIN_BPM)
+        lo = math.ceil(self._fps * 60.0 / self.MAX_BPM)
+        hi = math.floor(self._fps * 60.0 / self.MIN_BPM)
         self._lags = np.arange(lo, hi + 1)
         bpm = 60.0 * self._fps / self._lags
         self._prior = np.exp(-0.5 * (np.log2(bpm / self.PRIOR_BPM) / self.PRIOR_OCTAVES) ** 2)
@@ -199,6 +199,9 @@ class Tempo:
             self._miss()
             return
         period = self._refine(best)
+        if not self.MIN_BPM <= 60.0 * self._fps / period <= self.MAX_BPM:
+            self._miss()  # refinement slid off the edge of the search range
+            return
         self._misses = 0
         if self._candidate and abs(period - self._candidate) / self._candidate < self.AGREE:
             self._agree += 1

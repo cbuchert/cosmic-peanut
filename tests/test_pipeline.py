@@ -245,3 +245,15 @@ def test_realtime_synthetic_source_end_to_end():
     s = pipe.stats()
     assert s.capture_to_send_ms_p95 < 15.0
     assert not any(t.name.startswith("tidalviz-") for t in threading.enumerate())
+
+
+def test_realtime_promotion_succeeds_on_macos_threads():
+    import sys
+
+    from tidalviz.pipeline import promote_to_realtime
+
+    result: list[bool] = []
+    t = threading.Thread(target=lambda: result.append(promote_to_realtime(512 / SR, 0.001)))
+    t.start()
+    t.join()
+    assert result == [sys.platform == "darwin"]
