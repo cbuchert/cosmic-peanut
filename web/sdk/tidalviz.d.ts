@@ -65,7 +65,11 @@ export interface AudioFrame {
   /** Spectral flux, normalized, ~0–1. */
   readonly flux: number;
 
-  /** True on the frame an onset (transient / beat) is detected. */
+  /**
+   * True on the frame an onset (transient / beat) is detected. An onset in an audio frame that was
+   * replaced before it could be drawn is carried forward, so every onset is seen by exactly one
+   * `frame` call.
+   */
   readonly onset: boolean;
   /** True while the source is silent (also true when capture permission is missing). */
   readonly silent: boolean;
@@ -74,13 +78,15 @@ export interface AudioFrame {
   readonly frameIndex: number;
   /** Source sample rate in Hz. */
   readonly sampleRate: number;
+  /** Host monotonic time (s) of the newest sample in this frame (host clock, not `FrameTime`). */
+  readonly hostTime: number;
 }
 
 /** Render-loop timing passed with every frame. Seconds. */
 export interface FrameTime {
   /** Seconds since the visualizer started (monotonic, pauses while hidden). */
   readonly now: number;
-  /** Seconds since the previous rendered frame (clamped to ≤ 0.1). */
+  /** Seconds since the previous rendered frame (clamped to ≤ 0.1; 0 on the first frame). */
   readonly dt: number;
   /** Rendered-frame counter, starting at 0. */
   readonly frame: number;
@@ -101,7 +107,11 @@ export interface Size {
   readonly dpr: number;
 }
 
-/** Repo-scoped asset loaders. Paths are relative to the repo root (where tidalviz.json lives). */
+/**
+ * Repo-scoped asset loaders. Paths are relative to the repo root (where tidalviz.json lives).
+ * Paths with a `..` segment, a leading `/`, a backslash or a URL scheme are rejected (`url`
+ * throws; the loaders reject).
+ */
 export interface Assets {
   /** Absolute URL for a repo file, for use in `import()`, `<img>`, `fetch`, etc. */
   url(path: string): string;
