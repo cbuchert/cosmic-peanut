@@ -214,9 +214,9 @@ def _band_weights(edges: np.ndarray, n_bins: int, bin_hz: float) -> F32:
 
 
 def default_extractors(ctx: AnalysisContext) -> list[FeatureExtractor]:
-    from tidalviz.analysis.rhythm import Onset
+    from tidalviz.analysis.rhythm import Onset, Tempo
 
     return [
         Level(ctx), AutoGain(ctx), Waveform(ctx), Spectrum(ctx), Bands(ctx), BassMidTreb(ctx),
-        Onset(ctx),
+        Onset(ctx), Tempo(ctx),
     ]  # fmt: skip

@@ -92,3 +92,164 @@ class Onset:
         np.subtract(self._energy[lb:], self._rise, out=self._rise)
         k = int(np.argmax(self._rise)) + lb
         return (self._loc_n - k * self.LOCALIZE_BLOCK) / ctx.sample_rate
+
+
+class Tempo:
+    """Tempo from the autocorrelation of the onset envelope; beat phase from a phase-locked loop.
+
+    Every ``UPDATE`` frames the last ~5.5 s of the onset detection function is autocorrelated
+    (via a zero-padded FFT into preallocated buffers). Candidate periods between 60 and 180 BPM
+    are scored with their first harmonics and a log-normal prior around 120 BPM (to avoid
+    octave errors), then refined to a fractional lag by parabolic interpolation over the first
+    few multiples. ``bpm`` is reported once consecutive estimates agree.
+
+    Beat phase: a comb over the envelope gives the initial beat alignment; after that, every
+    (sub-hop localized) onset near a predicted beat nudges the reference beat time toward it.
+    """
+
+    fields: tuple[str, ...] = ("bpm", "beatPhase")
+    HISTORY = 512  # frames of onset envelope (5.5 s at 48 kHz / 512)
+    UPDATE = 8  # frames between tempo estimates
+    MIN_BPM, MAX_BPM, PRIOR_BPM, PRIOR_OCTAVES = 60.0, 180.0, 120.0, 1.0
+    CONFIDENCE = 0.2  # ACF peak / ACF[0]
+    AGREE = 0.02  # relative agreement between consecutive estimates
+    AGREE_COUNT = 3
+    LOSE_AFTER = 12  # updates without confidence before bpm drops back to 0 (~1 s)
+    PLL_WINDOW, PLL_GAIN = 0.2, 0.25  # onsets within ±0.2 beat pull the phase by 25%
+
+    def __init__(self, ctx: AnalysisContext) -> None:
+        h = self.HISTORY
+        self._fps = 1.0 / ctx.dt
+        self._env: F32 = np.zeros(h, dtype=np.float32)  # circular
+        self._pos = 0
+        self._frames = 0
+        self._lin: F32 = np.zeros(2 * h, dtype=np.float32)  # time-ordered, zero padded
+        self._spec = np.zeros(h + 1, dtype=np.complex64)
+        self._pow: F32 = np.zeros(h + 1, dtype=np.float32)
+        self._acf: F32 = np.zeros(2 * h, dtype=np.float32)
+        self._acfm: F32 = np.zeros(2 * h, dtype=np.float32)  # 3-tap max of _acf
+        lo = math.floor(self._fps * 60.0 / self.MAX_BPM)
+        hi = math.ceil(self._fps * 60.0 / self.MIN_BPM)
+        self._lags = np.arange(lo, hi + 1)
+        bpm = 60.0 * self._fps / self._lags
+        self._prior: F32 = np.exp(
+            -0.5 * (np.log2(bpm / self.PRIOR_BPM) / self.PRIOR_OCTAVES) ** 2
+        ).astype(np.float32)
+        self._score: F32 = np.zeros(self._lags.size, dtype=np.float32)
+        self._tmp: F32 = np.zeros(self._lags.size, dtype=np.float32)
+        self._period_s = 0.0  # 0 = not confident
+        self._candidate = 0.0
+        self._agree = 0
+        self._misses = 0
+        self._ref = 0.0  # host time of a reference beat
+        self._last_onset = -1.0
+        self._i_bpm = SCALAR_INDEX["bpm"]
+        self._i_phase = SCALAR_INDEX["beatPhase"]
+
+    def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
+        self._env[self._pos] = ctx.odf
+        self._pos = (self._pos + 1) % self.HISTORY
+        self._frames += 1
+        if self._frames >= self.HISTORY // 2 and self._frames % self.UPDATE == 0:
+            self._estimate(ctx)
+        if self._period_s > 0.0 and ctx.onset and ctx.onset_time != self._last_onset:
+            self._pull_phase(ctx.onset_time)
+        self._last_onset = ctx.onset_time if ctx.onset else self._last_onset
+        if self._period_s > 0.0:
+            out.scalars[self._i_bpm] = 60.0 / self._period_s
+            out.scalars[self._i_phase] = ((ctx.host_time - self._ref) / self._period_s) % 1.0
+        else:
+            out.scalars[self._i_bpm] = 0.0
+            out.scalars[self._i_phase] = 0.0
+
+    def _ordered(self) -> None:
+        """Copy the envelope oldest-first into _lin[:H], mean-removed; _lin[H:] stays 0."""
+        h, p = self.HISTORY, self._pos
+        self._lin[: h - p] = self._env[p:]
+        self._lin[h - p : h] = self._env[:p]
+        body = self._lin[:h]
+        np.subtract(body, float(np.mean(body)), out=body)
+
+    def _estimate(self, ctx: AnalysisContext) -> None:
+        h = self.HISTORY
+        self._ordered()
+        np.fft.rfft(self._lin, out=self._spec)
+        np.abs(self._spec, out=self._pow)
+        np.square(self._pow, out=self._pow)
+        np.fft.irfft(self._pow, n=2 * h, out=self._acf)
+        acf = self._acf
+        zero = float(acf[0])
+        if zero <= 1e-12:
+            self._miss()
+            return
+        # score(L) = acf[L] + ½·acf[2L] (a true beat period also repeats at twice the lag),
+        # read through a 3-tap max so periods that fall between whole frames aren't penalized.
+        m = self._acfm
+        np.maximum(acf[:-2], acf[1:-1], out=m[1:-1])
+        np.maximum(m[1:-1], acf[2:], out=m[1:-1])
+        lags = self._lags
+        np.take(m, lags, out=self._score)
+        np.take(m, 2 * lags, out=self._tmp)
+        np.multiply(self._tmp, 0.5, out=self._tmp)
+        np.add(self._score, self._tmp, out=self._score)
+        np.multiply(self._score, self._prior, out=self._score)
+        best = int(lags[int(np.argmax(self._score))])
+        if m[best] / zero < self.CONFIDENCE:
+            self._miss()
+            return
+        period = self._refine(best)
+        self._misses = 0
+        if self._candidate and abs(period - self._candidate) / self._candidate < self.AGREE:
+            self._agree += 1
+            self._candidate += 0.5 * (period - self._candidate)
+        else:
+            self._candidate, self._agree = period, 1
+        if self._agree >= self.AGREE_COUNT:
+            first = self._period_s == 0.0
+            self._period_s = self._candidate / self._fps
+            if first:
+                self._ref = self._comb_phase(ctx)
+
+    def _refine(self, lag: int) -> float:
+        """Fractional period (frames) from parabolic peaks at lag, 2·lag, … weighted by multiple."""
+        acf, total, weight = self._acf, 0.0, 0.0
+        m = 1
+        while (m + 1) * lag < self.HISTORY and m <= 4:
+            c = round(m * lag)
+            lo, hi = max(1, c - m), c + m
+            k = lo + int(np.argmax(acf[lo : hi + 1]))
+            a, b, d = float(acf[k - 1]), float(acf[k]), float(acf[k + 1])
+            den = a - 2 * b + d
+            frac = 0.5 * (a - d) / den if den < 0 else 0.0
+            total += k + frac  # peak_m ≈ m·period, so Σpeak / Σm weights by multiple
+            weight += m
+            m += 1
+        return total / weight if weight else float(lag)
+
+    def _comb_phase(self, ctx: AnalysisContext) -> float:
+        """Host time of the most recent beat, from a comb over the onset envelope."""
+        period = self._period_s * self._fps
+        h = self.HISTORY
+        env = self._lin[:h]  # time-ordered (from _estimate), newest last
+        n_beats = int((h - period) // period)
+        best, best_score = 0, -1.0
+        for phi in range(math.ceil(period)):
+            idx = h - 1 - phi - np.round(np.arange(n_beats) * period).astype(np.int64)
+            score = float(np.sum(env[idx]))
+            if score > best_score:
+                best, best_score = phi, score
+        # The envelope peaks on the frame that detected the onset, about half a hop late.
+        return ctx.host_time - (best + 0.5) * ctx.dt
+
+    def _pull_phase(self, onset_time: float) -> None:
+        p = self._period_s
+        err = ((onset_time - self._ref) / p + 0.5) % 1.0 - 0.5  # beats; 0 = on a beat
+        if abs(err) < self.PLL_WINDOW:
+            self._ref += self.PLL_GAIN * err * p
+
+    def _miss(self) -> None:
+        self._misses += 1
+        self._agree = 0
+        self._candidate = 0.0
+        if self._misses >= self.LOSE_AFTER:
+            self._period_s = 0.0

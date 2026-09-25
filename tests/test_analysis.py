@@ -124,3 +124,46 @@ def test_onsets_catch_every_kick_in_music_like_input():
     for k in kicks:
         assert np.min(np.abs(detected - k)) < 0.010, k
     assert len(detected) < 4 * len(kicks)  # kick, snare, hats — not a stream of false hits
+
+
+def tempo_track(kind: str, seconds: float) -> tuple[SyntheticSource, np.ndarray]:
+    src = SyntheticSource(kind)
+    rows = [
+        (f.host_time, f.scalars[S["bpm"]], f.scalars[S["beatPhase"]]) for f in frames(src, seconds)
+    ]
+    return src, np.array(rows, dtype=np.float64)
+
+
+def test_120bpm_click_track_reads_120_plus_minus_1_within_8_seconds():
+    _, rows = tempo_track("click120", 8.0)
+    assert rows[0, 1] == 0.0  # 0 until confident
+    assert abs(rows[-1, 1] - 120.0) <= 1.0
+    confident = rows[rows[:, 1] > 0]
+    assert len(confident) > 0
+    # once confident it stays on tempo (no octave jumps)
+    assert np.all(np.abs(confident[:, 1] - 120.0) <= 1.0)
+
+
+def test_music_like_input_reads_120_bpm_within_8_seconds():
+    _, rows = tempo_track("demo", 8.0)
+    assert abs(rows[-1, 1] - 120.0) <= 1.0
+
+
+def test_beat_phase_is_zero_until_confident_then_advances_steadily_and_lands_on_clicks():
+    src, rows = tempo_track("click120", 10.0)
+    assert np.all(rows[rows[:, 1] == 0, 2] == 0.0)
+    locked = rows[rows[:, 1] > 0]
+    tail = locked[len(locked) // 3 :]  # give the phase lock a moment
+    step = np.mod(np.diff(tail[:, 2]), 1.0)
+    expected = (512 / 48000.0) / 0.5  # one hop is 2.13% of a beat at 120 BPM
+    assert np.mean(np.abs(step - expected) < 0.005) > 0.95
+    # on the frame just after each click, the phase says "the beat was (host_time − click) ago"
+    for c in src.click_positions(src.position):
+        t = c / 48000.0
+        after = tail[tail[:, 0] >= t]
+        if t < tail[0, 0] or len(after) == 0:
+            continue
+        host, _, phase = after[0]
+        want = (host - t) / 0.5
+        d = abs((phase - want + 0.5) % 1.0 - 0.5)
+        assert d < 0.04, (t, phase, want)  # 0.04 of a beat = 20 ms
