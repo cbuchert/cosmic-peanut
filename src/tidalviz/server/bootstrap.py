@@ -20,7 +20,9 @@ _THREE_IMPORT_MAP = {
 
 def script_json(value: Any) -> str:
     """JSON that is safe to embed inside a <script> element: no `<`, `>`, `&`, U+2028/2029."""
-    return json.dumps(value, ensure_ascii=False, allow_nan=False).translate(_SCRIPT_ESCAPES)
+    return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).translate(
+        _SCRIPT_ESCAPES
+    )
 
 
 def bootstrap_html(repo_key: str, viz_id: str, entry: Mapping[str, Any], *, nonce: str) -> str:

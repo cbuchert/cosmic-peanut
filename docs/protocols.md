@@ -115,15 +115,18 @@ style-src 'self' 'unsafe-inline'`.
 pywebview opens `S/?token=<t>`; the token is random per launch.
 
 **Plugin server** (`P` = `http://127.0.0.1:<plugin port>`) — on every response:
-`Access-Control-Allow-Origin: *` and CSP `default-src 'none'; script-src P 'wasm-unsafe-eval'
-blob: data:; img-src P data: blob:; media-src P data: blob:; font-src P data:; connect-src P data:
-blob:; style-src 'unsafe-inline'; worker-src P blob:`. Dev-folder files add `Cache-Control:
-no-store`.
+`Access-Control-Allow-Origin: *`, `X-Content-Type-Options: nosniff` and CSP `default-src 'none';
+script-src P 'wasm-unsafe-eval' blob: data:; img-src P data: blob:; media-src P data: blob:;
+font-src P data:; connect-src P data: blob:; style-src P 'unsafe-inline'; worker-src P blob:`.
+The bootstrap page's CSP adds a fresh `'nonce-<n>'` to `script-src`, and its inline scripts carry
+`nonce="<n>"` (without it CSP blocks the inline import map and boot script). `style-src` includes
+`P` so `/sdk/bootstrap.css` and plugin stylesheets load. Dev-folder responses add `Cache-Control:
+no-store`. Both servers send `nosniff`; errors (404, 405, 421) carry the same headers.
 
 | Route | Serves |
 | --- | --- |
 | `GET /v/<repoKey>/<vizId>/` | Generated bootstrap page (below) |
-| `GET /r/<repoKey>/<path>` | Files inside the registered plugin directory only; rejects `..`, absolute paths, and symlinks resolving outside it (404) |
+| `GET /r/<repoKey>/<path>` | Files inside the registered plugin directory only; 404 for `..` (literal or percent-encoded), absolute paths, empty or hidden (`.`-prefixed, e.g. `.git`) segments, encoded `/`, `\\` or NUL, directories, and symlinks resolving outside it. Same rules for `/sdk` and `/lib/three` |
 | `GET /sdk/<path>` | `web/sdk/*` |
 | `GET /lib/three/<path>` | `web/vendor/three/*` |
 
