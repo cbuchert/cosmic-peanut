@@ -151,8 +151,9 @@ def test_failing_starts_back_off_exponentially(running):
     assert len(src.starts) == 4
     gaps = np.diff(src.starts)
     assert gaps[0] >= 0.02 and gaps[1] >= 0.06 and gaps[2] >= 0.12
-    assert gaps[2] > gaps[1] > gaps[0]
-    assert [s for lvl, s in statuses if lvl == "warn"][-1].endswith("0.12 s")
+    # The requested delays, not wall-clock gaps (scheduler jitter can reorder those on CI).
+    warns = [s for lvl, s in statuses if lvl == "warn"]
+    assert [w.rsplit(" ", 2)[-2] for w in warns] == ["0.02", "0.06", "0.12"]
 
 
 def test_switch_source_keeps_the_analysis_thread_and_ignores_the_old_source(running):
