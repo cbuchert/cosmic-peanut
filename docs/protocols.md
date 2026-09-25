@@ -126,7 +126,7 @@ no-store`. Both servers send `nosniff`; errors (404, 405, 421) carry the same he
 | Route | Serves |
 | --- | --- |
 | `GET /v/<repoKey>/<vizId>/` | Generated bootstrap page (below) |
-| `GET /r/<repoKey>/<path>` | Files inside the registered plugin directory only; 404 for `..` (literal or percent-encoded), absolute paths, empty or hidden (`.`-prefixed, e.g. `.git`) segments, encoded `/`, `\\` or NUL, directories, and symlinks resolving outside it. Same rules for `/sdk` and `/lib/three` |
+| `GET /r/<repoKey>/<path>` | Files inside the registered plugin directory only; 404 for `..` (literal or percent-encoded), absolute paths, empty or hidden (`.`-prefixed, e.g. `.git`) segments, encoded `/`, `\` or NUL, directories, and symlinks resolving outside it. Same rules for `/sdk` and `/lib/three` |
 | `GET /sdk/<path>` | `web/sdk/*` |
 | `GET /lib/three/<path>` | `web/vendor/three/*` |
 
