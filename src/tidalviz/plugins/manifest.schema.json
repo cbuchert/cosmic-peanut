@@ -2,16 +2,24 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://tidalviz.local/manifest.schema.json",
   "title": "Tidalviz manifest (tidalviz.json)",
+  "description": "Semantic rules the schema can't express are checked by the host too: unique visualizer ids, unique param ids per visualizer, number params need min < max and min <= default <= max, a select default must be one of its options, fallback is only allowed on webgpu entries and must name another non-webgpu entry, and the three renderer requires libs to include \"three\".",
   "type": "object",
   "additionalProperties": false,
-  "required": ["apiVersion", "visualizers"],
+  "required": [
+    "apiVersion",
+    "visualizers"
+  ],
   "properties": {
-    "apiVersion": { "const": 1 },
+    "apiVersion": {
+      "const": 1
+    },
     "visualizers": {
       "type": "array",
       "minItems": 1,
       "maxItems": 100,
-      "items": { "$ref": "#/$defs/visualizer" }
+      "items": {
+        "$ref": "#/$defs/visualizer"
+      }
     }
   },
   "$defs": {
@@ -21,85 +29,219 @@
       "maxLength": 300,
       "pattern": "^(?![/\\\\])(?!.*(^|[/\\\\])\\.\\.([/\\\\]|$))[^\\u0000:]+$"
     },
-    "text": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "vizId": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{1,40}$"
+    },
+    "paramId": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,39}$"
+    },
     "visualizer": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "entry", "renderer"],
+      "required": [
+        "id",
+        "name",
+        "entry",
+        "renderer"
+      ],
       "properties": {
-        "id": { "type": "string", "pattern": "^[a-z0-9-]{1,40}$" },
-        "name": { "$ref": "#/$defs/text" },
-        "description": { "type": "string", "maxLength": 1000 },
-        "author": { "$ref": "#/$defs/text" },
-        "entry": { "$ref": "#/$defs/relPath" },
-        "renderer": { "enum": ["2d", "webgl2", "webgpu", "three"] },
-        "fallback": { "type": "string", "pattern": "^[a-z0-9-]{1,40}$" },
+        "id": {
+          "$ref": "#/$defs/vizId"
+        },
+        "name": {
+          "$ref": "#/$defs/text"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "author": {
+          "$ref": "#/$defs/text"
+        },
+        "entry": {
+          "$ref": "#/$defs/relPath"
+        },
+        "renderer": {
+          "enum": [
+            "2d",
+            "webgl2",
+            "webgpu",
+            "three"
+          ]
+        },
+        "fallback": {
+          "$ref": "#/$defs/vizId"
+        },
         "libs": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "enum": ["three"] }
+          "items": {
+            "enum": [
+              "three"
+            ]
+          }
         },
-        "thumbnail": { "$ref": "#/$defs/relPath" },
+        "thumbnail": {
+          "$ref": "#/$defs/relPath"
+        },
         "params": {
           "type": "array",
           "maxItems": 64,
-          "items": { "$ref": "#/$defs/param" }
+          "items": {
+            "$ref": "#/$defs/param"
+          }
         }
       }
     },
-    "paramBase": {
-      "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,39}$" },
-      "label": { "$ref": "#/$defs/text" }
-    },
     "param": {
       "type": "object",
-      "required": ["id", "type", "label", "default"],
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "required": ["min", "max"],
-          "properties": {
-            "id": { "$ref": "#/$defs/paramBase/id" },
-            "label": { "$ref": "#/$defs/text" },
-            "type": { "const": "number" },
-            "min": { "type": "number" },
-            "max": { "type": "number" },
-            "step": { "type": "number", "exclusiveMinimum": 0 },
-            "default": { "type": "number" }
-          }
+      "required": [
+        "id",
+        "type",
+        "label",
+        "default"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/paramId"
         },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "id": { "$ref": "#/$defs/paramBase/id" },
-            "label": { "$ref": "#/$defs/text" },
-            "type": { "const": "color" },
-            "default": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
-          }
+        "label": {
+          "$ref": "#/$defs/text"
         },
+        "type": {
+          "enum": [
+            "number",
+            "color",
+            "boolean",
+            "select"
+          ]
+        }
+      },
+      "allOf": [
         {
-          "additionalProperties": false,
-          "properties": {
-            "id": { "$ref": "#/$defs/paramBase/id" },
-            "label": { "$ref": "#/$defs/text" },
-            "type": { "const": "boolean" },
-            "default": { "type": "boolean" }
-          }
-        },
-        {
-          "additionalProperties": false,
-          "required": ["options"],
-          "properties": {
-            "id": { "$ref": "#/$defs/paramBase/id" },
-            "label": { "$ref": "#/$defs/text" },
-            "type": { "const": "select" },
-            "options": {
-              "type": "array",
-              "minItems": 1,
-              "uniqueItems": true,
-              "items": { "$ref": "#/$defs/text" }
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "const": "number"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "min",
+              "max"
+            ],
+            "properties": {
+              "id": true,
+              "label": true,
+              "type": true,
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "step": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "default": {
+                "type": "number"
+              }
             },
-            "default": { "type": "string" }
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "const": "color"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "id": true,
+              "label": true,
+              "type": true,
+              "default": {
+                "type": "string",
+                "pattern": "^#[0-9a-fA-F]{6}$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "const": "boolean"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "id": true,
+              "label": true,
+              "type": true,
+              "default": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "const": "select"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "options"
+            ],
+            "properties": {
+              "id": true,
+              "label": true,
+              "type": true,
+              "options": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "#/$defs/text"
+                }
+              },
+              "default": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
           }
         }
       ]
