@@ -87,6 +87,12 @@ field path and reason.
 | `boolean` | `default` | boolean |
 | `select` | `options` (strings), `default` | one of `options` |
 
+Beyond the schema, the host checks: visualizer ids and param ids (per visualizer) are unique;
+`number` params have `min < max` and `min <= default <= max`; a `select` default is one of its
+`options`; `fallback` appears only on `webgpu` entries and names another, non-`webgpu` entry;
+renderer `three` requires `"libs": ["three"]`; `entry` and `thumbnail` exist inside the repo
+(symlinks may not point outside it).
+
 Values persist per visualizer and can be reset by the user. Read them from `ctx.params` (always
 current); implement `params(changed)` if you need to react to a change (rebuild geometry, etc.).
 
