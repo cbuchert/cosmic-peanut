@@ -85,6 +85,22 @@ def main() -> None:
                 "fps": round(cpu.get("fps", 0), 1),
                 "errors": cpu.get("errors", []) + gpu.get("errors", []) + console,
             }
+            # Resize, flip every param, then dispose: none of it may throw.
+            page.evaluate(
+                """async () => {
+                  const wait = () => new Promise((r) => setTimeout(r, 150));
+                  window.__resize(800, 450); await wait();
+                  window.__resize(1280, 720); await wait();
+                  for (const [k, v] of Object.entries(window.__ctx.params)) {
+                    const next = typeof v === "boolean" ? !v : typeof v === "number" ? v * 0.5
+                      : v.startsWith("#") ? "#33ff66" : v;
+                    window.__setParam(k, next); await wait();
+                  }
+                  for (const m of ["rings", "bars", "16", "32"]) { window.__setParam("mode", m); await wait(); }
+                  window.__dispose();
+                }"""
+            )
+            r["errors"] += page.evaluate("window.__errors")
             if args.flash:
                 for reduce in (0, 1):
                     s = run(page, f"{base}?{q}&strobe=1&lum=1&reduce={reduce}", 4)
