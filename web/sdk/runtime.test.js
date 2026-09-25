@@ -451,3 +451,44 @@ describe("runtime three", () => {
     expect(three.renderer.render).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("runtime perf and onsets", () => {
+  it("posts perf once per second with renderScale", async () => {
+    const h = harness();
+    await h.rt.start();
+    for (let i = 0; i <= 61; i++) h.tick(1000 + (i * 1000) / 60);
+    const perf = h.posted.filter((m) => m.type === "perf");
+    expect(perf).toHaveLength(1);
+    expect(perf[0]).toMatchObject({ type: "perf", renderScale: 1, dropped: 0 });
+    expect(perf[0].fps).toBeGreaterThan(55);
+    expect(perf[0].frameMsP50).toBeCloseTo(16.67, 1);
+    for (const k of ["frameMsP99", "pluginMsP50", "sdkMsP50"]) expect(typeof perf[0][k]).toBe("number");
+  });
+
+  it("measures plugin CPU time around frame", async () => {
+    const h = harness();
+    await h.rt.start();
+    h.plugin.frame.mockImplementation(() => { h.clock.t += 4; });
+    for (let i = 0; i <= 70; i++) h.tick(1000 + (i * 1000) / 60);
+    const perf = h.posted.find((m) => m.type === "perf");
+    expect(perf.pluginMsP50).toBeCloseTo(4);
+    expect(perf.sdkMsP50).toBeCloseTo(0);
+  });
+
+  it("latches an onset from a frame replaced before render; reports onsetSeen once", async () => {
+    const h = harness();
+    await h.rt.start();
+    /** @type {boolean[]} */
+    const onsets = [];
+    h.plugin.frame.mockImplementation((/** @type {any} */ a) => onsets.push(a.onset));
+    h.rt.handleMessage(encodeFrame({ frameIndex: 10, onset: true }));
+    h.rt.handleMessage(encodeFrame({ frameIndex: 11 }));
+    h.tick(16);
+    h.tick(32);
+    expect(onsets).toEqual([true, false]);
+    expect(h.posted.filter((m) => m.type === "onsetSeen")).toEqual([{ type: "onsetSeen", frameIndex: 10 }]);
+    h.rt.handleMessage(encodeFrame({ frameIndex: 12, onset: true }));
+    h.tick(48);
+    expect(h.posted.filter((m) => m.type === "onsetSeen").at(-1)).toEqual({ type: "onsetSeen", frameIndex: 12 });
+  });
+});

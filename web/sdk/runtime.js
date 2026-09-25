@@ -6,10 +6,11 @@
  * `sdk.js` wires it to the real window.
  */
 
-import { createAudioFrame, decodeInto, peekFlags } from "./frame.js";
+import { createAudioFrame, decodeInto, peekFlags, FLAG_ONSET } from "./frame.js";
 import { createAssets } from "./assets.js";
 import { describeError, formatLog } from "./diagnostics.js";
 import { createQualityController } from "./quality.js";
+import { createPerfMeter } from "./perf.js";
 
 /** @typedef {import("./tidalviz").Visualizer} Visualizer */
 /** @typedef {import("./tidalviz").VisualizerContext} VisualizerContext */
@@ -81,6 +82,7 @@ export function createRuntime(deps) {
   const DISPLAY_MS = 1000 / 60;
   const qc = createQualityController({ budgetMs: DISPLAY_MS });
   let renderScale = qc.scale;
+  const perf = createPerfMeter({ expectedIntervalMs: DISPLAY_MS });
 
   /** @type {Record<string, import("./tidalviz").ParamValue>} */
   const params = {};
@@ -146,7 +148,9 @@ export function createRuntime(deps) {
     if (typeof m.renderScaleMax === "number" && m.renderScaleMax > 0) {
       qc.setMax(Math.min(1, Math.max(0.5, m.renderScaleMax)));
     }
-    qc.setBudget(fpsCap > 0 ? 1000 / fpsCap : DISPLAY_MS);
+    const budget = fpsCap > 0 ? 1000 / fpsCap : DISPLAY_MS;
+    qc.setBudget(budget);
+    perf.setExpectedInterval(budget);
     renderScale = qc.scale;
   }
   applySettings(init);
@@ -178,6 +182,8 @@ export function createRuntime(deps) {
   const audio = createAudioFrame();
   /** @type {ArrayBuffer | null} newest undecoded frame */
   let pending = null;
+  /** frameIndex of the first onset frame not yet rendered (survives frame replacement), or -1 */
+  let latchedOnset = -1;
   const time = { now: 0, dt: 0, frame: 0 };
 
   // ---- loop ------------------------------------------------------------------------------
@@ -189,34 +195,54 @@ export function createRuntime(deps) {
     rafId = deps.raf(tick);
     // fps cap: skip display frames that come earlier than the cap allows (2 ms vsync slack)
     if (fpsCap > 0 && lastTs >= 0 && ts - lastTs < 1000 / fpsCap - 2) return;
+    const t0 = deps.now();
     const intervalMs = lastTs < 0 ? 0 : ts - lastTs;
+    if (lastTs < 0) perf.start(ts);
+    let onsetIndex = -1;
     if (pending) {
       decodeInto(audio, pending);
       pending = null;
+      if (latchedOnset >= 0) {
+        audio.onset = true;
+        onsetIndex = latchedOnset;
+        latchedOnset = -1;
+      }
+    } else {
+      audio.onset = false; // an onset is seen by exactly one rendered frame
     }
-    const elapsed = intervalMs / 1000;
     lastTs = ts;
-    time.now += elapsed;
-    time.dt = Math.min(0.1, elapsed);
+    time.now += intervalMs / 1000;
+    time.dt = Math.min(0.1, intervalMs / 1000);
+
+    const p0 = deps.now();
+    let failed = null;
     try {
       /** @type {Visualizer} */ (plugin).frame(audio, time);
       if (three?.autoRender) three.renderer.render(three.scene, three.camera);
-      consecutiveErrors = 0;
     } catch (err) {
-      time.frame++;
-      if (++consecutiveErrors >= 3) fail(err);
-      else postError(err, false);
+      failed = { err };
+    }
+    const pluginMs = deps.now() - p0;
+    time.frame++;
+    if (onsetIndex >= 0) port.postMessage({ type: "onsetSeen", frameIndex: onsetIndex });
+
+    if (failed) {
+      if (++consecutiveErrors >= 3) fail(failed.err);
+      else postError(failed.err, false);
       return;
     }
-    time.frame++;
-    if (intervalMs > 0 && qc.enabled && qc.sample(ts, intervalMs) !== renderScale) {
-      renderScale = qc.scale;
-      resize();
-    }
+    consecutiveErrors = 0;
     if (!readySent) {
       readySent = true;
       port.postMessage({ type: "ready" });
     }
+    if (intervalMs > 0 && qc.enabled && qc.sample(ts, intervalMs) !== renderScale) {
+      renderScale = qc.scale;
+      resize();
+    }
+    if (intervalMs > 0) perf.frame(intervalMs, pluginMs, deps.now() - t0 - pluginMs);
+    const report = perf.report(ts);
+    if (report) port.postMessage({ type: "perf", ...report, renderScale });
   }
 
   function stopLoop() {
@@ -308,11 +334,13 @@ export function createRuntime(deps) {
   /** @param {unknown} data a port message (untrusted: validated field by field) */
   function handleMessage(data) {
     if (data instanceof ArrayBuffer) {
+      let flags;
       try {
-        peekFlags(data);
+        flags = peekFlags(data);
       } catch {
         return;
       }
+      if (flags & FLAG_ONSET && latchedOnset < 0) latchedOnset = new DataView(data).getUint32(8, true);
       pending = data;
       return;
     }
