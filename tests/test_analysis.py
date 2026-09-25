@@ -4,7 +4,7 @@ from tidalviz.analysis import AnalysisSettings
 from tidalviz.capture.synthetic import SyntheticSource
 from tidalviz.frame import SCALAR_INDEX
 
-from .analysis_helpers import frames
+from .test_analysis_helpers import frames
 
 S = SCALAR_INDEX
 
