@@ -34,7 +34,8 @@ def _is_window(v: Any) -> bool:
         return True
     if not isinstance(v, dict):
         return False
-    return all(type(v.get(k)) is int for k in ("x", "y", "width", "height"))  # pyright: ignore[reportUnknownMemberType]
+    w = cast(dict[str, Any], v)
+    return all(type(w.get(k)) is int for k in ("x", "y", "width", "height"))
 
 
 # Keys the shell or host may set, each with its validator. `params` has its own setter.
