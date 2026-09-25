@@ -6,7 +6,7 @@ GUI-free so it can be tested with a real WebSocket client; the window is injecte
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Coroutine, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -18,7 +18,7 @@ from tidalviz.capture import (
     list_audio_apps,
 )
 from tidalviz.pipeline import AudioPipeline
-from tidalviz.plugins import PluginRegistry
+from tidalviz.plugins import DevFolderWatcher, ManifestError, PluginRegistry
 from tidalviz.server.runner import DEFAULT_WEB_DIR, HostServers
 from tidalviz.settings import Settings
 from tidalviz.transport.control import TextSocket
@@ -81,6 +81,12 @@ class Host:
         )
         self._loop: asyncio.AbstractEventLoop | None = None
         self._last_click = -CLICK_INTERVAL_S
+        self._tasks: set[asyncio.Future[Any]] = set()
+        self.watcher = DevFolderWatcher(
+            self._dev_changed,
+            revalidate=self.registry.reload,
+            on_manifest_errors=self._dev_manifest_errors,
+        )
         self.pipeline: AudioPipeline | None = None
 
     # --- lifecycle ------------------------------------------------------------------------
@@ -91,8 +97,12 @@ class Host:
         self.pipeline = AudioPipeline(make_source(self.settings.data["source"]), self._publish)
         self.pipeline.pause()  # resumed when a shell connects
         self.pipeline.start()
+        for key, folder in self.registry.dev_folders().items():
+            self.watcher.add(key, folder)
+        self.watcher.start()
 
     async def stop(self) -> None:
+        await asyncio.to_thread(self.watcher.stop)
         if self.pipeline is not None:
             await asyncio.to_thread(self.pipeline.stop)
         await self.servers.stop()
@@ -102,6 +112,39 @@ class Host:
         loop = self._loop
         if loop is not None and not loop.is_closed():
             loop.call_soon_threadsafe(self.servers.hub.publish, data)
+
+    def use_dev_folder(self, folder: Path) -> str:
+        """Register a plugin folder in place and make its first visualizer active."""
+        repo = self.registry.add_dev_folder(folder)
+        key = next(v["key"] for v in self.registry.visualizers() if v["repo"] == repo)
+        self.settings.update({"active": key})
+        return key
+
+    def _spawn(self, coro: Coroutine[Any, Any, Any]) -> None:
+        """Run a coroutine on the loop, keeping a reference until it finishes."""
+        task = asyncio.ensure_future(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    def _broadcast_threadsafe(self, msg: dict[str, Any]) -> None:
+        loop = self._loop
+        if loop is not None and not loop.is_closed():
+            loop.call_soon_threadsafe(lambda: self._spawn(self.servers.control.broadcast_json(msg)))
+
+    def _dev_changed(self, repo: str, paths: list[Path]) -> None:
+        """Watcher thread: a dev folder changed → hot-reload its visualizers."""
+        for v in self.registry.visualizers():
+            if v["repo"] == repo:
+                self._broadcast_threadsafe({"type": "reload", "key": v["key"]})
+
+    def _dev_manifest_errors(self, repo: str, errors: list[ManifestError]) -> None:
+        self._broadcast_threadsafe(
+            {
+                "type": "manifestError",
+                "repo": repo,
+                "errors": [{"path": e.path, "message": e.message} for e in errors],
+            }
+        )
 
     # --- composition ----------------------------------------------------------------------
 
@@ -150,7 +193,7 @@ class Host:
     # --- control channel ------------------------------------------------------------------
 
     def _on_connect(self, client: TextSocket) -> None:
-        asyncio.ensure_future(self.servers.control.send_json(client, self.hello()))
+        self._spawn(self.servers.control.send_json(client, self.hello()))
 
     def _on_client_count(self, n: int) -> None:
         if self.pipeline is not None:

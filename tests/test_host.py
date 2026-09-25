@@ -85,7 +85,9 @@ def window() -> FakeWindow:
 
 @pytest_asyncio.fixture
 async def host(tmp_path: Path, window: FakeWindow) -> AsyncIterator[Host]:
-    h = Host(root=tmp_path / "home", builtin_dirs=BUILTINS, source_id="synthetic:demo", window=window)
+    h = Host(
+        root=tmp_path / "home", builtin_dirs=BUILTINS, source_id="synthetic:demo", window=window
+    )
     await h.start()
     yield h
     await h.stop()
@@ -152,8 +154,6 @@ async def test_frames_stream_while_a_shell_is_connected(host: Host, http):
     assert 60 <= n <= 110  # ~94 frames/s from the synthetic source
 
 
-
-
 def perf(fps: float) -> dict[str, Any]:
     return {
         "type": "perf",
@@ -193,3 +193,40 @@ async def test_window_actions_reach_the_window(
     await shell.send({"type": "window", "action": action})
     await asyncio.sleep(0.2)
     assert window.calls == [call]
+
+
+def write_dev_plugin(folder: Path) -> None:
+    (folder / "src").mkdir(parents=True)
+    (folder / "tidalviz.json").write_text(
+        json.dumps(
+            {
+                "apiVersion": 1,
+                "visualizers": [
+                    {"id": "pulse", "name": "Pulse", "entry": "src/main.js", "renderer": "2d"}
+                ],
+            }
+        )
+    )
+    (folder / "src" / "main.js").write_text("export default () => ({ frame() {} });\n")
+
+
+@pytest.mark.asyncio
+async def test_dev_folder_becomes_active_and_hot_reloads(tmp_path: Path, window: FakeWindow, http):
+    folder = tmp_path / "my-viz"
+    write_dev_plugin(folder)
+    h = Host(
+        root=tmp_path / "home", builtin_dirs=BUILTINS, source_id="synthetic:demo", window=window
+    )
+    key = h.use_dev_folder(folder)
+    await h.start()
+    try:
+        shell = await connect(h, http)
+        hello = await shell.next_json("hello")
+        assert hello["active"] == key and key.endswith("/pulse")
+        assert next(v for v in hello["visualizers"] if v["key"] == key)["dev"] is True
+        await asyncio.sleep(0.3)  # let the watcher start
+        (folder / "src" / "main.js").write_text("export default () => ({ frame() {} }); // v2\n")
+        reload = await shell.next_json("reload", timeout=2.0)
+        assert reload["key"] == key
+    finally:
+        await h.stop()

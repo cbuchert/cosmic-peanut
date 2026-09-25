@@ -2,7 +2,7 @@
 
 Thin platform code, verified by running the app and the e2e suite rather than unit tests.
 """
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportMissingTypeStubs=false, reportAttributeAccessIssue=false
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportMissingTypeStubs=false, reportAttributeAccessIssue=false, reportPrivateImportUsage=false
 
 import logging
 from typing import Any
@@ -102,7 +102,9 @@ class PyWebviewWindow:
             w = self.win.native
             wv = self._webview()
             b = wv.bounds()
-            pt = wv.convertPoint_toView_(AppKit.NSMakePoint(b.size.width / 2, b.size.height / 2), None)
+            pt = wv.convertPoint_toView_(
+                AppKit.NSMakePoint(b.size.width / 2, b.size.height / 2), None
+            )
             t = AppKit.NSProcessInfo.processInfo().systemUptime()
             for kind in (AppKit.NSEventTypeLeftMouseDown, AppKit.NSEventTypeLeftMouseUp):
                 ev = AppKit.NSEvent.mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure_(
