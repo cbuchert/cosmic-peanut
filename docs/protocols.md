@@ -148,7 +148,8 @@ The import map is included only when the entry declares `libs: ["three"]`.
 ## 4. Control WebSocket (shell ⇄ host)
 
 Binary messages host→shell are frames (§1). Text messages are JSON `{ "type": ..., ... }` in both
-directions. Receivers ignore unknown types and validate the fields of known ones.
+directions. Receivers ignore unknown types and validate the fields of known ones. The host drops
+inbound text over 64 KB, ignores inbound binary, and rejects non-finite numbers (`NaN`).
 
 Host → shell:
 
@@ -176,7 +177,7 @@ Shell → host:
 
 | type | Fields |
 | --- | --- |
-| `heartbeat` | `t` — every 500 ms; 2 s without one ⇒ host reloads the web view with the active visualizer disabled |
+| `heartbeat` | `t` — every 500 ms; 2 s without one (counted from connect or the last heartbeat, while ≥1 client is connected) ⇒ host reloads the web view with the active visualizer disabled |
 | `select` | `key` — active visualizer changed (persisted) |
 | `params` | `key`, `values` (full set, persisted) |
 | `setSource` | `id` |
