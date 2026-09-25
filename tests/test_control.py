@@ -350,3 +350,13 @@ async def test_close_disconnects_clients(
     msg = await ws.receive(timeout=1)
     assert msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED)
     await wait_for(lambda: rec.counts == [1, 0])
+
+
+def test_on_connect_gets_each_new_client_once(clock: FakeClock) -> None:
+    seen: list[object] = []
+    channel = ControlChannel(lambda c, m: None, on_connect=seen.append, clock=clock)
+    a, b = FakeClient(), FakeClient()
+    channel.connect(a)
+    channel.connect(a)
+    channel.connect(b)
+    assert seen == [a, b]

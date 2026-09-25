@@ -33,13 +33,18 @@ class HostServers:
         dev: bool = False,
         on_message: OnMessage = _ignore,
         on_client_count: Callable[[int], None] | None = None,
+        on_connect: Callable[[TextSocket], None] | None = None,
         on_hang: Callable[[], None] | None = None,
         hang_after: float = HANG_AFTER_S,
     ) -> None:
         self.token = secrets.token_urlsafe(32)
         self.hub = FrameHub()
         self.control = ControlChannel(
-            on_message, on_client_count=on_client_count, on_hang=on_hang, hang_after=hang_after
+            on_message,
+            on_client_count=on_client_count,
+            on_connect=on_connect,
+            on_hang=on_hang,
+            hang_after=hang_after,
         )
         self._web_dir = web_dir
         self._dev = dev
