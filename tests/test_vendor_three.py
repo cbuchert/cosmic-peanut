@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import io
+import re
 import tarfile
 from pathlib import Path
 
@@ -119,6 +120,15 @@ def test_committed_tree_is_under_cap_and_licensed():
     total = sum(p.stat().st_size for p in VENDOR.rglob("*") if p.is_file())
     assert total <= vt.SIZE_CAP
     assert "MIT" in (VENDOR / "LICENSE").read_text()
+
+
+def test_orbit_imports_resolve_in_vendor_tree():
+    src = (ROOT / "plugins" / "builtin" / "src" / "orbit.js").read_text()
+    specs = re.findall(r"""from\s+["'](three(?:/addons/[^"']+)?)["']""", src)
+    assert "three/addons/postprocessing/UnrealBloomPass.js" in specs
+    for spec in specs:
+        rel = "three.module.js" if spec == "three" else spec.removeprefix("three/")
+        assert (VENDOR / rel).is_file(), spec
 
 
 def test_every_committed_relative_import_resolves():
