@@ -492,3 +492,63 @@ describe("runtime perf and onsets", () => {
     expect(h.posted.filter((m) => m.type === "onsetSeen").at(-1)).toEqual({ type: "onsetSeen", frameIndex: 12 });
   });
 });
+
+describe("runtime context loss", () => {
+  it("disposes on loss, posts contextLost, and re-creates on restore", async () => {
+    const first = { frame: vi.fn(), dispose: vi.fn() };
+    const second = { frame: vi.fn() };
+    const reset = vi.fn();
+    const instances = [first, second];
+    const h = harness({ create: () => instances.shift(), contexts: { reset } });
+    await h.rt.start();
+    h.tick(16);
+    h.rt.contextLost();
+    expect(first.dispose).toHaveBeenCalledTimes(1);
+    expect(h.pendingRaf()).toBe(0);
+    expect(h.posted.at(-1)).toEqual({ type: "contextLost" });
+    h.rt.handleMessage({ type: "visibility", visible: true });
+    expect(h.pendingRaf()).toBe(0);
+    await h.rt.contextRestored();
+    expect(reset).toHaveBeenCalledTimes(1);
+    expect(h.create).toHaveBeenCalledTimes(2);
+    expect(h.create.mock.calls[1][0]).toBe(h.create.mock.calls[0][0]);
+    h.tick(32);
+    expect(second.frame).toHaveBeenCalledTimes(1);
+    expect(first.frame).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failing re-create is fatal", async () => {
+    let n = 0;
+    const h = harness({ create: () => { if (n++) throw new Error("again"); return { frame: vi.fn() }; } });
+    await h.rt.start();
+    h.rt.contextLost();
+    await h.rt.contextRestored();
+    expect(h.posted.at(-1)).toMatchObject({ type: "error", message: "Error: again", fatal: true });
+  });
+
+  it("ignores loss/restore after dispose", async () => {
+    const h = harness();
+    await h.rt.start();
+    h.rt.handleMessage({ type: "dispose" });
+    h.rt.contextLost();
+    await h.rt.contextRestored();
+    expect(h.types()).not.toContain("contextLost");
+    expect(h.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("runtime dispose during async create", () => {
+  it("disposes the late instance and never renders it", async () => {
+    const plugin = { frame: vi.fn(), dispose: vi.fn() };
+    /** @type {(v: any) => void} */
+    let resolve = () => {};
+    const h = harness({ create: () => new Promise((r) => (resolve = r)) });
+    const started = h.rt.start();
+    await new Promise((r) => setTimeout(r, 0));
+    h.rt.handleMessage({ type: "dispose" });
+    resolve(plugin);
+    await started;
+    expect(plugin.dispose).toHaveBeenCalledTimes(1);
+    expect(h.pendingRaf()).toBe(0);
+  });
+});

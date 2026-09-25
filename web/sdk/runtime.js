@@ -23,7 +23,10 @@ import { createPerfMeter } from "./perf.js";
  *   gl: WebGL2RenderingContext | null,
  *   gpu: import("./tidalviz").WebGPUHandles | null,
  *   three: import("./tidalviz").ThreeHandles | null,
+ *   reset?: () => void,
  * }} RendererHandles
+ * `reset` restores per-instance defaults before a re-create after context loss (three: fresh
+ * default scene/camera, autoRender on).
  */
 
 /**
@@ -267,9 +270,15 @@ export function createRuntime(deps) {
     startLoop();
   }
 
+  /** @type {RendererHandles | null} */
+  let handles = null;
+  /** @type {import("./tidalviz").CreateVisualizer | null} */
+  let create = null;
+  let lost = false; // WebGL context lost, waiting for restore
+
   async function createPlugin() {
     applySize();
-    const handles = await deps.createContext(manifest.renderer, canvas);
+    handles = await deps.createContext(manifest.renderer, canvas);
     three = handles.three;
     if (three) applySize(true);
     const assets = createAssets(deps.base, { fetch: deps.fetch, createImageBitmap: deps.createImageBitmap });
@@ -303,12 +312,21 @@ export function createRuntime(deps) {
     if (typeof mod.default !== "function") {
       throw new Error(`${manifest.entry}: the default export must be a create(ctx) function`);
     }
-    const create = /** @type {import("./tidalviz").CreateVisualizer} */ (mod.default);
-    const vis = await create(ctx);
+    create = /** @type {import("./tidalviz").CreateVisualizer} */ (mod.default);
+    await instantiate();
+  }
+
+  /** Run the plugin's create(ctx) and validate what it returns. */
+  async function instantiate() {
+    const vis = await /** @type {import("./tidalviz").CreateVisualizer} */ (create)(
+      /** @type {VisualizerContext} */ (ctx),
+    );
     if (!isObject(vis) || typeof vis.frame !== "function") {
       throw new Error("create(ctx) must return an object with a frame(audio, time) function");
     }
     plugin = vis;
+    if (dead) release(); // disposed while create was pending
+
   }
 
   /**
@@ -323,12 +341,39 @@ export function createRuntime(deps) {
     }
   }
 
-  function dispose() {
+  /** Stop rendering and let the plugin free its resources. */
+  function release() {
     stopLoop();
-    dead = true;
     const p = plugin;
     plugin = null;
     if (p?.dispose) guard(() => p.dispose?.());
+  }
+
+  function dispose() {
+    dead = true;
+    release();
+  }
+
+  /** WebGL context lost: dispose the instance; it is re-created on restore. */
+  function contextLost() {
+    if (dead || lost || !create) return;
+    lost = true;
+    release();
+    port.postMessage({ type: "contextLost" });
+  }
+
+  /** WebGL context restored: re-run create with the same ctx. Never rejects. */
+  async function contextRestored() {
+    if (dead || !lost) return;
+    lost = false;
+    try {
+      handles?.reset?.();
+      await instantiate();
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    startLoop();
   }
 
   /** @param {unknown} data a port message (untrusted: validated field by field) */
@@ -374,6 +419,8 @@ export function createRuntime(deps) {
   return {
     start,
     handleMessage,
+    contextLost,
+    contextRestored,
     /** Errors outside create/frame (window `error`, `unhandledrejection`). @param {unknown} err */
     reportError(err) {
       postError(err, false);
