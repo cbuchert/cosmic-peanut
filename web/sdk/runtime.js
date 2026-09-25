@@ -172,7 +172,11 @@ export function createRuntime(deps) {
    * @param {boolean} fatal
    */
   function postError(err, fatal) {
-    port.postMessage({ type: "error", ...describeError(err, deps.base), fatal });
+    /** @type {Record<string, unknown>} */
+    const msg = { type: "error", ...describeError(err, deps.base), fatal };
+    const fallback = /** @type {{ fallback?: unknown }} */ (err)?.fallback;
+    if (typeof fallback === "string") msg.fallback = fallback;
+    port.postMessage(msg);
   }
 
   /** @param {unknown} err */

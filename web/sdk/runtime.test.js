@@ -552,3 +552,16 @@ describe("runtime dispose during async create", () => {
     expect(h.pendingRaf()).toBe(0);
   });
 });
+
+describe("runtime renderer fallback", () => {
+  it("adds `fallback` to the fatal error when the renderer is unavailable", async () => {
+    const { RendererUnavailableError } = await import("./renderer.js");
+    const h = harness({
+      createContext: async () => {
+        throw new RendererUnavailableError('WebGPU is unavailable; the host should run the fallback visualizer "p2"', "p2");
+      },
+    });
+    await h.rt.start();
+    expect(h.posted.at(-1)).toMatchObject({ type: "error", fatal: true, fallback: "p2" });
+  });
+});
