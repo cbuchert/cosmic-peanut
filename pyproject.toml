@@ -45,6 +45,7 @@ default-groups = ["dev"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["tools/spike"]  # throwaway M1 spike, kept as reference
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
