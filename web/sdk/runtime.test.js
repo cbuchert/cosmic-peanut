@@ -223,3 +223,92 @@ describe("runtime errors", () => {
     expect(h.posted).toContainEqual({ type: "log", text: 'hi 1 {"a":2}' });
   });
 });
+
+describe("runtime port messages", () => {
+  it("params: updates live ctx.params, then calls params(changed) with valid keys only", async () => {
+    const plugin = { frame: vi.fn(), params: vi.fn() };
+    const h = harness({ plugin, init: { params: { hue: 1, on: true } } });
+    await h.rt.start();
+    const ctx = h.create.mock.calls[0][0];
+    plugin.params.mockImplementation(() => expect(ctx.params.hue).toBe(200));
+    h.rt.handleMessage({ type: "params", changed: { hue: 200, bad: { x: 1 } } });
+    expect(plugin.params).toHaveBeenCalledWith({ hue: 200 });
+    expect(ctx.params).toEqual({ hue: 200, on: true });
+  });
+
+  it("params: a throwing params hook is reported non-fatally", async () => {
+    const plugin = { frame: vi.fn(), params: vi.fn(() => { throw new Error("p"); }) };
+    const h = harness({ plugin });
+    await h.rt.start();
+    h.rt.handleMessage({ type: "params", changed: { a: 1 } });
+    expect(h.posted.find((m) => m.type === "error")).toMatchObject({ message: "Error: p", fatal: false });
+  });
+
+  it("settings: reduceFlashing and quality are live on ctx", async () => {
+    const h = harness();
+    await h.rt.start();
+    const ctx = h.create.mock.calls[0][0];
+    h.rt.handleMessage({ type: "settings", reduceFlashing: false, quality: "battery" });
+    expect(ctx.reduceFlashing).toBe(false);
+    expect(ctx.quality).toBe("battery");
+    h.rt.handleMessage({ type: "settings", quality: "nonsense", reduceFlashing: "yes" });
+    expect(ctx.quality).toBe("battery");
+    expect(ctx.reduceFlashing).toBe(false);
+  });
+
+  it("visibility: hidden stops rAF; visible resumes without counting the hidden time", async () => {
+    const h = harness();
+    await h.rt.start();
+    /** @type {number[]} */
+    const nows = [];
+    h.plugin.frame.mockImplementation((/** @type {any} */ _a, /** @type {any} */ t) => nows.push(t.now));
+    h.tick(0);
+    h.tick(16);
+    h.rt.handleMessage({ type: "visibility", visible: false });
+    expect(h.pendingRaf()).toBe(0);
+    h.clock.t = 60_000;
+    h.rt.handleMessage({ type: "visibility", visible: true });
+    h.tick(60_000);
+    h.tick(60_016);
+    expect(nows[2]).toBeCloseTo(0.016);
+    expect(nows[3]).toBeCloseTo(0.032);
+  });
+
+  it("init visible:false starts paused", async () => {
+    const h = harness({ init: { visible: false } });
+    await h.rt.start();
+    expect(h.pendingRaf()).toBe(0);
+    h.rt.handleMessage({ type: "visibility", visible: true });
+    expect(h.pendingRaf()).toBe(1);
+  });
+
+  it("dispose: calls dispose(), stops, then acknowledges with {type:'disposed'}", async () => {
+    const plugin = { frame: vi.fn(), dispose: vi.fn() };
+    const h = harness({ plugin });
+    await h.rt.start();
+    h.tick(16);
+    h.rt.handleMessage({ type: "dispose" });
+    expect(plugin.dispose).toHaveBeenCalledTimes(1);
+    expect(h.pendingRaf()).toBe(0);
+    expect(h.posted.at(-1)).toEqual({ type: "disposed" });
+    h.rt.handleMessage({ type: "visibility", visible: true });
+    expect(h.pendingRaf()).toBe(0);
+  });
+
+  it("dispose: a throwing dispose is reported but still acknowledged", async () => {
+    const plugin = { frame: vi.fn(), dispose: vi.fn(() => { throw new Error("d"); }) };
+    const h = harness({ plugin });
+    await h.rt.start();
+    h.rt.handleMessage({ type: "dispose" });
+    expect(h.types().slice(-2)).toEqual(["error", "disposed"]);
+  });
+
+  it("ignores unknown and malformed messages", async () => {
+    const h = harness();
+    await h.rt.start();
+    for (const m of [null, 1, "x", { type: "nope" }, { type: "params" }, { type: "params", changed: 3 }, { type: "visibility" }]) {
+      expect(() => h.rt.handleMessage(m)).not.toThrow();
+    }
+    expect(h.pendingRaf()).toBe(1);
+  });
+});

@@ -73,15 +73,13 @@ export function createRuntime(deps) {
   let reduceFlashing = true;
   let renderScale = 1;
   let visible = init.visible !== false;
-  if (typeof init.reduceFlashing === "boolean") reduceFlashing = init.reduceFlashing;
-  if (init.quality === "auto" || init.quality === "high" || init.quality === "balanced" || init.quality === "battery") {
-    quality = init.quality;
-  }
 
   /** @type {Record<string, import("./tidalviz").ParamValue>} */
   const params = {};
   for (const spec of manifest.params ?? []) params[spec.id] = spec.default;
   Object.assign(params, sanitizeParams(init.params));
+
+  applySettings(init);
 
   // ---- size ------------------------------------------------------------------------------
   let cssWidth = deps.cssSize.width, cssHeight = deps.cssSize.height;
@@ -222,7 +220,35 @@ export function createRuntime(deps) {
     plugin = vis;
   }
 
-  /** @param {unknown} data a port message */
+  /**
+   * Run an optional plugin hook; errors are reported non-fatally.
+   * @param {() => void} fn
+   */
+  function guard(fn) {
+    try {
+      fn();
+    } catch (err) {
+      postError(err, false);
+    }
+  }
+
+  /** @param {Record<string, unknown>} m */
+  function applySettings(m) {
+    if (typeof m.reduceFlashing === "boolean") reduceFlashing = m.reduceFlashing;
+    if (m.quality === "auto" || m.quality === "high" || m.quality === "balanced" || m.quality === "battery") {
+      quality = m.quality;
+    }
+  }
+
+  function dispose() {
+    stopLoop();
+    dead = true;
+    const p = plugin;
+    plugin = null;
+    if (p?.dispose) guard(() => p.dispose?.());
+  }
+
+  /** @param {unknown} data a port message (untrusted: validated field by field) */
   function handleMessage(data) {
     if (data instanceof ArrayBuffer) {
       try {
@@ -231,6 +257,31 @@ export function createRuntime(deps) {
         return;
       }
       pending = data;
+      return;
+    }
+    if (!isObject(data)) return;
+    switch (data.type) {
+      case "params": {
+        if (!isObject(data.changed)) return;
+        const changed = sanitizeParams(data.changed);
+        Object.assign(params, changed);
+        const p = plugin;
+        if (p?.params) guard(() => p.params?.(changed));
+        return;
+      }
+      case "settings":
+        applySettings(data);
+        return;
+      case "visibility":
+        if (typeof data.visible !== "boolean") return;
+        visible = data.visible;
+        if (visible) startLoop();
+        else stopLoop();
+        return;
+      case "dispose":
+        dispose();
+        port.postMessage({ type: "disposed" });
+        return;
     }
   }
 
