@@ -4,7 +4,7 @@
  *
  * Each frame: (1) warp last frame's image (zoom/rotate/ripple driven by bassAtt/midAtt/trebAtt and
  * beatPhase) into the other of two ping-pong framebuffers, with decay; (2) add this frame's
- * waveform rings or band spikes on top; (3) tone-map that buffer to the screen.
+ * waveform rings or band spikes on top; (3) tone-map that buffer to the screen as premultiplied colour with alpha = brightness.
  *
  * Shaders live in shaders/undertow/ and load with ctx.assets.text. The waveform and bands reach the
  * GPU as one 512×2 float texture updated in place, so the frame loop allocates nothing.
@@ -117,9 +117,11 @@ export default async function create(ctx) {
       gl.drawArrays(gl.TRIANGLES, 0, bars ? BAR_VERTS : RING_VERTS);
       gl.disable(gl.BLEND);
 
-      // 3. Composite to the canvas.
+      // 3. Composite to the (transparent, premultiplied) canvas: alpha comes from brightness.
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, w, h);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
       gl.useProgram(comp.program);
       gl.bindTexture(gl.TEXTURE_2D, dst.tex);
       gl.uniform1i(comp.u.u_src, 0);

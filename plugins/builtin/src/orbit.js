@@ -6,12 +6,18 @@
  * updated through a reused Object3D/Color so the frame loop allocates nothing. The camera circles
  * the ring at a rate locked to the tempo and dips on each beat (`beatPhase`). Bloom comes from
  * `three/addons` (EffectComposer + UnrealBloomPass) at half resolution, so `autoRender` is off.
+ *
+ * Transparent canvas: the scene has no background and renders over 0,0,0,0, so every pass works on
+ * "light on black". UnrealBloomPass doesn't keep a meaningful alpha, so the OutputPass (already the
+ * last, full-screen pass) rewrites alpha = max(r, g, b) of its final colour: premultiplied glow
+ * that matches the old opaque look over black and floats over the desktop, at no extra pass.
  */
 import * as THREE from "three";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { alphaFromBrightness } from "./lib/alpha.js";
 import { createFlashLimiter } from "./lib/flash.js";
 
 const COUNT = 64;
@@ -25,7 +31,7 @@ export default function create(ctx) {
   three.autoRender = false;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x020208);
+  scene.background = null; // transparent: the shell supplies black or the desktop
   scene.fog = new THREE.FogExp2(0x020208, 0.045);
   const camera = new THREE.PerspectiveCamera(50, ctx.size.width / ctx.size.height, 0.1, 200);
   three.scene = scene;
@@ -77,13 +83,15 @@ export default function create(ctx) {
   const stars = new THREE.Points(starGeo, starMat);
   scene.add(stars);
 
-  // Post: render → half-res bloom → output (tone map + sRGB).
+  // Post: render → half-res bloom → output (tone map + sRGB + alpha from brightness).
   const composer = new EffectComposer(renderer);
   composer.setPixelRatio(1); // sizes below are already drawing-buffer pixels
   const bloom = new UnrealBloomPass(new THREE.Vector2(ctx.size.width / 2, ctx.size.height / 2), 1, 0.4, 0.15);
-  composer.addPass(new RenderPass(scene, camera));
+  composer.addPass(new RenderPass(scene, camera, null, new THREE.Color(0x000000), 0)); // clear to 0,0,0,0
   composer.addPass(bloom);
-  composer.addPass(new OutputPass());
+  const output = new OutputPass();
+  output.material.fragmentShader = alphaFromBrightness(output.material.fragmentShader);
+  composer.addPass(output);
   const prevToneMapping = renderer.toneMapping;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
 

@@ -29,7 +29,7 @@ export default function create(ctx) {
   /** @type {CanvasGradient | string} */
   let barFill = "#fff";
   /** @type {CanvasGradient | string} */
-  let backdrop = "#000";
+  let backdrop = "rgb(0 0 0 / 0)";
   let colorCss = "#fff";
   let waveCss = "rgba(255,255,255,0.8)";
   let capCss = "#fff";
@@ -85,14 +85,12 @@ export default function create(ctx) {
       smoothLevels(levels, target, count, Number(ctx.params.smoothing), dt);
       updatePeaks(peaks, hold, vel, levels, count, dt);
 
-      // Background: black plus a bass glow. The glow is the only full-screen brightness change,
-      // so it goes through the flash limiter.
+      // Background: transparent (the shell supplies black or the desktop) plus a bass glow. The
+      // glow is the only full-screen brightness change, so it goes through the flash limiter.
       const kick = audio.onset ? Math.min(1, 0.4 + audio.onsetStrength) : 0;
       glow = Math.max(kick, glow * Math.exp(-dt * 5));
       const bright = flash.step(Math.min(1, 0.25 + 0.35 * glow + 0.2 * audio.bassAtt), dt, ctx.reduceFlashing);
-      g.globalAlpha = 1;
-      g.fillStyle = "#000";
-      g.fillRect(0, 0, w, h);
+      g.clearRect(0, 0, w, h);
       g.globalAlpha = bright;
       g.fillStyle = backdrop;
       g.fillRect(0, 0, w, h);
