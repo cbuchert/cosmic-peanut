@@ -18,7 +18,7 @@
  *   previous: string | null; dev: boolean; builtin: boolean }} RepoInfo
  * @typedef {{ id: string; name: string }} SourceInfo
  * @typedef {{ quality?: QualityMode; reduceFlashing?: boolean; autoCycleSeconds?: number;
- *   hudVisible?: boolean; photosensitivityNoticeSeen?: boolean }} Settings
+ *   hudVisible?: boolean; photosensitivityNoticeSeen?: boolean; transparent?: boolean }} Settings
  * @typedef {{ hostCpu: number; rssMb: number; analysisMsP50: number; captureToSendMsP95: number;
  *   droppedFrames: number; latencyMsP95?: number }} Stats
  *
@@ -177,6 +177,7 @@ export function parseSettings(v) {
   if (isNum(v.autoCycleSeconds) && v.autoCycleSeconds >= 0) out.autoCycleSeconds = v.autoCycleSeconds;
   if (isBool(v.hudVisible)) out.hudVisible = v.hudVisible;
   if (isBool(v.photosensitivityNoticeSeen)) out.photosensitivityNoticeSeen = v.photosensitivityNoticeSeen;
+  if (isBool(v.transparent)) out.transparent = v.transparent;
   return out;
 }
 

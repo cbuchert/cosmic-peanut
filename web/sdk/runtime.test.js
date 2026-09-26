@@ -6,7 +6,7 @@ const BASE = "http://127.0.0.1:5000/r/abc/";
 
 /**
  * Build a runtime around fakes. `plugin` is what create() returns (or a function of ctx).
- * @param {{ plugin?: any, create?: (ctx: any) => any, init?: any, manifest?: any, contexts?: any, dpr?: number,
+ * @param {{ plugin?: any, create?: (ctx: any) => any, init?: any, manifest?: any, contexts?: any, dpr?: number, reduceMotion?: () => boolean,
  *   createContext?: any }} [o]
  */
 function harness(o = {}) {
@@ -38,6 +38,7 @@ function harness(o = {}) {
     now: () => clock.t,
     devicePixelRatio: () => o.dpr ?? 2,
     fetch: async () => new Response(""),
+    reduceMotion: o.reduceMotion,
   });
   /** Advance the fake clock to `ms` and run pending rAF callbacks with timestamp `ms`. */
   const tick = (/** @type {number} */ ms) => {
@@ -563,5 +564,40 @@ describe("runtime renderer fallback", () => {
     });
     await h.rt.start();
     expect(h.posted.at(-1)).toMatchObject({ type: "error", fatal: true, fallback: "p2" });
+  });
+});
+
+
+describe("reduced motion and pointer input", () => {
+  it("ctx.reduceMotion is live from the host's prefers-reduced-motion, false by default", async () => {
+    let reduce = true;
+    const h = harness({ reduceMotion: () => reduce });
+    await h.rt.start();
+    const ctx = h.create.mock.calls[0][0];
+    expect(ctx.reduceMotion).toBe(true);
+    reduce = false;
+    expect(ctx.reduceMotion).toBe(false);
+
+    const d = harness();
+    await d.rt.start();
+    expect(d.create.mock.calls[0][0].reduceMotion).toBe(false);
+  });
+
+  it("forwards valid pointer messages to the plugin's pointer hook, ignoring bad ones", async () => {
+    const pointer = vi.fn();
+    const h = harness({ plugin: { frame: vi.fn(), pointer } });
+    await h.rt.start();
+    h.rt.handleMessage({ type: "pointer", kind: "down", x: 10, y: 20, dx: 0, dy: 0 });
+    h.rt.handleMessage({ type: "pointer", kind: "move", x: 15, y: 18, dx: 5, dy: -2 });
+    h.rt.handleMessage({ type: "pointer", kind: "explode", x: 1, y: 1, dx: 0, dy: 0 });
+    h.rt.handleMessage({ type: "pointer", kind: "up", x: "15", y: 18, dx: 0, dy: 0 });
+    expect(pointer).toHaveBeenCalledTimes(2);
+    expect(pointer.mock.calls[1][0]).toMatchObject({ kind: "move", x: 15, y: 18, dx: 5, dy: -2 });
+  });
+
+  it("plugins without a pointer hook are unaffected", async () => {
+    const h = harness();
+    await h.rt.start();
+    expect(() => h.rt.handleMessage({ type: "pointer", kind: "down", x: 1, y: 1, dx: 0, dy: 0 })).not.toThrow();
   });
 });

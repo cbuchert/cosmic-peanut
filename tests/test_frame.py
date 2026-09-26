@@ -17,7 +17,7 @@ def sample_frame(stereo: bool) -> AudioFrame:
     f.scalars[:] = np.arange(16, dtype=np.float32) / 10
     f.bands[:] = np.linspace(0, 1, 64, dtype=np.float32)
     f.spectrum[:] = np.linspace(1, 0, 1024, dtype=np.float32)
-    f.waveform[:] = np.sin(np.arange(512, dtype=np.float32) / 10)
+    f.waveform[:] = np.sin(np.arange(2048, dtype=np.float32) / 10)
     if stereo:
         assert f.left is not None and f.right is not None
         f.left[:] = 0.25
@@ -51,10 +51,10 @@ def test_header_layout():
     assert version == 1
     assert flags == 0b001  # onset, not silent, mono
     assert (index, rate, t) == (7, 48000.0, 1234.5)
-    assert struct.unpack_from("<4H", data, 24) == (64, 1024, 512, 16)
+    assert struct.unpack_from("<4H", data, 24) == (64, 1024, 2048, 16)
 
 
-@pytest.mark.parametrize(("stereo", "size"), [(False, 6496), (True, 10592)])
+@pytest.mark.parametrize(("stereo", "size"), [(False, 12640), (True, 29024)])
 def test_size_matches_contract(stereo: bool, size: int):
     assert len(encode(sample_frame(stereo))) == size
 
@@ -66,9 +66,9 @@ def test_arrays_are_aligned_and_in_order():
         ("scalars", 16),
         ("bands", 64),
         ("spectrum", 1024),
-        ("waveform", 512),
-        ("left", 512),
-        ("right", 512),
+        ("waveform", 2048),
+        ("left", 2048),
+        ("right", 2048),
     ):
         assert off % 4 == 0, name
         arr = np.frombuffer(data, dtype="<f4", count=n, offset=off)

@@ -66,7 +66,7 @@ export class DecodedFrame {
     this.scalars = new Float32Array(16);
     this.bands = new Float32Array(64);
     this.spectrum = new Float32Array(1024);
-    this.waveform = new Float32Array(512);
+    this.waveform = new Float32Array(2048);
     /** @type {Float32Array | null} */
     this.left = null;
     /** @type {Float32Array | null} */

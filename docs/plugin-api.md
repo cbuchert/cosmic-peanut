@@ -110,6 +110,7 @@ export default async function create(ctx) {
     resize(size) {},         // canvas was resized; size === ctx.size
     params(changed) {},      // only the keys that changed
     dispose() {},            // free GPU resources, timers, listeners
+    pointer(e) {},           // drag on the visual: e = { kind: "down"|"move"|"up", x, y, dx, dy } (reused object)
   };
 }
 ```
@@ -130,8 +131,15 @@ own rAF loop and don't resize the canvas.
 | `renderScale` | 0.5–1, lowered automatically in Auto quality when frames run over budget |
 | `quality` | `auto`, `high`, `balanced`, `battery` |
 | `reduceFlashing` | Live; when true, at most 3 full-screen brightness changes per second |
+| `reduceMotion` | Live; macOS "Reduce motion". When true, default to gentler motion (e.g. no self-orbit) |
 | `log(...)` | Prints to the dev overlay's console |
 | `id`, `name`, `renderer`, `apiVersion` | From the manifest |
+
+**The canvas is transparent.** The shell supplies the backdrop: black by default, or the desktop
+behind the window when the user turns on *Transparent background*. Clear to transparent
+(`clearRect`, `gl.clearColor(0, 0, 0, 0)`) instead of painting black, and write premultiplied
+color with a meaningful alpha: for glowing, additive looks, `alpha = max(r, g, b)` works well. On
+the black backdrop this looks exactly like an opaque black canvas.
 
 Renderer details:
 
@@ -157,8 +165,8 @@ keep (`myCopy.set(audio.bands)`).
 | --- | --- | --- |
 | `bands` | `Float32Array(64)` | Smoothed band levels 0–1, log-spaced 30 Hz – 16 kHz |
 | `spectrum` | `Float32Array(1024)` | Linear magnitude, normalized 0–1 |
-| `waveform` | `Float32Array(512)` | Latest samples, mono mix, −1..1 |
-| `left`, `right` | `Float32Array(512) \| null` | Per-channel samples when the source is stereo |
+| `waveform` | `Float32Array(2048)` | Latest samples, mono mix, −1..1; consecutive frames overlap (≈94 frames/s × 512-sample hop) |
+| `left`, `right` | `Float32Array(2048) \| null` | Per-channel samples when the source is stereo |
 | `rms`, `peak` | number | Level of the latest hop |
 | `bass`, `mid`, `treb` | number | 1.0 = recent average for that band (≈0–2, MilkDrop style) |
 | `bassAtt`, `midAtt`, `trebAtt` | number | Smoothed versions; good for motion |

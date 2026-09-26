@@ -24,7 +24,10 @@ describe("createRendererContext", () => {
     const h = await createRendererContext("webgl2", canvas, {});
     expect(h.gl).toBe(gl);
     expect(canvas.getContext).toHaveBeenCalledWith("webgl2", GL_OPTIONS);
-    expect(GL_OPTIONS).toEqual({ powerPreference: "high-performance", antialias: false, preserveDrawingBuffer: false });
+    // Transparent, premultiplied canvases: the shell supplies the backdrop (black or the desktop).
+    expect(GL_OPTIONS).toEqual({
+      powerPreference: "high-performance", antialias: false, preserveDrawingBuffer: false, alpha: true, premultipliedAlpha: true,
+    });
   });
 
   it("webgl2: throws when unavailable", async () => {
@@ -39,7 +42,7 @@ describe("createRendererContext", () => {
     const h = await createRendererContext("webgpu", fakeCanvas({ webgpu: context }), { gpu: /** @type {any} */ (gpu) });
     expect(h.gpu).toEqual({ adapter, device, context, format: "bgra8unorm" });
     expect(gpu.requestAdapter).toHaveBeenCalledWith({ powerPreference: "high-performance" });
-    expect(context.configure).toHaveBeenCalledWith({ device, format: "bgra8unorm", alphaMode: "opaque" });
+    expect(context.configure).toHaveBeenCalledWith({ device, format: "bgra8unorm", alphaMode: "premultiplied" });
   });
 
   it("webgpu: unavailable names the fallback", async () => {
@@ -60,6 +63,7 @@ describe("createRendererContext", () => {
       constructor(opts) {
         this.opts = opts;
         this.setPixelRatio = vi.fn();
+        this.setClearColor = vi.fn();
         made.push(this);
       }
     }
@@ -71,6 +75,7 @@ describe("createRendererContext", () => {
     expect(t.renderer).toBe(made[0]);
     expect(made[0].opts).toEqual({ canvas, ...GL_OPTIONS });
     expect(made[0].setPixelRatio).toHaveBeenCalledWith(1);
+    expect(made[0].setClearColor).toHaveBeenCalledWith(0x000000, 0);
     expect(t.scene).toBeInstanceOf(REAL_THREE.Scene);
     expect(t.camera).toBeInstanceOf(REAL_THREE.PerspectiveCamera);
     expect([t.camera.fov, t.camera.near, t.camera.far, t.camera.position.z]).toEqual([60, 0.1, 1000, 5]);

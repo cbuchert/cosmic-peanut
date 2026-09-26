@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cosmic Peanut</title>
+<style>
+  :root {
+    --bg: #000;
+    --ink: #eef1ff;
+    --ink-dim: rgba(238, 241, 255, 0.6);
+    --glass: rgba(8, 10, 22, 0.66);
+    --edge: rgba(255, 255, 255, 0.14);
+    --signal: #8fe9ff;
+    --warn: #ffd27a;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #000; } }
+  :root[data-theme="dark"] { --bg: #000; }
+  html { height: 100%; scroll-padding-top: env(safe-area-inset-top, 0px); }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); }
+  body {
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink);
+    -webkit-user-select: none; user-select: none;
+  }
+  body.idle { cursor: none; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+
+  .panel {
+    position: fixed; left: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    width: min(320px, calc(100vw - 32px));
+    max-height: calc(100% - 32px); overflow-y: auto;
+    padding: 14px 16px 12px;
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    transition: opacity .5s ease, transform .5s ease;
+  }
+  body.idle .panel { opacity: 0; transform: translateY(6px); pointer-events: none; }
+
+  h1 { margin: 0 0 2px; font-size: 16px; font-weight: 650; letter-spacing: -0.01em; }
+  .sub { margin: 0 0 12px; color: var(--ink-dim); font-size: 12px; }
+
+  .sources { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  button, select {
+    font: inherit; color: var(--ink);
+    background: rgba(255,255,255,0.08);
+    border: 1px solid var(--edge);
+    border-radius: 8px; padding: 6px 10px; cursor: pointer;
+  }
+  button:hover, select:hover { background: rgba(255,255,255,0.15); }
+  button[aria-pressed="true"] { border-color: var(--signal); color: var(--signal); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+  select option { color: #000; }
+
+  label.ctl { display: grid; grid-template-columns: 92px 1fr 40px; align-items: center; gap: 8px; margin: 6px 0; }
+  label.ctl span:first-child { color: var(--ink-dim); }
+  label.ctl output { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+  input[type=range] { width: 100%; accent-color: var(--signal); }
+  .row2 { display: flex; gap: 6px; margin-top: 10px; }
+  .row2 select { flex: 1; }
+
+  .msg { margin-top: 10px; font-size: 12px; color: var(--ink-dim); }
+  .msg.warn { color: var(--warn); }
+  .msg:empty { display: none; }
+  .keys { margin-top: 8px; color: var(--ink-dim); font-size: 11px; }
+  kbd { font: inherit; padding: 0 4px; border: 1px solid var(--edge); border-radius: 4px; }
+  #file { display: none; }
+</style>
+</head>
+<body>
+<canvas id="gl" aria-label="Waveform rings drifting from the north pole to the south pole of an invisible sphere"></canvas>
+
+<div class="panel" id="panel">
+  <h1>Cosmic Peanut</h1>
+  <p class="sub">Each ring is the waveform at one moment, drifting pole to pole.</p>
+
+  <div class="sources" role="group" aria-label="Audio source">
+    <button id="srcDemo" aria-pressed="true">Demo signal</button>
+    <button id="srcMic" aria-pressed="false">Microphone</button>
+    <button id="srcFile" aria-pressed="false">Audio file…</button>
+    <input type="file" id="file" accept="audio/*">
+  </div>
+
+  <label class="ctl"><span>Travel time</span><input type="range" id="travel" min="2" max="20" step="0.5" value="7"><output id="travelOut">7 s</output></label>
+  <label class="ctl"><span>Amplitude</span><input type="range" id="amp" min="0" max="0.6" step="0.01" value="0.22"><output id="ampOut">0.22</output></label>
+  <label class="ctl"><span>Detail</span><input type="range" id="detail" min="0" max="1" step="0.01" value="0.7"><output id="detailOut">0.70</output></label>
+  <label class="ctl"><span>Bass pulse</span><input type="range" id="pulse" min="0" max="1" step="0.01" value="0.35"><output id="pulseOut">0.35</output></label>
+  <label class="ctl"><span>Orbit speed</span><input type="range" id="spin" min="-0.6" max="0.6" step="0.01" value="0.12"><output id="spinOut">0.12</output></label>
+  <label class="ctl"><span>Brightness</span><input type="range" id="bright" min="0.2" max="2" step="0.05" value="1"><output id="brightOut">1.0</output></label>
+
+  <div class="row2">
+    <select id="density" aria-label="Ring density">
+      <option value="120">Sparse rings</option>
+      <option value="240" selected>Medium rings</option>
+      <option value="400">Dense rings</option>
+    </select>
+    <select id="palette" aria-label="Palette">
+      <option value="0" selected>Nebula</option>
+      <option value="1">Ember</option>
+      <option value="2">Phosphor</option>
+    </select>
+    <select id="line" aria-label="Line style">
+      <option value="soft" selected>Soft lines</option>
+      <option value="fine">Fine lines</option>
+    </select>
+  </div>
+
+  <div class="msg" id="msg"></div>
+  <div class="keys">Drag to orbit &nbsp; <kbd>Space</kbd> pause &nbsp; <kbd>F</kbd> full screen &nbsp; <kbd>H</kbd> hide</div>
+</div>
+
+<script>
+"use strict";
+
+/* =====================================================================
+   The visualization, written in the shape of a Tidalviz plugin:
+   create(ctx) -> { resize(size), frame(audio, time), params(changed) }
+   audio.waveform is a Float32Array of recent raw samples (any length).
+   ===================================================================== */
+function createCosmicPeanut(ctx) {
+  const gl = ctx.gl;
+  const M = 512;                        // points around each ring (high, so the waveform stays jagged)
+  let N = ctx.params.density;           // rings alive at once
+  let P = { ...ctx.params };
+
+  const VERT = `#version 300 es
+  precision highp float;
+  precision highp sampler2D;
+  in vec2 aIdx;                  // x: point around ring (0..M), y: ring age index (0 = newest)
+  uniform sampler2D uHist;       // M x N history of waveform rows
+  uniform int uHead, uN, uM;
+  uniform float uFrac, uAmp, uRadius, uPulse;
+  uniform mat4 uProj, uView;
+  out float vAge, vDepth, vSample, vEmpty;
+  void main() {
+    int i = int(aIdx.y);
+    int j = int(aIdx.x) % uM;
+    int row = (uHead - i + uN) % uN;
+    float s = texelFetch(uHist, ivec2(j, row), 0).r;
+    vEmpty = step(1e5, s);                               // rows not yet written stay invisible
+    s *= 1.0 - vEmpty;
+    float age = (float(i) + uFrac) / float(uN - 1);     // 0 north pole .. 1 south pole
+    float theta = clamp(age, 0.0, 1.0) * 3.14159265;
+    float phi = aIdx.x / float(uM) * 6.28318531;
+    float r = (uRadius + uAmp * s) * (1.0 + uPulse * 0.06); // waveform along the normal; bass swells it all, gently
+    vec3 p = r * vec3(sin(theta) * cos(phi), cos(theta), sin(theta) * sin(phi));
+    vec4 v = uView * vec4(p, 1.0);
+    vAge = age; vDepth = -v.z; vSample = s;
+    gl_Position = uProj * v;
+  }`;
+
+  const FRAG = `#version 300 es
+  precision highp float;
+  in float vAge, vDepth, vSample, vEmpty;
+  uniform float uCamDist, uRadius, uGain, uPalette, uPulse;
+  out vec4 o;
+  vec3 pal(float t) {
+    if (uPalette < 0.5) return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.55, 0.70, 0.85)));  // nebula
+    if (uPalette < 1.5) return 0.5 + 0.5 * cos(6.28318 * (t * 0.7 + vec3(0.0, 0.12, 0.25))); // ember
+    return vec3(0.25, 1.0, 0.55) * (0.6 + 0.4 * cos(6.28318 * t));                            // phosphor
+  }
+  void main() {
+    float edges = smoothstep(0.0, 0.035, vAge) * (1.0 - smoothstep(0.88, 1.0, vAge));
+    float back = clamp((vDepth - (uCamDist - uRadius)) / (2.0 * uRadius), 0.0, 1.0);
+    float depthFade = mix(1.0, 0.16, back);               // far side dimmer: implies the sphere
+    float fresh = mix(1.5, 0.35, vAge);                   // newest rings brightest
+    vec3 c = pal(vAge * 0.55 - uPulse * 0.08) + abs(vSample) * 0.35 + uPulse * 0.12;
+    o = vec4(c * edges * depthFade * fresh * uGain * (1.0 - vEmpty), 1.0);
+  }`;
+
+  function shader(type, src) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  const prog = gl.createProgram();
+  gl.attachShader(prog, shader(gl.VERTEX_SHADER, VERT));
+  gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FRAG));
+  gl.bindAttribLocation(prog, 0, "aIdx");
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  const U = {};
+  for (const n of ["uHist","uHead","uN","uM","uFrac","uAmp","uRadius","uProj","uView","uCamDist","uGain","uPalette","uPulse"])
+    U[n] = gl.getUniformLocation(prog, n);
+
+  const vao = gl.createVertexArray();
+  const vbo = gl.createBuffer(), ibo = gl.createBuffer();
+  const tex = gl.createTexture();
+  let hist, head = 0, indexCount = 0;
+
+  function build() {
+    // one vertex per (point, ring); each ring is a closed line strip, split by primitive restart
+    const verts = new Float32Array(N * (M + 1) * 2);
+    const idx = new Uint32Array(N * (M + 2));
+    let v = 0, k = 0;
+    for (let i = 0; i < N; i++) {
+      const base = i * (M + 1);
+      for (let j = 0; j <= M; j++) { verts[v++] = j; verts[v++] = i; idx[k++] = base + j; }
+      idx[k++] = 0xFFFFFFFF;
+    }
+    indexCount = k;
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+
+    hist = new Float32Array(M * N).fill(1e6);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, M, N, 0, gl.RED, gl.FLOAT, hist);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    head = 0;
+  }
+  build();
+
+  // ---- turn a raw waveform into one ring: trigger, resample, taper the seam, auto-gain
+  const ring = new Float32Array(M);
+  let peakTrack = 0.1;
+  function makeRing(wave) {
+    // Detail picks how much time one ring spans: a shorter window shows more high-frequency jaggedness.
+    const want = Math.round(1024 - P.detail * 832);        // 1024 samples (smooth) .. 192 (jagged)
+    const W = Math.min(want, wave.length >> 1 || wave.length);
+    let start = 0;
+    if (wave.length >= W * 2) {            // oscilloscope-style trigger: first rising zero crossing
+      for (let i = 1; i < wave.length - W; i++) {
+        if (wave[i - 1] < 0 && wave[i] >= 0) { start = i; break; }
+      }
+    }
+    let peak = 0;
+    const step = W / M;
+    for (let j = 0; j < M; j++) {                         // point-sample with linear interpolation: no smoothing
+      const x = start + j * step, i0 = Math.floor(x), f = x - i0;
+      const s = (wave[i0] || 0) * (1 - f) + (wave[i0 + 1] || 0) * f;
+      ring[j] = s;
+      peak = Math.max(peak, Math.abs(s));
+    }
+    peakTrack = Math.max(peak, peakTrack * 0.992);
+    const norm = 1 / Math.max(peakTrack, 0.02);
+    const taper = Math.floor(M * 0.08);    // ends ease to zero so the ring closes without a seam
+    for (let j = 0; j < M; j++) {
+      let w = 1;
+      if (j < taper) w = 0.5 - 0.5 * Math.cos(Math.PI * j / taper);
+      else if (j > M - 1 - taper) w = 0.5 - 0.5 * Math.cos(Math.PI * (M - 1 - j) / taper);
+      ring[j] = Math.max(-1.5, Math.min(1.5, ring[j] * norm * w));
+    }
+    return ring;
+  }
+
+  // ---- tiny matrix helpers
+  function perspective(fovy, aspect, near, far) {
+    const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+    return new Float32Array([f / aspect,0,0,0, 0,f,0,0, 0,0,(far + near) * nf,-1, 0,0,2 * far * near * nf,0]);
+  }
+  function lookAt(e) {
+    const len = Math.hypot(e[0], e[1], e[2]);
+    const z = [e[0] / len, e[1] / len, e[2] / len];
+    let x = [z[2], 0, -z[0]]; const xl = Math.hypot(x[0], x[2]) || 1; x = [x[0] / xl, 0, x[2] / xl];
+    const y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
+    return new Float32Array([
+      x[0], y[0], z[0], 0,  x[1], y[1], z[1], 0,  x[2], y[2], z[2], 0,
+      -(x[0]*e[0] + x[1]*e[1] + x[2]*e[2]), -(y[0]*e[0] + y[1]*e[1] + y[2]*e[2]), -(z[0]*e[0] + z[1]*e[1] + z[2]*e[2]), 1]);
+  }
+
+  // ---- bass pulse: use the host's bass level if it gives one, else low-pass the waveform ourselves
+  let bassAvg = 0.05, pulse = 0;
+  function bassLevel(audio) {
+    if (typeof audio.bass === "number") return audio.bass;
+    const wave = audio.waveform, sr = audio.sampleRate || 48000;
+    const a = 1 - Math.exp(-2 * Math.PI * 140 / sr);      // one-pole low-pass at about 140 Hz
+    let y = 0, sum = 0;
+    const n = Math.min(wave.length, 2048);
+    for (let i = wave.length - n; i < wave.length; i++) { y += a * (wave[i] - y); sum += y * y; }
+    return Math.sqrt(sum / n);
+  }
+  function updatePulse(audio, dt) {
+    const b = bassLevel(audio);
+    bassAvg += (b - bassAvg) * Math.min(1, dt * 0.6);       // slow running average (a few seconds)
+    const rel = b / Math.max(bassAvg, 1e-4);                // about 1.0 = average bass for this song
+    const target = Math.max(0, Math.min(1.5, (rel - 1.0) * 1.2));
+    pulse += (target - pulse) * Math.min(1, dt * (target > pulse ? 18 : 4));  // fast attack, slower release
+    return pulse * P.pulse;
+  }
+
+  let W = 1, H = 1, pushClock = 0, frac = 0;
+  const RADIUS = 1.0;
+
+  return {
+    resize(size) { W = size.width; H = size.height; },
+
+    params(changed) {
+      Object.assign(P, changed);
+      if (changed.density && changed.density !== N) { N = changed.density; build(); }
+    },
+
+    frame(audio, time) {
+      // push new rings at a fixed rate so travel time is exact whatever the display refresh
+      const rate = N / P.travel;           // rings per second
+      if (!time.paused) {
+        pushClock += time.dt * rate;
+        while (pushClock >= 1) {
+          pushClock -= 1;
+          head = (head + 1) % N;
+          gl.bindTexture(gl.TEXTURE_2D, tex);
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, head, M, 1, gl.RED, gl.FLOAT, makeRing(audio.waveform));
+        }
+        frac = pushClock;
+      }
+
+      const pulseAmt = time.paused ? pulse * P.pulse : updatePulse(audio, time.dt);
+
+      const aspect = W / H, fov = 38 * Math.PI / 180;
+      const fitV = (RADIUS + P.amp) * 1.32 / Math.tan(fov / 2);   // room for the bass swell
+      const dist = Math.max(fitV, fitV / aspect);
+      const eye = [
+        dist * Math.cos(ctx.view.pitch) * Math.sin(ctx.view.yaw),
+        dist * Math.sin(ctx.view.pitch),
+        dist * Math.cos(ctx.view.pitch) * Math.cos(ctx.view.yaw)];
+
+      gl.viewport(0, 0, W, H);
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);         // additive: overlapping rings glow
+      gl.useProgram(prog);
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.uniform1i(U.uHist, 0);
+      gl.uniform1i(U.uHead, head); gl.uniform1i(U.uN, N); gl.uniform1i(U.uM, M);
+      gl.uniform1f(U.uFrac, frac);
+      gl.uniform1f(U.uAmp, P.amp);
+      gl.uniform1f(U.uRadius, RADIUS);
+      gl.uniform1f(U.uCamDist, dist);
+      gl.uniform1f(U.uGain, P.bright * 0.55 * Math.sqrt(240 / N) * (ctx.lineScale || 1));
+      gl.uniform1f(U.uPalette, P.palette);
+      gl.uniform1f(U.uPulse, pulseAmt);
+      gl.uniformMatrix4fv(U.uProj, false, perspective(fov, aspect, 0.1, 50));
+      gl.uniformMatrix4fv(U.uView, false, lookAt(eye));
+      gl.bindVertexArray(vao);
+      gl.drawElements(gl.LINE_STRIP, indexCount, gl.UNSIGNED_INT, 0);
+      gl.bindVertexArray(null);
+    },
+  };
+}
+
+/* =====================================================================
+   Stand-in host: audio sources, controls, camera, render loop.
+   In Tidalviz, the app would provide all of this.
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const canvas = $("gl");
+const gl = canvas.getContext("webgl2", { antialias: true, alpha: false, powerPreference: "high-performance" });
+const msg = (text, warn) => { $("msg").textContent = text || ""; $("msg").className = "msg" + (warn ? " warn" : ""); };
+
+if (!gl) msg("This browser can't run WebGL 2, which the visualization needs.", true);
+
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const params = {
+  travel: 7, amp: 0.22, spin: reduceMotion ? 0 : 0.12, bright: 1, detail: 0.7, pulse: reduceMotion ? 0.1 : 0.35,
+  density: 240, palette: 0,
+};
+if (reduceMotion) { $("spin").value = 0; $("pulse").value = 0.1; }
+const view = { yaw: 0.4, pitch: 0.42, basePitch: 0.42 };
+let orbitT = 0;
+const ctx = { gl, canvas, params, view, lineScale: 1 };
+const viz = gl ? createCosmicPeanut(ctx) : null;
+
+// ---------- audio sources ----------
+const WAVE_LEN = 2048;
+const waveBuf = new Float32Array(WAVE_LEN);
+let audioCtx = null, analyser = null, mediaStream = null, mediaEl = null, source = "demo";
+
+function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = WAVE_LEN;
+    analyser.smoothingTimeConstant = 0;
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume();
+}
+function stopInputs() {
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  if (mediaEl) { mediaEl.pause(); URL.revokeObjectURL(mediaEl.src); mediaEl = null; }
+  if (analyser) try { analyser.disconnect(); } catch (e) {}
+}
+function setPressed(which) {
+  for (const [id, key] of [["srcDemo","demo"],["srcMic","mic"],["srcFile","file"]])
+    $(id).setAttribute("aria-pressed", String(key === which));
+}
+
+// Demo: a synthesized groove (bass chord, kick, hats), generated silently.
+let demoT = 0;
+const CHORDS = [55, 65.41, 49, 73.42];
+function demoWave(t) {
+  const sr = 48000, beat = 0.5;
+  const root = CHORDS[Math.floor(t / 4) % CHORDS.length];
+  for (let i = 0; i < WAVE_LEN; i++) {
+    const s = t + i / sr, bt = s % beat, ht = (s + beat / 2) % beat;
+    const kick = Math.sin(2 * Math.PI * (45 + 90 * Math.exp(-bt * 30)) * bt) * Math.exp(-bt * 9);
+    const bass = 0.45 * Math.sin(2 * Math.PI * root * s) + 0.2 * Math.sin(2 * Math.PI * root * 1.5 * s) +
+                 0.12 * Math.sin(2 * Math.PI * root * 4 * s + Math.sin(s * 0.7) * 2);
+    const hat = (Math.random() * 2 - 1) * 0.18 * Math.exp(-ht * 60);
+    const note = root * 4 * [1, 1.5, 2, 1.25][Math.floor(s * 4) % 4];         // arpeggiated lead
+    const saw = ((s * note) % 1) * 2 - 1, sq = ((s * note * 2.01) % 1) < 0.5 ? 1 : -1;
+    const lead = (0.16 * saw + 0.06 * sq) * Math.exp(-((s * 4) % 1) * 3);
+    waveBuf[i] = 0.9 * kick + bass * (0.6 + 0.4 * Math.sin(s * 0.9)) + hat + lead;
+  }
+  return waveBuf;
+}
+
+$("srcDemo").onclick = () => { stopInputs(); source = "demo"; setPressed("demo"); msg(""); };
+
+$("srcMic").onclick = async () => {
+  try {
+    ensureAudio();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    stopInputs();
+    mediaStream = stream;
+    audioCtx.createMediaStreamSource(stream).connect(analyser);   // not routed to speakers
+    source = "live"; setPressed("mic");
+    msg("Listening to your microphone. On a Mac with BlackHole, pick it as the input to visualize system audio.");
+  } catch (e) {
+    msg("Microphone access was blocked. Allow it for this page, or use an audio file instead.", true);
+  }
+};
+
+$("srcFile").onclick = () => $("file").click();
+$("file").onchange = () => {
+  const f = $("file").files[0];
+  if (!f) return;
+  ensureAudio();
+  stopInputs();
+  mediaEl = new Audio(URL.createObjectURL(f));
+  mediaEl.loop = true;
+  const node = audioCtx.createMediaElementSource(mediaEl);
+  node.connect(analyser);
+  analyser.connect(audioCtx.destination);                         // you hear the file
+  mediaEl.play().then(() => {
+    source = "live"; setPressed("file");
+    msg("Playing " + f.name + ". Press Space to pause.");
+  }).catch(() => msg("That file couldn't be played. Try an MP3, M4A or WAV.", true));
+  $("file").value = "";
+};
+
+// ---------- controls ----------
+function bindRange(id, key, fmt) {
+  const el = $(id), out = $(id + "Out");
+  const update = () => { const v = parseFloat(el.value); out.textContent = fmt(v); viz && viz.params({ [key]: v }); params[key] = v; };
+  el.addEventListener("input", update); update();
+}
+bindRange("travel", "travel", v => v + " s");
+bindRange("amp", "amp", v => v.toFixed(2));
+bindRange("spin", "spin", v => v.toFixed(2));
+bindRange("detail", "detail", v => v.toFixed(2));
+bindRange("pulse", "pulse", v => v.toFixed(2));
+bindRange("bright", "bright", v => v.toFixed(1));
+$("density").onchange = e => viz && viz.params({ density: parseInt(e.target.value, 10) });
+$("palette").onchange = e => viz && viz.params({ palette: parseInt(e.target.value, 10) });
+$("line").onchange = () => resize(true);
+
+// ---------- sizing ----------
+function resize(force) {
+  const soft = $("line").value === "soft";
+  const dpr = soft ? 1 : Math.min(window.devicePixelRatio || 1, 2);   // soft = lower-res lines, upscaled into a glow
+  ctx.lineScale = soft ? 1 : 1.35;
+  const w = Math.max(2, Math.floor(innerWidth * dpr)), h = Math.max(2, Math.floor(innerHeight * dpr));
+  if (force || canvas.width !== w || canvas.height !== h) {
+    canvas.width = w; canvas.height = h;
+    viz && viz.resize({ width: w, height: h, dpr });
+  }
+}
+addEventListener("resize", () => resize());
+resize(true);
+
+// ---------- orbit by dragging ----------
+let drag = null;
+canvas.addEventListener("pointerdown", e => { drag = { x: e.clientX, y: e.clientY, yaw: view.yaw, pitch: view.pitch }; canvas.setPointerCapture(e.pointerId); canvas.classList.add("dragging"); });
+canvas.addEventListener("pointermove", e => {
+  if (!drag) return;
+  view.yaw = drag.yaw - (e.clientX - drag.x) * 0.006;
+  view.pitch = Math.max(-1.3, Math.min(1.3, drag.pitch + (e.clientY - drag.y) * 0.006));
+});
+const endDrag = () => {
+  if (drag) { view.basePitch = view.pitch - 0.3 * Math.sin(orbitT * 0.09); }   // resume orbit from where you let go
+  drag = null; canvas.classList.remove("dragging");
+};
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+
+// ---------- keys and idle panel ----------
+let paused = false, hidden = false, idleTimer;
+function wake() {
+  if (!hidden) document.body.classList.remove("idle");
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { if (!$("panel").contains(document.activeElement) || document.activeElement === document.body) document.body.classList.add("idle"); }, 3500);
+}
+addEventListener("pointermove", wake);
+addEventListener("keydown", e => {
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT" && e.target.type !== "range") return;
+  const k = e.key.toLowerCase();
+  if (k === " ") {
+    e.preventDefault(); paused = !paused;
+    if (mediaEl) paused ? mediaEl.pause() : mediaEl.play();
+    msg(paused ? "Paused. Press Space to resume." : "");
+  } else if (k === "f") {
+    document.fullscreenElement ? document.exitFullscreen?.() : document.documentElement.requestFullscreen?.();
+  } else if (k === "h") { hidden = !hidden; document.body.classList.toggle("idle", hidden); }
+});
+wake();
+
+// ---------- render loop ----------
+let last = performance.now() / 1000;
+function loop() {
+  const now = performance.now() / 1000, dt = Math.min(0.05, now - last); last = now;
+  if (viz) {
+    let wave;
+    if (source === "demo") { if (!paused) demoT += dt; wave = demoWave(demoT); }
+    else { analyser.getFloatTimeDomainData(waveBuf); wave = waveBuf; }
+    if (!paused && !drag) {
+      // slow self-orbit: steady yaw plus a gentle rise and fall, so the poles swing into view
+      orbitT += dt * Math.min(1, Math.abs(params.spin) / 0.12);
+      view.yaw += params.spin * dt;
+      view.pitch = Math.max(-1.3, Math.min(1.3, view.basePitch + 0.3 * Math.sin(orbitT * 0.09)));
+    }
+    const sampleRate = source === "demo" ? 48000 : audioCtx.sampleRate;
+    viz.frame({ waveform: wave, sampleRate }, { now, dt, paused });
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

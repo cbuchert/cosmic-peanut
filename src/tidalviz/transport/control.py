@@ -41,7 +41,8 @@ class ControlChannel:
 
     ``on_message(client, msg)`` gets every valid known message (heartbeats included); an
     awaitable result is run as a task so a slow handler never stalls the receive loop.
-    ``on_client_count(n)`` runs on every connect/disconnect. ``on_hang()`` runs once when a
+    ``on_client_count(n)`` runs on every connect/disconnect; ``on_connect(client)`` once per new
+    client (send it `hello`). ``on_hang()`` runs once when a
     client is connected and no valid heartbeat has arrived for ``hang_after`` seconds (the
     clock starts at each connect and each heartbeat; the next heartbeat or connect re-arms it).
     Callback errors are logged, never raised.
@@ -52,6 +53,7 @@ class ControlChannel:
         on_message: OnMessage,
         *,
         on_client_count: Callable[[int], None] | None = None,
+        on_connect: Callable[[TextSocket], None] | None = None,
         on_hang: Callable[[], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         hang_after: float = HANG_AFTER_S,
@@ -59,12 +61,14 @@ class ControlChannel:
     ) -> None:
         self._on_message = on_message
         self._on_client_count = on_client_count
+        self._on_connect = on_connect
         self._on_hang = on_hang
         self._clock = clock
         self._hang_after = hang_after
         self._max_bytes = max_message_bytes
         self._clients: list[TextSocket] = []
         self._last_beat: float | None = None  # None: watchdog disarmed
+        self._hidden = False  # the shell reported its window hidden: watchdog paused
         self._tasks: set[asyncio.Task[None]] = set()
         self._watchdog: asyncio.Task[None] | None = None
 
@@ -106,6 +110,11 @@ class ControlChannel:
         self._clients.append(client)
         self._last_beat = self._clock()
         self._notify_count()
+        if self._on_connect is not None:
+            try:
+                self._on_connect(client)
+            except Exception:
+                log.exception("control: on_connect failed")
 
     def disconnect(self, client: TextSocket) -> None:
         if client not in self._clients:
@@ -166,8 +175,13 @@ class ControlChannel:
         if not known:
             log.debug("control: ignored unknown type %r", message.get("type"))
             return
-        if message["type"] == "heartbeat":
+        if message["type"] == "heartbeat" and not self._hidden:
             self._last_beat = self._clock()
+        elif message["type"] == "visibility":
+            # A hidden/minimized window's timers are throttled past the hang threshold, so the
+            # watchdog pauses while hidden and re-arms from "now" when visible again.
+            self._hidden = not message["visible"]
+            self._last_beat = None if self._hidden else self._clock()
         self._dispatch(client, message)
 
     def _dispatch(self, client: TextSocket, msg: dict[str, Any]) -> None:

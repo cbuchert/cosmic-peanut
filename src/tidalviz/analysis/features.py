@@ -69,7 +69,7 @@ class AutoGain:
 
 
 class Waveform:
-    """Newest 512 samples: mono mix, plus left/right planes when stereo."""
+    """Newest N_WAVEFORM (2048) samples: mono mix, plus left/right planes when stereo."""
 
     fields: tuple[str, ...] = ("waveform", "left", "right")
 

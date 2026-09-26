@@ -3,6 +3,26 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Integration — app, bench, e2e (2026-09-26)
+
+- **Plugins were stuck at 20 fps in the app.** The shell's iframes ignore the pointer (so the
+  shell sees the mouse), so the native click that lifts WebKit's cross-origin rAF throttle never
+  reached the plugin. Now, while the active plugin reports < 40 fps, its iframe accepts the
+  pointer; the shell then takes keyboard focus back. The fix is occasionally flaky in the real
+  window (one bench run stayed at 22 fps); the host re-clicks every 2 s.
+- **No 120 Hz WebKit preference.** Turning off `PreferPageRenderingUpdatesNear60FPSEnabled` made
+  WKWebView pace frames irregularly: Orbit 48 fps / 26% dropped vs 59.9 fps / 0.56% at the default.
+- **Bench, Orbit, live TIDAL audio, 2560×1440 canvas (M4 Pro, window alone):** 59.9 fps, 0.7%
+  dropped, frame p99 37 ms (budget 20), audio-to-screen p95 ~33–57 ms (budget 50), analysis p50
+  0.19 ms, capture→send p95 0.7 ms, **host CPU ~20% (budget 10%)**. Two app windows at once push
+  latency to ~500 ms — measure alone.
+- **Host CPU breakdown (headless probe):** analysis thread ~7% (Analyzer 0.46–0.54 ms thread CPU
+  per hop live vs 44 µs in a hot loop: per-call numpy overhead on cold caches; `AnalysisContext.load`
+  alone is 0.18 ms), catap capture workers ~6%, event loop ~2%. QoS user-interactive doesn't help.
+  Reaching 10% needs far fewer numpy calls per hop (batching extractors) — open decision.
+- **Frame contract:** waveform is now 2,048 samples per channel (Cosmic Peanut): mono 12,640 B,
+  stereo 29,024 B.
+
 ## M1/M2 components — parallel lanes (2026-09-25)
 
 Built in parallel worktrees (audio, host, plugins, sdk, shell, viz, spike) against the M0

@@ -52,6 +52,9 @@ export default async function create(ctx) {
       const flashLevel = flash.step(kick, time.dt, ctx.reduceFlashing);
 
       gl.viewport(0, 0, ctx.size.width, ctx.size.height);
+      // Transparent canvas: clear to 0,0,0,0, never opaque black (see the end of scene.frag).
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
       gl.useProgram(program);
       gl.bindVertexArray(vao);
       gl.uniform2f(u.resolution, ctx.size.width, ctx.size.height);

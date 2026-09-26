@@ -41,6 +41,7 @@ export const CROSSFADE_MS = 1500;
 const READY_TIMEOUT_MS = 10_000;
 const REMOVE_DELAY_MS = 100; // let the SDK run dispose() before the iframe goes away
 const RING = 512;
+const THROTTLED_FPS = 40;
 
 /** @param {{ message: string; file?: string; line?: number }} e */
 export function formatError(e) {
@@ -219,6 +220,11 @@ export function createPluginHost(deps) {
         break;
       case "perf": {
         const { type: _t, ...perf } = m;
+        // WebKit runs a cross-origin iframe's rAF at 20 Hz until a click lands *inside* it
+        // (tools/spike/REPORT.md). The iframe normally ignores the pointer so the shell sees
+        // the mouse; while it's throttled, let the next click (the host's native one, or the
+        // user's) through, then take the pointer back.
+        if (slot === active) slot.iframe.style.pointerEvents = m.fps > 0 && m.fps < THROTTLED_FPS ? "auto" : "";
         onEvent({ kind: "perf", key, perf });
         break;
       }
@@ -303,6 +309,16 @@ export function createPluginHost(deps) {
     setSettings(partial) {
       Object.assign(settings, partial);
       for (const s of live()) post(s, { type: "settings", ...partial });
+    },
+
+    /**
+     * Pointer input on the stage, for the active plugin only (iframes don't get pointer
+     * events themselves, so the shell keeps its idle/overlay handling).
+     * @param {"down" | "move" | "up"} kind @param {number} x @param {number} y
+     * @param {number} dx @param {number} dy
+     */
+    pointer(kind, x, y, dx, dy) {
+      if (active?.port) post(active, { type: "pointer", kind, x, y, dx, dy });
     },
 
     /** @param {boolean} visible */

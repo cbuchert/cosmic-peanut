@@ -40,11 +40,11 @@ def test_level_reports_raw_rms_and_peak_of_the_newest_hop():
     assert abs(f.scalars[S["peak"]] - 0.5) < 0.01
 
 
-def test_waveform_is_the_newest_512_samples_with_stereo_planes():
+def test_waveform_is_the_newest_2048_samples_with_stereo_planes():
     src = SyntheticSource("sine1k", channels=2)
     f = last(src, 0.1)
     n = src.position
-    t = np.arange(n - 512, n) / 48000.0
+    t = np.arange(n - 2048, n) / 48000.0
     expected = 0.5 * np.sin(2 * np.pi * 1000.0 * t)
     np.testing.assert_allclose(f.waveform, expected, atol=1e-5)
     assert f.left is not None and f.right is not None

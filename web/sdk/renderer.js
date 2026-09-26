@@ -8,6 +8,10 @@ export const GL_OPTIONS = Object.freeze({
   powerPreference: /** @type {const} */ ("high-performance"),
   antialias: false,
   preserveDrawingBuffer: false,
+  // Transparent, premultiplied canvas: the shell supplies the backdrop (black, or the desktop
+  // when "Transparent background" is on). Plugins clear to 0,0,0,0 and output premultiplied color.
+  alpha: true,
+  premultipliedAlpha: true,
 });
 
 /** The requested renderer can't run here; `fallback` is the manifest's fallback entry id. */
@@ -59,7 +63,7 @@ export async function createRendererContext(kind, canvas, deps) {
       const context = /** @type {GPUCanvasContext | null} */ (canvas.getContext("webgpu"));
       if (!context) throw unavailable();
       const format = gpu.getPreferredCanvasFormat();
-      context.configure({ device, format, alphaMode: "opaque" });
+      context.configure({ device, format, alphaMode: "premultiplied" });
       h.gpu = { adapter, device, context, format };
       return h;
     }
@@ -68,6 +72,7 @@ export async function createRendererContext(kind, canvas, deps) {
       const THREE = await deps.importThree();
       const renderer = new THREE.WebGLRenderer({ canvas, ...GL_OPTIONS });
       renderer.setPixelRatio(1); // the SDK sizes the drawing buffer in device pixels itself
+      renderer.setClearColor(0x000000, 0);
       const aspect = (canvas.clientWidth || 1) / (canvas.clientHeight || 1);
       const defaults = () => {
         const camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);

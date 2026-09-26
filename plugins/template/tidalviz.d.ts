@@ -35,11 +35,11 @@ export interface AudioFrame {
   readonly bands: Float32Array;
   /** 1024-bin linear magnitude spectrum, normalized 0–1 (bin i ≈ i * sampleRate / 2048 Hz). */
   readonly spectrum: Float32Array;
-  /** Latest 512 samples, mono mix, −1 to 1. */
+  /** Latest 2048 samples, mono mix, −1 to 1 (overlaps between frames; read `.length`). */
   readonly waveform: Float32Array;
-  /** Latest 512 left-channel samples when the source is stereo, else null. */
+  /** Latest 2048 left-channel samples when the source is stereo, else null. */
   readonly left: Float32Array | null;
-  /** Latest 512 right-channel samples when the source is stereo, else null. */
+  /** Latest 2048 right-channel samples when the source is stereo, else null. */
   readonly right: Float32Array | null;
 
   /** Root-mean-square level of the latest hop, 0–1. */
@@ -181,6 +181,11 @@ export interface VisualizerContext {
    * most 3 per second (photosensitivity).
    */
   readonly reduceFlashing: boolean;
+  /**
+   * macOS "Reduce motion" (live). When true, default to gentler motion (e.g. stop
+   * self-orbiting cameras); users can still raise it through params.
+   */
+  readonly reduceMotion: boolean;
 
   /** Log to the host's plugin console (dev overlay). Strings only are rendered, never HTML. */
   log(...args: unknown[]): void;
@@ -199,6 +204,21 @@ export interface Visualizer {
   params?(changed: ParamValues): void;
   /** Optional. Release GPU resources, timers, listeners. */
   dispose?(): void;
+  /**
+   * Optional. Pointer input on the visual (drag to orbit, etc.). The event object is reused:
+   * read it during the call. Coordinates are CSS pixels in the canvas.
+   */
+  pointer?(e: PointerInput): void;
+}
+
+export interface PointerInput {
+  kind: "down" | "move" | "up";
+  /** Position in CSS pixels from the canvas's top-left. */
+  x: number;
+  y: number;
+  /** Movement since the previous event, CSS pixels. */
+  dx: number;
+  dy: number;
 }
 
 /** The entry module's default export. May be async. */

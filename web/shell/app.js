@@ -58,8 +58,10 @@ export function createApp(deps) {
   /** @type {Map<string, ParamValues>} */ const values = new Map();
   /** @type {string | null} */ let selected = null;
   /** @type {string[]} */ const history = [];
-  /** @type {Required<Pick<Settings, "quality" | "reduceFlashing" | "autoCycleSeconds" | "hudVisible">>} */
-  const settings = { quality: "auto", reduceFlashing: true, autoCycleSeconds: 0, hudVisible: false };
+  /** @type {Required<Pick<Settings, "quality" | "reduceFlashing" | "autoCycleSeconds" | "hudVisible" | "transparent">>} */
+  const settings = { quality: "auto", reduceFlashing: true, autoCycleSeconds: 0, hudVisible: false, transparent: false };
+  // Transparent: no backdrop, so the desktop shows behind the (alpha) plugin canvas.
+  const applyTransparent = () => root.classList.toggle("transparent", settings.transparent);
   let dev = false;
   let overlaysHidden = false;
   /** @type {PanelName | null} */ let openPanel = null;
@@ -164,7 +166,8 @@ export function createApp(deps) {
 
   const topbar = h(
     "header",
-    { class: "topbar overlay" },
+    // pywebview drags the frameless window from elements with this class.
+    { class: "topbar overlay pywebview-drag-region" },
     h("div", { class: "now" }, nowName, nowRepo),
     h(
       "div",
@@ -216,6 +219,34 @@ export function createApp(deps) {
     visible: () => doc.visibilityState !== "hidden",
     onEvent,
   });
+
+  // ---- pointer input: drags on the stage go to the active plugin -----------------------------
+  /** @type {{ id: number, x: number, y: number } | null} */
+  let drag = null;
+  /** @param {PointerEvent} e @param {"down" | "move" | "up"} kind */
+  const forward = (e, kind) => {
+    const r = stage.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    const dx = kind === "move" && drag ? x - drag.x : 0, dy = kind === "move" && drag ? y - drag.y : 0;
+    if (drag) (drag.x = x), (drag.y = y);
+    pluginHost.pointer(kind, x, y, dx, dy);
+  };
+  stage.addEventListener("pointerdown", (e) => {
+    drag = { id: e.pointerId, x: 0, y: 0 };
+    stage.setPointerCapture?.(e.pointerId);
+    forward(e, "down");
+  });
+  stage.addEventListener("pointermove", (e) => {
+    if (drag && e.pointerId === drag.id) forward(e, "move");
+  });
+  for (const type of ["pointerup", "pointercancel"]) {
+    stage.addEventListener(type, (e) => {
+      const pe = /** @type {PointerEvent} */ (e);
+      if (!drag || pe.pointerId !== drag.id) return;
+      forward(pe, "up");
+      drag = null;
+    });
+  }
 
   // ---- helpers -------------------------------------------------------------------------------
   /** @param {string} key */
@@ -304,6 +335,12 @@ export function createApp(deps) {
       send({ type: "settings", reduceFlashing: reduce.checked });
       pluginHost.setSettings({ reduceFlashing: reduce.checked });
     });
+    const transparent = /** @type {HTMLInputElement} */ (h("input", { id: "transparent", type: "checkbox", checked: settings.transparent }));
+    transparent.addEventListener("change", () => {
+      settings.transparent = transparent.checked;
+      applyTransparent();
+      send({ type: "settings", transparent: transparent.checked });
+    });
     const cycle = /** @type {HTMLSelectElement} */ (
       h("select", { id: "auto-cycle" }, AUTO_CYCLE_CHOICES.map((s) => h("option", { value: String(s) }, cycleLabel(s))))
     );
@@ -320,6 +357,7 @@ export function createApp(deps) {
       field("quality", "Quality", quality),
       h("p", { class: "hint muted" }, "Balanced caps resolution at 1.5×; Battery at 1× and 30 fps."),
       h("div", { class: "field field-inline" }, h("label", { for: "reduce-flashing" }, "Reduce flashing"), reduce),
+      h("div", { class: "field field-inline" }, h("label", { for: "transparent" }, "Transparent background"), transparent),
       field("auto-cycle", "Auto-cycle", cycle),
       h("h3", { class: "section-title" }, "Window"),
       h(
@@ -550,7 +588,24 @@ export function createApp(deps) {
   }
 
   doc.addEventListener("keydown", onKey);
-  doc.addEventListener("visibilitychange", () => pluginHost.setVisible(doc.visibilityState !== "hidden"));
+  // A click that lands in a plugin iframe (see the throttle note in pluginHost.js) moves keyboard
+  // focus into it, and the shell's keys would stop working. Plugins take no keyboard input, so
+  // take focus straight back.
+  doc.defaultView?.addEventListener("blur", () => {
+    setTimeout(() => {
+      const el = doc.activeElement;
+      if (el instanceof HTMLIFrameElement && stage.contains(el)) {
+        el.blur();
+        doc.defaultView?.focus();
+      }
+    }, 0);
+  });
+  doc.addEventListener("visibilitychange", () => {
+    const visible = doc.visibilityState !== "hidden";
+    pluginHost.setVisible(visible);
+    // Hidden pages' timers are throttled past the hang threshold: the host pauses its watchdog.
+    send({ type: "visibility", visible });
+  });
   sourceSel.addEventListener("change", () => {
     activeSource = sourceSel.value;
     send({ type: "setSource", id: sourceSel.value });
@@ -581,6 +636,7 @@ export function createApp(deps) {
         Object.assign(settings, msg.settings);
         pluginHost.setSettings({ quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality, dpr) });
         hud.setVisible(settings.hudVisible);
+        applyTransparent();
         renderSettings();
         renderSources();
         armCycle();

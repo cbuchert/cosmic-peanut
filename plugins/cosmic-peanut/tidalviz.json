@@ -1,0 +1,25 @@
+{
+  "apiVersion": 1,
+  "visualizers": [
+    {
+      "id": "cosmic-peanut",
+      "name": "Cosmic Peanut",
+      "description": "Waveform rings drift pole to pole around an invisible, slowly turning sphere.",
+      "author": "Tidalviz",
+      "entry": "src/cosmic-peanut.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/cosmic-peanut.jpg",
+      "params": [
+        { "id": "travel", "type": "number", "label": "Travel time", "min": 2, "max": 20, "step": 0.5, "default": 7 },
+        { "id": "amp", "type": "number", "label": "Amplitude", "min": 0, "max": 0.6, "step": 0.01, "default": 0.22 },
+        { "id": "detail", "type": "number", "label": "Detail", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
+        { "id": "pulse", "type": "number", "label": "Bass pulse", "min": 0, "max": 1, "step": 0.01, "default": 0.35 },
+        { "id": "orbit", "type": "number", "label": "Orbit speed", "min": -0.6, "max": 0.6, "step": 0.01, "default": 0.12 },
+        { "id": "bright", "type": "number", "label": "Brightness", "min": 0.2, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "density", "type": "select", "label": "Rings", "options": ["sparse", "medium", "dense"], "default": "medium" },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["nebula", "ember", "phosphor"], "default": "nebula" },
+        { "id": "lines", "type": "select", "label": "Lines", "options": ["soft", "fine"], "default": "soft" }
+      ]
+    }
+  ]
+}

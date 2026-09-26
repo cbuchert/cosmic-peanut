@@ -23,7 +23,7 @@ aligned offset, so the SDK wraps each in a `Float32Array` view without copying.
 | 8 | u32 | Frame index |
 | 12 | f32 | Sample rate (Hz) |
 | 16 | f64 | Host monotonic time (s) of the newest sample in this frame |
-| 24 | u16 × 4 | Counts: bands `B` (64), spectrum bins `S` (1024), waveform samples per channel `W` (512), scalars `C` (16) |
+| 24 | u16 × 4 | Counts: bands `B` (64), spectrum bins `S` (1024), waveform samples per channel `W` (2048), scalars `C` (16) |
 | 32 | f32 × C | Scalars (order below) |
 | 32+4C | f32 × B | Band levels 0–1 |
 | … | f32 × S | Magnitude spectrum, normalized |
@@ -31,8 +31,10 @@ aligned offset, so the SDK wraps each in a `Float32Array` view without copying.
 | … | f32 × W × 2 | Only when the stereo flag is set: left plane, then right plane |
 
 Decisions vs. the PRD: channels are **planar** (mono, then left, then right) rather than
-interleaved, so `waveform`, `left` and `right` are all zero-copy views. Size: 6,496 B mono,
-10,592 B stereo (~1 MB/s on loopback).
+interleaved, so `waveform`, `left` and `right` are all zero-copy views. Size: 12,640 B mono,
+29,024 B stereo (~2.7 MB/s on loopback). The waveform is the newest 2,048 samples, so
+consecutive frames overlap; plugins that need a long window (Cosmic Peanut's trigger search)
+get it without stitching frames, which the latest-only policy may drop.
 
 Scalar order (indices are stable; new scalars are appended, which does not bump the version):
 
@@ -62,8 +64,8 @@ class AudioFrame:
     scalars: NDArray[float32]   # shape (16,), SCALAR_NAMES order
     bands: NDArray[float32]     # (64,)
     spectrum: NDArray[float32]  # (1024,)
-    waveform: NDArray[float32]  # (512,) mono
-    left: NDArray[float32] | None; right: NDArray[float32] | None   # (512,) when stereo
+    waveform: NDArray[float32]  # (2048,) mono
+    left: NDArray[float32] | None; right: NDArray[float32] | None   # (2048,) when stereo
 
 # tidalviz/capture — PCM producers
 class AudioSource(Protocol):
@@ -179,6 +181,7 @@ Shell → host:
 | type | Fields |
 | --- | --- |
 | `heartbeat` | `t` — every 500 ms; 2 s without one (counted from connect or the last heartbeat, while ≥1 client is connected) ⇒ host reloads the web view with the active visualizer disabled |
+| `visibility` | `visible` — the window was hidden/minimized or shown; the hang watchdog pauses while hidden (WebKit throttles hidden pages' timers past 2 s) |
 | `select` | `key` — active visualizer changed (persisted) |
 | `params` | `key`, `values` (full set, persisted) |
 | `setSource` | `id` |
@@ -210,6 +213,7 @@ Shell → SDK (port):
 | `{type:"params", changed}` | |
 | `{type:"settings", quality?, maxDpr?, fpsCap?, reduceFlashing?}` | |
 | `{type:"visibility", visible}` | Hidden ⇒ SDK stops its rAF loop |
+| `{type:"pointer", kind, x, y, dx, dy}` | Drag on the stage, active plugin only. `kind` ∈ down/move/up; CSS px in the canvas. SDK validates and calls the plugin's `pointer` hook |
 | `{type:"dispose"}` | SDK calls `dispose()`, then the shell removes the iframe |
 
 SDK → shell (port):

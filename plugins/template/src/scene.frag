@@ -39,5 +39,11 @@ void main() {
   col += u_color * 0.35 * exp(-r * 4.0) * (0.4 + u_flash);   // soft core glow
   col += vec3(0.25, 0.35, 0.9) * 0.05 * u_treb * (1.0 - r);  // cool haze from the highs
 
-  fragColor = vec4(1.0 - exp(-col), 1.0);  // tone map: bright, never clipped
+  col = 1.0 - exp(-col);  // tone map: bright, never clipped
+
+  // The canvas is TRANSPARENT and PREMULTIPLIED: the app draws black behind it, or the desktop
+  // when "Transparent background" is on. Don't output alpha 1.0 (that paints a black box over the
+  // desktop). `col` is light on black, i.e. already premultiplied, so use its brightest channel as
+  // alpha: identical over black, glowing light over anything else.
+  fragColor = vec4(col, max(col.r, max(col.g, col.b)));
 }

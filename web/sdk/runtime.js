@@ -45,7 +45,9 @@ import { createPerfMeter } from "./perf.js";
  *   devicePixelRatio: () => number,
  *   fetch: (url: string) => Promise<Response>,
  *   createImageBitmap?: (b: Blob) => Promise<ImageBitmap>,
+ *   reduceMotion?: () => boolean,
  * }} RuntimeDeps
+ * `reduceMotion` is live: the page's `prefers-reduced-motion` (macOS Reduce motion).
  */
 
 /** @param {unknown} v @returns {v is Record<string, unknown>} */
@@ -69,6 +71,8 @@ function sanitizeParams(v) {
 
 /** Default DPR cap per quality preset (0 = native). */
 const PRESET_DPR = { auto: 0, high: 0, balanced: 1.5, battery: 1 };
+
+const POINTER_KINDS = new Set(["down", "move", "up"]);
 
 /** @param {RuntimeDeps} deps */
 export function createRuntime(deps) {
@@ -308,6 +312,9 @@ export function createRuntime(deps) {
       get reduceFlashing() {
         return reduceFlashing;
       },
+      get reduceMotion() {
+        return deps.reduceMotion?.() ?? false;
+      },
       log(...args) {
         port.postMessage({ type: "log", text: formatLog(args) });
       },
@@ -380,6 +387,9 @@ export function createRuntime(deps) {
     startLoop();
   }
 
+  /** @type {import("./tidalviz").PointerInput} */
+  const pointerEvent = { kind: "move", x: 0, y: 0, dx: 0, dy: 0 };
+
   /** @param {unknown} data a port message (untrusted: validated field by field) */
   function handleMessage(data) {
     if (data instanceof ArrayBuffer) {
@@ -413,6 +423,21 @@ export function createRuntime(deps) {
         if (visible) startLoop();
         else stopLoop();
         return;
+      case "pointer": {
+        const { kind, x, y, dx, dy } = data;
+        if (!POINTER_KINDS.has(/** @type {string} */ (kind))) return;
+        if (![x, y, dx, dy].every((v) => typeof v === "number" && Number.isFinite(v))) return;
+        const p = plugin;
+        if (!p?.pointer) return;
+        // One reused event object: no per-event allocation on the input path.
+        pointerEvent.kind = /** @type {"down" | "move" | "up"} */ (kind);
+        pointerEvent.x = /** @type {number} */ (x);
+        pointerEvent.y = /** @type {number} */ (y);
+        pointerEvent.dx = /** @type {number} */ (dx);
+        pointerEvent.dy = /** @type {number} */ (dy);
+        guard(() => p.pointer?.(pointerEvent));
+        return;
+      }
       case "dispose":
         dispose();
         port.postMessage({ type: "disposed" });
