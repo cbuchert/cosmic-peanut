@@ -8,6 +8,9 @@
  *   audio=proto  the Cosmic Peanut prototype's demo signal instead of the synth
  *   finish=1  gl.finish() inside the timed region, so the number includes GPU work
  *   lum=1     record mean frame luminance (for the flash-limiter check)
+ *   bg=light  a bright, busy backdrop behind the transparent canvas (default black, like the shell)
+ *   nocanvas=1  hide the canvas (screenshot the backdrop alone)
+ *   still=N   deterministic: seeded Math.random, fixed 1/60 s steps, stop after N frames
  */
 import { createProtoDemo, createSynth } from "./synth.js";
 
@@ -20,6 +23,36 @@ const measureLum = q.get("lum") === "1";
 const rep = Number(q.get("rep") ?? 1);
 const base = `/plugins/${repo}/`;
 const w = /** @type {any} */ (window);
+const still = Number(q.get("still") ?? 0);
+
+const bgEl = /** @type {HTMLElement} */ (document.getElementById("bg"));
+if (q.get("bg") === "light") {
+  bgEl.className = "light";
+  const words = "Finder Mail Notes Terminal Safari Music Photos Calendar Xcode Preview".split(" ");
+  const hues = ["#e63946", "#2a9d8f", "#457b9d", "#f4a261", "#1d3557", "#ffffff"];
+  for (let i = 0; i < 60; i++) {
+    const el = document.createElement("span");
+    el.textContent = words[i % words.length];
+    bgEl.append(el);
+    if (i % 5 === 4) {
+      const box = document.createElement("span");
+      box.className = "box";
+      box.style.background = hues[(i / 5) % hues.length | 0];
+      bgEl.append(box);
+    }
+  }
+}
+if (q.get("nocanvas") === "1") /** @type {HTMLElement} */ (document.getElementById("c")).style.display = "none";
+if (still) {
+  // mulberry32: same stars, same hats, every run.
+  let seed = 1;
+  Math.random = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 /** @type {string[]} */
 const errors = [];
@@ -65,15 +98,16 @@ async function main() {
       image: async (/** @type {string} */ p) => createImageBitmap(await (await fetch(base + p)).blob()),
     },
   };
+  // Same context options as web/sdk/renderer.js: transparent, premultiplied canvases.
+  const glOpts = { powerPreference: /** @type {const} */ ("high-performance"), antialias: false, preserveDrawingBuffer: false, alpha: true, premultipliedAlpha: true };
   /** @type {WebGL2RenderingContext | null} */
   let gl = null;
-  if (entry.renderer === "2d") ctx.ctx2d = canvas.getContext("2d", { alpha: false });
-  if (entry.renderer === "webgl2") {
-    gl = ctx.gl = canvas.getContext("webgl2", { powerPreference: "high-performance", antialias: false, preserveDrawingBuffer: false, alpha: false });
-  }
+  if (entry.renderer === "2d") ctx.ctx2d = canvas.getContext("2d", { alpha: true });
+  if (entry.renderer === "webgl2") gl = ctx.gl = /** @type {WebGL2RenderingContext} */ (canvas.getContext("webgl2", glOpts));
   if (entry.renderer === "three") {
     const THREE = await import("three");
-    const renderer = new THREE.WebGLRenderer({ canvas, powerPreference: "high-performance", antialias: false });
+    const renderer = new THREE.WebGLRenderer({ canvas, ...glOpts });
+    renderer.setClearColor(0x000000, 0);
     renderer.setPixelRatio(dpr);
     renderer.setSize(size.cssWidth, size.cssHeight, false);
     const camera = new THREE.PerspectiveCamera(60, size.width / size.height, 0.1, 1000);
@@ -151,6 +185,7 @@ async function main() {
   /** @param {number} ts */
   function tick(ts) {
     if (!running) return;
+    if (still) ts = start + (frames * 1000) / 60;
     const dt = Math.min(0.1, (ts - last) / 1000);
     if (frames > 0) intervals.push(ts - last);
     last = ts;
@@ -175,6 +210,10 @@ async function main() {
       let s = 0;
       for (let i = 0; i < d.length; i += 4) s += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
       lum.push(s / (d.length / 4) / 255);
+    }
+    if (still && frames >= still) {
+      w.__still = true;
+      return;
     }
     requestAnimationFrame(tick);
   }

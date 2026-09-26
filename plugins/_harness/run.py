@@ -2,6 +2,9 @@
 
 Serve the repo root first (python3 -m http.server <port> --bind 127.0.0.1), then:
     uv run python plugins/_harness/run.py --port <port> [--browser webkit] [bars undertow ...]
+    uv run python plugins/_harness/run.py --port <port> --shots DIR [--tag after]
+        deterministic stills of each visualizer over black and over a light, busy backdrop
+        (plus the backdrop alone), for checking transparency; no timing.
 """
 
 import argparse
@@ -15,7 +18,9 @@ VIZ = {
     "undertow": "builtin",
     "orbit": "builtin",
     "halo": "template",
+    "cosmic-peanut": "cosmic-peanut",
 }
+BACKDROPS = ("black", "light")
 OUT = Path(__file__).resolve().parent / "out"
 
 
@@ -47,6 +52,27 @@ def run(page, url: str, seconds: float) -> dict:
     return page.evaluate("window.__stats ? window.__stats() : {errors: window.__errors}")
 
 
+def shots(browser, base: str, vizs: list[str], out: Path, tag: str, prefix: str) -> None:
+    """Deterministic stills (`still=150`: 2.5 s of fixed 60 Hz steps) over each backdrop."""
+    out.mkdir(parents=True, exist_ok=True)
+    page = browser.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=2)
+    for bg in BACKDROPS:
+        page.goto(f"{base}?viz=none&bg={bg}&nocanvas=1")
+        page.wait_for_function("window.__ready === true", timeout=20000)
+        page.screenshot(path=out / f"backdrop-{bg}.png")
+    for viz in vizs:
+        for bg in BACKDROPS:
+            page.goto(f"{base}?repo={prefix}{VIZ[viz]}&viz={viz}&bg={bg}&still=150")
+            page.wait_for_function(
+                "window.__still === true || window.__errors.length > 0", timeout=30000
+            )
+            page.wait_for_timeout(300)
+            errors = page.evaluate("window.__errors")
+            page.screenshot(path=out / f"{viz}-{bg}-{tag}.png")
+            print(viz, bg, tag, errors or "ok", flush=True)
+    page.close()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("viz", nargs="*", default=list(VIZ))
@@ -56,12 +82,19 @@ def main() -> None:
     ap.add_argument("--rep", type=int, default=10, help="frames per rAF when timing")
     ap.add_argument("--flash", action="store_true", help="also run the reduceFlashing check")
     ap.add_argument("--query", default="", help="extra query string, e.g. p.mirror=true")
+    ap.add_argument("--shots", type=Path, help="write backdrop stills here instead of timing")
+    ap.add_argument("--tag", default="after", help="file-name tag for --shots")
+    ap.add_argument("--prefix", default="", help="plugin folder prefix under /plugins/")
     args = ap.parse_args()
     OUT.mkdir(exist_ok=True)
     base = f"http://127.0.0.1:{args.port}/plugins/_harness/index.html"
     results = {}
     with sync_playwright() as p:
         browser = getattr(p, args.browser).launch()
+        if args.shots:
+            shots(browser, base, args.viz, args.shots, args.tag, args.prefix)
+            browser.close()
+            return
         for viz in args.viz:
             page = browser.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=2)
             console = []
