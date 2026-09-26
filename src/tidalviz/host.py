@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import logging
 import struct
+import subprocess
 import time
 from collections import deque
 from collections.abc import Callable, Coroutine, Sequence
@@ -38,6 +39,8 @@ PROTOCOL_VERSION = 1
 THROTTLED_FPS = 40  # WebKit runs a never-clicked cross-origin iframe's rAF at 20 Hz
 CLICK_INTERVAL_S = 2.0
 STATS_INTERVAL_S = 1.0
+# System Settings → Privacy & Security → Screen & System Audio Recording (process taps).
+PERMISSIONS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
 # Settings the shell owns; anything else in a `settings` message is ignored.
 SHELL_SETTINGS = (
     "quality",
@@ -56,6 +59,10 @@ class WindowControl(Protocol):
     def click_plugin(self) -> None: ...
     def recover_webview(self) -> None: ...
     def pick_folder(self) -> str | None: ...
+
+
+def open_url(url: str) -> None:
+    subprocess.run(["/usr/bin/open", url], check=False)
 
 
 def make_source(source_id: str) -> AudioSource:
@@ -83,6 +90,7 @@ class Host:
         dev: bool = False,
         hang_after: float = HANG_AFTER_S,
         fetcher: GitFetcher | None = None,
+        open_url: Callable[[str], None] = open_url,
     ) -> None:
         root.mkdir(parents=True, exist_ok=True)
         self.settings = Settings(root / "settings.json")
@@ -90,6 +98,7 @@ class Host:
             self.settings.data["source"] = source_id  # this launch only; not persisted
         self.registry = PluginRegistry(root, builtin_dirs, fetcher=fetcher)
         self.window = window
+        self._open_url = open_url
         self.dev = dev
         self.servers = HostServers(
             self.registry,
@@ -290,6 +299,8 @@ class Host:
                 self._spawn(self._registry_op("Rollback", self.registry.rollback, msg["repo"]))
             case "remove":
                 self._spawn(self._registry_op("Remove", self.registry.remove, msg["repo"]))
+            case "openPermissions":
+                self._open_url(PERMISSIONS_URL)
             case "addFolder":
                 self._spawn(self._add_folder(msg.get("path")))
             case "window":

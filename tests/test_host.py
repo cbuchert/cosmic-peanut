@@ -434,3 +434,28 @@ async def test_add_folder_with_a_path_registers_a_dev_repo(installer, http, tmp_
     await shell.send({"type": "addFolder", "path": str(folder)})
     viz = await shell.next_json("visualizers")
     assert any(v["id"] == "pulse" and v["dev"] for v in viz["visualizers"])
+
+
+@pytest.mark.asyncio
+async def test_open_permissions_opens_the_audio_capture_privacy_pane(
+    tmp_path: Path, window: FakeWindow, http
+):
+    opened: list[str] = []
+    h = Host(
+        root=tmp_path / "home",
+        builtin_dirs=BUILTINS,
+        source_id="synthetic:demo",
+        window=window,
+        open_url=opened.append,
+    )
+    await h.start()
+    try:
+        shell = await connect(h, http)
+        await shell.next_json("hello")
+        await shell.send({"type": "openPermissions"})
+        await asyncio.sleep(0.2)
+        assert opened == [
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+        ]
+    finally:
+        await h.stop()

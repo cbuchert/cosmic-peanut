@@ -267,6 +267,20 @@ describe("pluginHost", () => {
     ]);
   });
 
+  it("lets clicks reach a throttled plugin iframe until it runs at display rate", () => {
+    const { host, load, made } = setup();
+    host.show(vizA, {});
+    const pa = load(0);
+    pa.emit({ type: "ready" });
+    const perf = (/** @type {number} */ fps) =>
+      pa.emit({ type: "perf", fps, frameMsP50: 2, frameMsP99: 5, pluginMsP50: 1, renderScale: 1, dropped: 0 });
+    expect(made[0].iframe.style.pointerEvents).toBe("");
+    perf(21); // WebKit's never-clicked cross-origin iframe rate
+    expect(made[0].iframe.style.pointerEvents).toBe("auto");
+    perf(60);
+    expect(made[0].iframe.style.pointerEvents).toBe("");
+  });
+
   it("forwards pointer input to the active plugin only", () => {
     const { host, load } = setup();
     host.show(vizA, {});

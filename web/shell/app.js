@@ -578,6 +578,18 @@ export function createApp(deps) {
   }
 
   doc.addEventListener("keydown", onKey);
+  // A click that lands in a plugin iframe (see the throttle note in pluginHost.js) moves keyboard
+  // focus into it, and the shell's keys would stop working. Plugins take no keyboard input, so
+  // take focus straight back.
+  doc.defaultView?.addEventListener("blur", () => {
+    setTimeout(() => {
+      const el = doc.activeElement;
+      if (el instanceof HTMLIFrameElement && stage.contains(el)) {
+        el.blur();
+        doc.defaultView?.focus();
+      }
+    }, 0);
+  });
   doc.addEventListener("visibilitychange", () => pluginHost.setVisible(doc.visibilityState !== "hidden"));
   sourceSel.addEventListener("change", () => {
     activeSource = sourceSel.value;
