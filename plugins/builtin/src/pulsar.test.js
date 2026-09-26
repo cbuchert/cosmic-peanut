@@ -33,7 +33,7 @@ function audioFrame(loud) {
 }
 
 /** Run `frames` frames at 60 Hz; returns the log of the last one. */
-function run(/** @type {ReturnType<typeof setup>} */ s, frames, loud = true) {
+function run(/** @type {ReturnType<typeof setup>} */ s, /** @type {number} */ frames, loud = true) {
   const audio = audioFrame(loud);
   for (let f = 0; f < frames; f++) {
     s.log.length = 0;

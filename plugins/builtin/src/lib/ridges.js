@@ -239,18 +239,33 @@ export function ridgeLayout(w, h, lines, height, out) {
 /**
  * Draw the history with hidden-line removal on a transparent canvas: back to front, each line
  * first erases what lies behind it (destination-out fill under its curve), then strokes itself.
+ *
+ * To halve the path work, a back line strokes the same closed path it erased with. Its closing
+ * edges stay invisible: the sides run outside the plot (clipped away) and the bottom edge lies
+ * below the next line's baseline, inside the region that line erases at full alpha. The two
+ * front lines (the newest fades in, so its erase is partial) stroke just their curve.
  * @param {CanvasRenderingContext2D} g
  * @param {ReturnType<typeof createRing>} ring
+ * @param {Int16Array} idx which points to draw, ascending (see {@link drawOrder})
  * @param {{ left: number, width: number, bottom: number, spacing: number, amp: number }} lay
  * @param {number} frac scroll fraction 0–1 from {@link advanceScroll}
  * @param {string} color stroke color
  * @param {number} lineWidth pixels
+ * @param {number} h canvas height, pixels
  */
-export function drawRidges(g, ring, lay, frac, color, lineWidth) {
+export function drawRidges(g, ring, idx, lay, frac, color, lineWidth, h) {
   const { data, points, lines } = ring;
   const { left, spacing, amp } = lay;
   const dx = lay.width / (points - 1);
   const right = left + lay.width;
+  // Erase depth below a line's own baseline: past the next baseline by a spacing, so the next
+  // line's erase covers this line's bottom edge (ridges dip at most a wiggle below baseline).
+  const depth = 2 * spacing + lineWidth;
+  const out = lineWidth + 2;
+  g.save();
+  g.beginPath();
+  g.rect(left, 0, lay.width, h);
+  g.clip();
   g.strokeStyle = color;
   g.lineWidth = lineWidth;
   g.lineJoin = "round";
@@ -260,19 +275,21 @@ export function drawRidges(g, ring, lay, frac, color, lineWidth) {
     // The oldest line fades out as it leaves, the newest fades in as it arrives: no popping.
     g.globalAlpha = age === lines - 1 ? 1 - frac : age === 0 ? frac : 1;
 
-    tracePoints(g, data, o, points, left, dx, base, amp);
-    const floor = base + spacing;
-    g.lineTo(right, floor);
-    g.lineTo(left, floor);
+    tracePoints(g, data, o, idx, left, dx, base, amp);
+    const floor = base + depth;
+    g.lineTo(right + out, base - data[o + points - 1] * amp);
+    g.lineTo(right + out, floor);
+    g.lineTo(left - out, floor);
+    g.lineTo(left - out, base - data[o] * amp);
     g.closePath();
     g.globalCompositeOperation = "destination-out";
     g.fill();
 
     g.globalCompositeOperation = "source-over";
-    tracePoints(g, data, o, points, left, dx, base, amp);
+    if (age < 2) tracePoints(g, data, o, idx, left, dx, base, amp);
     g.stroke();
   }
-  g.globalAlpha = 1;
+  g.restore();
 }
 
 /**
@@ -280,14 +297,35 @@ export function drawRidges(g, ring, lay, frac, color, lineWidth) {
  * @param {CanvasRenderingContext2D} g
  * @param {Float32Array} data
  * @param {number} o row offset
- * @param {number} points
+ * @param {Int16Array} idx
  * @param {number} left
  * @param {number} dx
  * @param {number} base baseline y
  * @param {number} amp
  */
-function tracePoints(g, data, o, points, left, dx, base, amp) {
+function tracePoints(g, data, o, idx, left, dx, base, amp) {
   g.beginPath();
-  g.moveTo(left, base - data[o] * amp);
-  for (let i = 1; i < points; i++) g.lineTo(left + i * dx, base - data[o + i] * amp);
+  g.moveTo(left + idx[0] * dx, base - data[o + idx[0]] * amp);
+  for (let k = 1; k < idx.length; k++) {
+    const i = idx[k];
+    g.lineTo(left + i * dx, base - data[o + i] * amp);
+  }
+}
+
+/**
+ * Indices of the points worth drawing: all of them where the envelope is non-zero, every
+ * `tailStride`-th in the flat tails (they only wiggle), plus both ends. Built once, not per frame.
+ * @param {Float32Array} env
+ * @param {number} tailStride
+ */
+export function drawOrder(env, tailStride) {
+  const last = env.length - 1;
+  /** @type {number[]} */
+  const idx = [];
+  for (let i = 0; i <= last; i++) {
+    // Keep the tail points next to the bump too, so the rise starts where it should.
+    const near = env[i] > 0 || (i > 0 && env[i - 1] > 0) || (i < last && env[i + 1] > 0);
+    if (near || i % tailStride === 0 || i === last) idx.push(i);
+  }
+  return Int16Array.from(idx);
 }

@@ -7,6 +7,7 @@ import {
   buildLine,
   centralEnvelope,
   createRing,
+  drawOrder,
   drawRidges,
   resizeRing,
   ridgeLayout,
@@ -231,6 +232,14 @@ describe("buildLine", () => {
     expect(peaks).toBeGreaterThanOrEqual(3);
   });
 
+  it("never dips more than a wiggle below the baseline", () => {
+    const out = line();
+    for (let seed = 0; seed < 50; seed++) {
+      buildLine(out, 0, env, bandsWith(0, 63, 1), noise, 2, seed);
+      expect(Math.min(...out)).toBeGreaterThan(-0.02);
+    }
+  });
+
   it("wiggles a little in the tails with the waveform, but stays low there", () => {
     const out = line();
     buildLine(out, 0, env, bandsWith(0, 63, 1), noise, 2, 3);
@@ -278,6 +287,7 @@ describe("ridgeLayout", () => {
 describe("drawRidges", () => {
   const P = 5;
   const lay = { left: 100, width: 400, top: 50, bottom: 350, spacing: 100, amp: 200 };
+  const ALL = Int16Array.from([0, 1, 2, 3, 4]);
   /** Four lines; the row pushed k-th (k = 1…4) has the value k/10 at every point. */
   function ring4() {
     const r = createRing(4, P);
@@ -290,10 +300,14 @@ describe("drawRidges", () => {
   /** Split the log into per-draw-call segments: the path ops before each fill/stroke. */
   function draws(/** @type {ReturnType<typeof fakeContext>["log"]} */ log) {
     const out = [];
+    /** @type {typeof log} */
     let path = [];
+    let pathId = 0;
     for (const e of log) {
-      if (e.op === "begin") path = [];
-      else if (e.op === "fill" || e.op === "stroke") out.push({ ...e, path });
+      if (e.op === "begin") {
+        path = [];
+        pathId++;
+      } else if (e.op === "fill" || e.op === "stroke") out.push({ ...e, path: path.slice(), pathId });
       else path.push(e);
     }
     return out;
@@ -301,7 +315,7 @@ describe("drawRidges", () => {
 
   it("erases under each line (destination-out) and then strokes it (source-over)", () => {
     const { log, ctx } = fakeContext();
-    drawRidges(ctx, ring4(), lay, 0, "#ffffff", 3);
+    drawRidges(ctx, ring4(), ALL, lay, 0, "#ffffff", 3, 400);
     const d = draws(log);
     expect(d.map((e) => `${e.op}:${e.gco}`)).toEqual(
       Array(4).fill(["fill:destination-out", "stroke:source-over"]).flat(),
@@ -314,26 +328,77 @@ describe("drawRidges", () => {
 
   it("draws back to front: oldest (top) line first, newest (bottom) last", () => {
     const { log, ctx } = fakeContext();
-    drawRidges(ctx, ring4(), lay, 0, "#fff", 1);
+    drawRidges(ctx, ring4(), ALL, lay, 0, "#fff", 1, 400);
     const strokes = draws(log).filter((e) => e.op === "stroke");
     // Baselines 50, 150, 250, 350 minus value × amp (oldest row holds 0.1).
     expect(strokes.map((s) => s.path[0].y)).toEqual([50 - 20, 150 - 40, 250 - 60, 350 - 80].map((v) => expect.closeTo(v, 4)));
   });
 
-  it("strokes only the curve, but fills a closed region reaching below the line's baseline", () => {
+  it("draws only the points listed in `idx`, at their own x", () => {
     const { log, ctx } = fakeContext();
-    drawRidges(ctx, ring4(), lay, 0, "#fff", 1);
-    const [fill, stroke] = draws(log);
-    expect(stroke.path.map((p) => p.op)).toEqual(["move", "line", "line", "line", "line"]);
-    expect(stroke.path.map((p) => p.x)).toEqual([100, 200, 300, 400, 500]);
-    expect(fill.path.at(-1)?.op).toBe("close");
-    const lowest = Math.max(...fill.path.filter((p) => p.y !== undefined).map((p) => /** @type {number} */ (p.y)));
-    expect(lowest).toBeGreaterThan(50);
+    drawRidges(ctx, ring4(), Int16Array.from([0, 2, 4]), lay, 0, "#fff", 1, 400);
+    const d = draws(log);
+    const front = d[d.length - 1];
+    expect(front.path.map((p) => p.x)).toEqual([100, 300, 500]);
+    expect(d[0].path.slice(0, 3).map((p) => p.x)).toEqual([100, 300, 500]);
+  });
+
+  it("clips to the plot's width for the whole draw", () => {
+    const { log, ctx } = fakeContext();
+    drawRidges(ctx, ring4(), ALL, lay, 0, "#fff", 1, 400);
+    const ops = log.map((e) => e.op);
+    expect(ops.slice(0, 4)).toEqual(["save", "begin", "rect", "clip"]);
+    expect(log[2]).toMatchObject({ x: 100, w: 400 });
+    expect(ops.at(-1)).toBe("restore");
+  });
+
+  it("front two lines stroke only their curve; back lines stroke the path they erased with, whose closing edges stay hidden", () => {
+    const { log, ctx } = fakeContext();
+    drawRidges(ctx, ring4(), ALL, lay, 0, "#fff", 2, 400);
+    const d = draws(log);
+    const strokes = d.filter((e) => e.op === "stroke");
+    for (const s of strokes.slice(-2)) {
+      expect(s.path.map((p) => p.op)).toEqual(["move", "line", "line", "line", "line"]);
+      expect(s.path.map((p) => p.x)).toEqual([100, 200, 300, 400, 500]);
+    }
+    const lowest = (/** @type {typeof d[number]} */ f) =>
+      Math.max(...f.path.filter((p) => p.y !== undefined).map((p) => /** @type {number} */ (p.y)));
+    for (let k = 0; k < 2; k++) {
+      const [fill, stroke, nextFill] = [d[2 * k], d[2 * k + 1], d[2 * k + 2]];
+      expect(stroke.pathId).toBe(fill.pathId); // one trace, no beginPath in between
+      const nextBase = 50 + (k + 1) * 100;
+      expect(fill.path.at(-1)?.op).toBe("close");
+      // The closing edges: from the curve's last point round to its first (closePath).
+      const pts = [...fill.path.slice(P - 1, -1), fill.path[0]];
+      let crossing = 0;
+      for (let i = 1; i < pts.length; i++) {
+        const [a, b] = /** @type {{ x: number, y: number }[]} */ ([pts[i - 1], pts[i]]);
+        // A segment entering the plot's interior is visible unless buried: below the next
+        // line's baseline and inside the region the next line erases, with stroke margin.
+        if (Math.max(a.x, b.x) <= 100.5 || Math.min(a.x, b.x) >= 499.5) continue;
+        crossing++;
+        for (const y of [a.y, b.y]) {
+          expect(y).toBeGreaterThan(nextBase + 2);
+          expect(y).toBeLessThan(lowest(nextFill) - 2);
+        }
+      }
+      expect(crossing).toBe(1); // just the bottom edge
+    }
+  });
+
+  it("every erase reaches below its own baseline by more than a line spacing", () => {
+    const { log, ctx } = fakeContext();
+    drawRidges(ctx, ring4(), ALL, lay, 0, "#fff", 2, 400);
+    const fills = draws(log).filter((e) => e.op === "fill");
+    fills.forEach((f, k) => {
+      const lowest = Math.max(...f.path.filter((p) => p.y !== undefined).map((p) => /** @type {number} */ (p.y)));
+      expect(lowest).toBeGreaterThan(50 + k * 100 + 100);
+    });
   });
 
   it("offsets every line up by the scroll fraction and fades the oldest out, the newest in", () => {
     const { g, log, ctx } = fakeContext();
-    drawRidges(ctx, ring4(), lay, 0.25, "#fff", 1);
+    drawRidges(ctx, ring4(), ALL, lay, 0.25, "#fff", 1, 400);
     const strokes = draws(log).filter((e) => e.op === "stroke");
     expect(strokes[3].path[0].y).toBeCloseTo(350 - 25 - 80);
     expect(strokes.map((s) => s.alpha)).toEqual([0.75, 1, 1, 0.25]);
@@ -341,5 +406,21 @@ describe("drawRidges", () => {
     expect(fills.map((s) => s.alpha)).toEqual([0.75, 1, 1, 0.25]);
     expect(g.globalAlpha).toBe(1);
     expect(g.globalCompositeOperation).toBe("source-over");
+  });
+});
+
+describe("drawOrder", () => {
+  it("keeps every point of the bump, thins the flat tails, and always keeps both ends", () => {
+    const env = new Float32Array(97);
+    centralEnvelope(env, 0.25);
+    const idx = drawOrder(env, 4);
+    const list = Array.from(idx);
+    expect(list[0]).toBe(0);
+    expect(list.at(-1)).toBe(96);
+    for (let i = 1; i < list.length; i++) expect(list[i]).toBeGreaterThan(list[i - 1]);
+    for (let i = 0; i < 97; i++) if (env[i] > 0) expect(list).toContain(i);
+    const tail = list.filter((i) => env[i] === 0).length;
+    const tailTotal = env.filter((v) => v === 0).length;
+    expect(tail).toBeLessThan(tailTotal / 3);
   });
 });

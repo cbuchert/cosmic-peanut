@@ -102,7 +102,11 @@ def test_template_readme_covers_the_workflow():
 
 def test_pulsar_manifest():
     (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "pulsar"]
-    assert (v["name"], v["entry"], v["thumbnail"]) == ("Pulsar", "src/pulsar.js", "thumbs/pulsar.jpg")
+    assert (v["name"], v["entry"], v["thumbnail"]) == (
+        "Pulsar",
+        "src/pulsar.js",
+        "thumbs/pulsar.jpg",
+    )
     params = {p["id"]: p for p in v["params"]}
     assert list(params) == ["lines", "speed", "height", "color", "lineWidth"]
     assert params["lines"]["default"] == "80"

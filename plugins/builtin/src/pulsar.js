@@ -13,6 +13,7 @@ import {
   buildLine,
   centralEnvelope,
   createRing,
+  drawOrder,
   drawRidges,
   ENV_HALF_WIDTH,
   ridgeLayout,
@@ -21,7 +22,9 @@ import {
   stepGain,
 } from "./lib/ridges.js";
 
-const POINTS = 161;
+const POINTS = 97;
+/** Draw every n-th point of the flat tails (they only wiggle): keeps path work low. */
+const TAIL_STRIDE = 4;
 /** Manifest default of the Speed param (lines per second). */
 const DEFAULT_SPEED = 10;
 /** Used instead of the default when macOS "Reduce motion" is on. */
@@ -36,6 +39,7 @@ export default function create(ctx) {
   let lineWidth = 1;
   const env = new Float32Array(POINTS);
   centralEnvelope(env, ENV_HALF_WIDTH);
+  const idx = drawOrder(env, TAIL_STRIDE);
   const scroll = { frac: 0 };
   const gainState = { level: 0.5 };
   let gain = 1;
@@ -67,7 +71,7 @@ export default function create(ctx) {
 
       const { width: w, height: h } = ctx.size;
       g.clearRect(0, 0, w, h);
-      drawRidges(g, ring, lay, scroll.frac, color, lineWidth);
+      drawRidges(g, ring, idx, lay, scroll.frac, color, lineWidth, h);
     },
 
     resize() {
