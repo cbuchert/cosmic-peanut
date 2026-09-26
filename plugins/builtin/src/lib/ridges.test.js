@@ -1,6 +1,10 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { advanceScroll, bandAt, centralEnvelope, createRing, resizeRing, ringPush, ringRow } from "./ridges.js";
+import {
+  advanceScroll,
+  bandAt,
+  buildLine,
+  centralEnvelope, createRing, resizeRing, ringPush, ringRow, stepGain } from "./ridges.js";
 
 const ramp = Float32Array.from({ length: 64 }, (_, i) => i / 63);
 
@@ -95,5 +99,134 @@ describe("ring history", () => {
     push(big, 5);
     expect(big.data[ringRow(big, 0)]).toBe(5);
     expect(big.data[ringRow(big, 1)]).toBe(4);
+  });
+});
+
+describe("stepGain", () => {
+  /** Gain after `seconds` of a steady `level` at 60 Hz. */
+  function settle(/** @type {number} */ level, seconds = 40, state = { level: 0.5 }) {
+    let g = 0;
+    for (let f = 0; f < seconds * 60; f++) g = stepGain(state, level, 1 / 60);
+    return g;
+  }
+
+  it("brings quiet and loud tracks to the same peak height", () => {
+    const quiet = 0.2 * settle(0.2);
+    const loud = 0.9 * settle(0.9);
+    expect(quiet).toBeCloseTo(loud, 2);
+    expect(loud).toBeGreaterThan(0.5);
+  });
+
+  it("is slow: a sudden jump barely moves the gain within a frame", () => {
+    const state = { level: 0.3 };
+    const before = settle(0.3, 20, state);
+    const after = stepGain(state, 1, 1 / 60);
+    expect(after / before).toBeGreaterThan(0.9);
+  });
+
+  it("stays bounded in silence", () => {
+    const g = settle(0, 60);
+    expect(Number.isFinite(g)).toBe(true);
+    expect(g).toBeLessThanOrEqual(6);
+  });
+});
+
+describe("buildLine", () => {
+  const P = 161;
+  const env = new Float32Array(P);
+  centralEnvelope(env, 0.25);
+  const silentWave = new Float32Array(2048);
+  const noise = Float32Array.from({ length: 2048 }, (_, i) => Math.sin(i * 12.9898) * 0.4 + Math.sin(i * 0.05) * 0.2);
+  const zero = new Float32Array(64);
+  /** @param {number} lo @param {number} hi @param {number} v */
+  const bandsWith = (lo, hi, v) => Float32Array.from({ length: 64 }, (_, i) => (i >= lo && i <= hi ? v : 0));
+  const line = () => new Float32Array(P);
+  const maxAbs = (/** @type {Float32Array} */ a, from = 0, to = a.length) => {
+    let m = 0;
+    for (let i = from; i < to; i++) m = Math.max(m, Math.abs(a[i]));
+    return m;
+  };
+
+  it("is nearly flat in silence", () => {
+    const out = line();
+    const raw = buildLine(out, 0, env, zero, silentWave, 1, 7);
+    expect(raw).toBe(0);
+    expect(maxAbs(out)).toBeLessThan(0.01);
+  });
+
+  it("returns the raw (pre-gain) peak level of the enveloped bands", () => {
+    expect(buildLine(line(), 0, env, bandsWith(0, 63, 0.5), silentWave, 3, 1)).toBeCloseTo(0.5, 2);
+  });
+
+  it("puts the bass in the middle and higher bands toward the bump's edges", () => {
+    const bass = line();
+    buildLine(bass, 0, env, bandsWith(0, 3, 1), silentWave, 1, 1);
+    expect(bass[80]).toBeGreaterThan(0.3);
+    expect(maxAbs(bass, 0, 65)).toBeLessThan(bass[80] * 0.2);
+
+    const high = line();
+    buildLine(high, 0, env, bandsWith(24, 36, 1), silentWave, 1, 1);
+    expect(high[80]).toBeLessThan(0.02);
+    const argmax = (/** @type {number} */ from, /** @type {number} */ to) => {
+      let best = from;
+      for (let i = from; i < to; i++) if (high[i] > high[best]) best = i;
+      return best;
+    };
+    const left = argmax(0, 81);
+    const right = argmax(80, P);
+    expect(high[left]).toBeGreaterThan(0.05);
+    expect(high[right]).toBeGreaterThan(0.05);
+    expect(80 - left).toBeGreaterThan(10);
+    expect(right - 80).toBeGreaterThan(10);
+  });
+
+  it("writes at the given offset and nowhere else", () => {
+    const out = new Float32Array(P * 3).fill(9);
+    buildLine(out, P, env, bandsWith(0, 63, 0.5), noise, 1, 1);
+    expect(out[P - 1]).toBe(9);
+    expect(out[2 * P]).toBe(9);
+    expect(out[P + 80]).not.toBe(9);
+  });
+
+  it("jitter is deterministic given the same audio and seed", () => {
+    const a = line();
+    const b = line();
+    buildLine(a, 0, env, bandsWith(0, 63, 0.6), noise, 1, 5);
+    buildLine(b, 0, env, bandsWith(0, 63, 0.6), noise, 1, 5);
+    expect(b).toEqual(a);
+  });
+
+  it("changes with the waveform and with the seed", () => {
+    const a = line();
+    const b = line();
+    const c = line();
+    const shifted = noise.map((v, i) => noise[(i + 300) % 2048]);
+    buildLine(a, 0, env, bandsWith(0, 63, 0.6), noise, 1, 5);
+    buildLine(b, 0, env, bandsWith(0, 63, 0.6), shifted, 1, 5);
+    buildLine(c, 0, env, bandsWith(0, 63, 0.6), noise, 1, 6);
+    const diff = (/** @type {Float32Array} */ x, /** @type {Float32Array} */ y) =>
+      maxAbs(x.map((v, i) => v - y[i]));
+    expect(diff(a, b)).toBeGreaterThan(0.05);
+    expect(diff(a, c)).toBeGreaterThan(0.05);
+  });
+
+  it("is jagged and lopsided, not a mirrored spectrum", () => {
+    const out = line();
+    buildLine(out, 0, env, bandsWith(0, 63, 0.6), noise, 1, 3);
+    let asym = 0;
+    for (let i = 0; i < 80; i++) asym = Math.max(asym, Math.abs(out[i] - out[P - 1 - i]));
+    expect(asym).toBeGreaterThan(0.1);
+    // Several local maxima inside the bump, like the cover's multiple peaks.
+    let peaks = 0;
+    for (let i = 41; i < 120; i++) if (out[i] > out[i - 1] && out[i] > out[i + 1] && out[i] > 0.1) peaks++;
+    expect(peaks).toBeGreaterThanOrEqual(3);
+  });
+
+  it("wiggles a little in the tails with the waveform, but stays low there", () => {
+    const out = line();
+    buildLine(out, 0, env, bandsWith(0, 63, 1), noise, 2, 3);
+    const tail = maxAbs(out, 0, 30);
+    expect(tail).toBeGreaterThan(0.006);
+    expect(tail).toBeLessThan(0.04);
   });
 });
