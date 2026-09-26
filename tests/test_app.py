@@ -20,5 +20,5 @@ def test_bench(tmp_path: Path):
 
 def test_builtin_dirs_exist_with_manifests():
     dirs = builtin_dirs()
-    assert [d.name for d in dirs] == ["builtin", "template"]
+    assert [d.name for d in dirs] == ["builtin", "cosmic-peanut", "template"]
     assert all((d / "tidalviz.json").is_file() for d in dirs)
