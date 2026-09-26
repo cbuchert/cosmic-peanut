@@ -230,3 +230,103 @@ async def test_dev_folder_becomes_active_and_hot_reloads(tmp_path: Path, window:
         assert reload["key"] == key
     finally:
         await h.stop()
+
+
+@pytest.mark.asyncio
+async def test_missed_heartbeats_disable_the_active_visualizer_and_recover(
+    tmp_path: Path, window: FakeWindow, http
+):
+    h = Host(
+        root=tmp_path / "home",
+        builtin_dirs=BUILTINS,
+        source_id="synthetic:demo",
+        window=window,
+        hang_after=0.3,
+    )
+    await h.start()
+    try:
+        shell = await connect(h, http)
+        await shell.next_json("hello")
+        await shell.send({"type": "select", "key": "builtin/orbit"})
+        await asyncio.sleep(0.8)  # no heartbeats: the watchdog fires
+        assert window.calls.count("recover") == 1
+        await shell.ws.close()
+
+        again = await connect(h, http)  # the reloaded web view reconnects
+        hello = await again.next_json("hello")
+        orbit = next(v for v in hello["visualizers"] if v["key"] == "builtin/orbit")
+        assert orbit["disabled"] is True
+        disabled = await again.next_json("disabled")
+        assert disabled["key"] == "builtin/orbit" and "froze" in disabled["reason"]
+    finally:
+        await h.stop()
+
+
+@pytest.mark.asyncio
+async def test_set_source_switches_capture_and_persists(host: Host, http):
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    await shell.send({"type": "setSource", "id": "synthetic:click120"})
+    msg = await shell.next_json("sources")
+    assert msg["active"] == "synthetic:click120"
+    assert host.settings.data["source"] == "synthetic:click120"
+    assert host.pipeline is not None
+    assert getattr(host.pipeline.source, "kind", None) == "click120"
+
+
+@pytest.mark.asyncio
+async def test_unknown_source_is_rejected_with_a_status(host: Host, http):
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    await shell.send({"type": "setSource", "id": "synthetic:nope"})
+    status = await shell.next_json("status")
+    assert status["level"] == "error"
+    assert host.settings.data["source"] == "synthetic:demo"
+
+
+@pytest.mark.asyncio
+async def test_enable_reenables_a_disabled_visualizer(host: Host, http):
+    host.registry.disable("builtin/bars")
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    await shell.send({"type": "enable", "key": "builtin/bars"})
+    msg = await shell.next_json("visualizers")
+    bars = next(v for v in msg["visualizers"] if v["key"] == "builtin/bars")
+    assert bars["disabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_settings_persist_only_shell_owned_keys(host: Host, http):
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    await shell.send(
+        {"type": "settings", "quality": "battery", "hudVisible": True, "source": "system"}
+    )
+    await asyncio.sleep(0.1)
+    assert host.settings.data["quality"] == "battery" and host.settings.data["hudVisible"]
+    assert host.settings.data["source"] == "synthetic:demo"
+
+
+@pytest.mark.asyncio
+async def test_stats_are_broadcast_with_onset_latency(tmp_path: Path, window: FakeWindow, http):
+    h = Host(
+        root=tmp_path / "home", builtin_dirs=BUILTINS, source_id="synthetic:click120", window=window
+    )
+    await h.start()
+    try:
+        shell = await connect(h, http)
+        await shell.next_json("hello")
+        # Echo onsetSeen for the first onset frame we receive, like the SDK does.
+        async with asyncio.timeout(3):
+            while True:
+                m = await shell.ws.receive()
+                if m.type == aiohttp.WSMsgType.BINARY and m.data[6] & 1:
+                    index = int.from_bytes(m.data[8:12], "little")
+                    await shell.send({"type": "onsetSeen", "frameIndex": index})
+                    break
+        stats = await shell.next_json("stats", timeout=2.5)
+        for k in ("hostCpu", "rssMb", "analysisMsP50", "captureToSendMsP95", "droppedFrames"):
+            assert isinstance(stats[k], (int, float)), k
+        assert 0 <= stats["latencyMsP95"] < 50
+    finally:
+        await h.stop()

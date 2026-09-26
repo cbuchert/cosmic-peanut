@@ -5,10 +5,17 @@ GUI-free so it can be tested with a real WebSocket client; the window is injecte
 """
 
 import asyncio
+import contextlib
 import logging
+import struct
+import time
+from collections import deque
 from collections.abc import Coroutine, Sequence
 from pathlib import Path
 from typing import Any, Protocol
+
+import numpy as np
+import psutil
 
 from tidalviz.capture import (
     AudioSource,
@@ -21,13 +28,22 @@ from tidalviz.pipeline import AudioPipeline
 from tidalviz.plugins import DevFolderWatcher, ManifestError, PluginRegistry
 from tidalviz.server.runner import DEFAULT_WEB_DIR, HostServers
 from tidalviz.settings import Settings
-from tidalviz.transport.control import TextSocket
+from tidalviz.transport.control import HANG_AFTER_S, TextSocket
 
 log = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = 1
 THROTTLED_FPS = 40  # WebKit runs a never-clicked cross-origin iframe's rAF at 20 Hz
 CLICK_INTERVAL_S = 2.0
+STATS_INTERVAL_S = 1.0
+# Settings the shell owns; anything else in a `settings` message is ignored.
+SHELL_SETTINGS = (
+    "quality",
+    "reduceFlashing",
+    "autoCycleSeconds",
+    "hudVisible",
+    "photosensitivityNoticeSeen",
+)
 
 
 class WindowControl(Protocol):
@@ -63,6 +79,7 @@ class Host:
         source_id: str | None = None,
         web_dir: Path = DEFAULT_WEB_DIR,
         dev: bool = False,
+        hang_after: float = HANG_AFTER_S,
     ) -> None:
         root.mkdir(parents=True, exist_ok=True)
         self.settings = Settings(root / "settings.json")
@@ -78,10 +95,19 @@ class Host:
             on_message=self._on_message,
             on_client_count=self._on_client_count,
             on_connect=self._on_connect,
+            on_hang=self._on_hang,
+            hang_after=hang_after,
         )
         self._loop: asyncio.AbstractEventLoop | None = None
         self._last_click = -CLICK_INTERVAL_S
         self._tasks: set[asyncio.Future[Any]] = set()
+        self._notices: list[dict[str, Any]] = []  # sent to the next shell after its hello
+        # Onset frames published (index, host time) — appended on the analysis thread; deque
+        # appends are atomic. Latency = when the shell reports seeing one, minus its time.
+        self._onsets: deque[tuple[int, float]] = deque(maxlen=64)
+        self._latency_ms: deque[float] = deque(maxlen=256)
+        self._process = psutil.Process()
+        self._stats_task: asyncio.Task[None] | None = None
         self.watcher = DevFolderWatcher(
             self._dev_changed,
             revalidate=self.registry.reload,
@@ -100,8 +126,14 @@ class Host:
         for key, folder in self.registry.dev_folders().items():
             self.watcher.add(key, folder)
         self.watcher.start()
+        self._process.cpu_percent(None)  # prime: the first call always returns 0
+        self._stats_task = asyncio.create_task(self._stats_loop())
 
     async def stop(self) -> None:
+        if self._stats_task is not None:
+            self._stats_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._stats_task
         await asyncio.to_thread(self.watcher.stop)
         if self.pipeline is not None:
             await asyncio.to_thread(self.pipeline.stop)
@@ -109,6 +141,10 @@ class Host:
 
     def _publish(self, data: bytes) -> None:
         """Analysis thread → event loop; the hub keeps only the newest frame."""
+        if data[6] & 1:  # onset flag (protocols §1)
+            (index,) = struct.unpack_from("<I", data, 8)
+            (host_time,) = struct.unpack_from("<d", data, 16)
+            self._onsets.append((index, host_time))
         loop = self._loop
         if loop is not None and not loop.is_closed():
             loop.call_soon_threadsafe(self.servers.hub.publish, data)
@@ -193,7 +229,29 @@ class Host:
     # --- control channel ------------------------------------------------------------------
 
     def _on_connect(self, client: TextSocket) -> None:
-        self._spawn(self.servers.control.send_json(client, self.hello()))
+        self._spawn(self._greet(client))
+
+    async def _greet(self, client: TextSocket) -> None:
+        await self.servers.control.send_json(client, self.hello())
+        notices, self._notices = self._notices, []
+        for msg in notices:
+            await self.servers.control.send_json(client, msg)
+
+    def _on_hang(self) -> None:
+        """No heartbeat for 2 s: a plugin froze the shared WebContent process (spike).
+        Disable the active visualizer so the reload doesn't hang again, then kill-and-reset."""
+        key = self.settings.data["active"]
+        if key is not None:
+            self.registry.disable(key)
+            self._notices.append(
+                {
+                    "type": "disabled",
+                    "key": key,
+                    "reason": "It froze the window, so Tidalviz reloaded without it.",
+                }
+            )
+        log.warning("shell stopped responding; recovering (disabled %s)", key)
+        self.window.recover_webview()
 
     def _on_client_count(self, n: int) -> None:
         if self.pipeline is not None:
@@ -210,6 +268,15 @@ class Host:
                 self.settings.set_params(msg["key"], msg["values"])
             case "perf":
                 self._maybe_click(msg["fps"])
+            case "onsetSeen":
+                self._onset_seen(msg["frameIndex"])
+            case "setSource":
+                self._set_source(msg["id"])
+            case "enable":
+                self.registry.enable(msg["key"])
+                self._spawn(self._broadcast_visualizers())
+            case "settings":
+                self.settings.update({k: v for k, v in msg.items() if k in SHELL_SETTINGS})
             case "window":
                 self._window_action(msg["action"])
             case _:
@@ -231,3 +298,62 @@ class Host:
         }
         if (fn := actions.get(action)) is not None:
             fn()
+
+    async def _broadcast_visualizers(self) -> None:
+        await self.servers.control.broadcast_json(
+            {
+                "type": "visualizers",
+                "visualizers": self.visualizers(),
+                "repos": self.registry.repos(),
+            }
+        )
+
+    def _set_source(self, source_id: str) -> None:
+        try:
+            source = make_source(source_id)
+        except (ValueError, StopIteration):
+            self._spawn(
+                self.servers.control.broadcast_json(
+                    {
+                        "type": "status",
+                        "level": "error",
+                        "text": f"Unknown audio source: {source_id}",
+                    }
+                )
+            )
+            return
+        if self.pipeline is not None:
+            self.pipeline.switch_source(source)
+        self.settings.update({"source": source_id})
+        self._spawn(
+            self.servers.control.broadcast_json(
+                {"type": "sources", "sources": self.sources(), "active": source_id}
+            )
+        )
+
+    def _onset_seen(self, index: int) -> None:
+        now = time.monotonic()
+        for i, host_time in reversed(self._onsets):
+            if i == index:
+                self._latency_ms.append((now - host_time) * 1000)
+                return
+
+    def stats(self) -> dict[str, Any]:
+        p = self.pipeline.stats() if self.pipeline is not None else None
+        out: dict[str, Any] = {
+            "type": "stats",
+            "hostCpu": self._process.cpu_percent(None),
+            "rssMb": self._process.memory_info().rss / 1e6,
+            "analysisMsP50": p.analysis_ms_p50 if p else 0.0,
+            "captureToSendMsP95": p.capture_to_send_ms_p95 if p else 0.0,
+            "droppedFrames": (p.dropped_frames if p else 0) + self.servers.hub.total_dropped,
+        }
+        if self._latency_ms:
+            out["latencyMsP95"] = float(np.percentile(self._latency_ms, 95))
+        return out
+
+    async def _stats_loop(self) -> None:
+        while True:
+            await asyncio.sleep(STATS_INTERVAL_S)
+            if self.servers.control.client_count:
+                await self.servers.control.broadcast_json(self.stats())
