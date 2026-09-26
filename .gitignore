@@ -8,3 +8,4 @@ dist/
 build/
 .DS_Store
 *.egg-info/
+plugins/_harness/out/
