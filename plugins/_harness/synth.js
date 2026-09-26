@@ -1,7 +1,8 @@
 // @ts-check
 /**
  * Synthetic audio frames for the harness: 120 BPM kick on every beat, hats on the offbeats, two
- * drifting spectral bumps, a slow "song" envelope. Everything is preallocated.
+ * drifting spectral bumps, a slow "song" envelope. Everything is preallocated. The waveform is the
+ * newest 2,048 samples (overlapping between frames), as in the frame contract.
  * With `strobe`, onsets and bass hits land at 10 Hz — a worst case for the flash limiter.
  */
 const SR = 48000;
@@ -10,9 +11,10 @@ const SR = 48000;
 export function createSynth(opts = {}) {
   const bands = new Float32Array(64);
   const spectrum = new Float32Array(1024);
-  const waveform = new Float32Array(512);
-  const left = new Float32Array(512);
-  const right = new Float32Array(512);
+  const WAVE = 2048;
+  const waveform = new Float32Array(WAVE);
+  const left = new Float32Array(WAVE);
+  const right = new Float32Array(WAVE);
   const specBand = new Float32Array(1024);
   for (let k = 0; k < 1024; k++) {
     const hz = Math.max(1, (k * SR) / 2048);
@@ -78,8 +80,9 @@ export function createSynth(opts = {}) {
     }
     let sum = 0;
     let peak = 0;
-    for (let n = 0; n < 512; n++) {
-      const s = (sampleClock + n) / SR;
+    sampleClock += Math.round(dt * SR);
+    for (let n = 0; n < WAVE; n++) {
+      const s = (sampleClock - WAVE + n) / SR;
       const kickEnv = Math.exp(-(((s * pulseRate) % 1) * 7));
       let v = 0.55 * kickEnv * Math.sin(2 * Math.PI * (48 + 60 * kickEnv) * s);
       v += 0.12 * mid * (Math.sin(2 * Math.PI * 220 * s) + Math.sin(2 * Math.PI * 277.2 * s) + Math.sin(2 * Math.PI * 329.6 * s));
@@ -88,10 +91,10 @@ export function createSynth(opts = {}) {
       waveform[n] = v;
       left[n] = v * 0.9 + 0.1 * Math.sin(2 * Math.PI * 440 * s);
       right[n] = v * 0.9 - 0.1 * Math.sin(2 * Math.PI * 440 * s);
+      if (n < WAVE - 512) continue; // level stats over the newest 512-sample hop
       sum += v * v;
       if (Math.abs(v) > peak) peak = Math.abs(v);
     }
-    sampleClock += Math.round(dt * SR);
 
     frame.rms = Math.sqrt(sum / 512);
     frame.peak = peak;
@@ -111,5 +114,45 @@ export function createSynth(opts = {}) {
     return /** @type {import('../../web/sdk/tidalviz').AudioFrame} */ (frame);
   }
 
+  return { update };
+}
+
+/**
+ * The Cosmic Peanut prototype's "Demo signal" (docs/reference/cosmic-peanut-prototype.html): bass
+ * chord, kick, hats, arpeggiated lead, 2,048 samples from the demo clock, and no host `bass`
+ * level (so the plugin uses its waveform fallback, as the prototype does).
+ */
+export function createProtoDemo() {
+  const WAVE_LEN = 2048;
+  const waveBuf = new Float32Array(WAVE_LEN);
+  const CHORDS = [55, 65.41, 49, 73.42];
+  let demoT = 0;
+  /** @type {any} */
+  const frame = {
+    bands: new Float32Array(64), spectrum: new Float32Array(1024), waveform: waveBuf,
+    left: null, right: null, rms: 0, peak: 0, bass: undefined, mid: 1, treb: 1,
+    bassAtt: 1, midAtt: 1, trebAtt: 1, onsetStrength: 0, onset: false, onsetAge: 10, bpm: 0,
+    beatPhase: 0, centroid: 0, flux: 0, silent: false, frameIndex: 0, sampleRate: 48000, hostTime: 0,
+  };
+  /** @param {number} _t @param {number} dt */
+  function update(_t, dt) {
+    demoT += dt;
+    const t = demoT;
+    const sr = 48000, beat = 0.5;
+    const root = CHORDS[Math.floor(t / 4) % CHORDS.length];
+    for (let i = 0; i < WAVE_LEN; i++) {
+      const s = t + i / sr, bt = s % beat, ht = (s + beat / 2) % beat;
+      const kick = Math.sin(2 * Math.PI * (45 + 90 * Math.exp(-bt * 30)) * bt) * Math.exp(-bt * 9);
+      const bass = 0.45 * Math.sin(2 * Math.PI * root * s) + 0.2 * Math.sin(2 * Math.PI * root * 1.5 * s) +
+                   0.12 * Math.sin(2 * Math.PI * root * 4 * s + Math.sin(s * 0.7) * 2);
+      const hat = (Math.random() * 2 - 1) * 0.18 * Math.exp(-ht * 60);
+      const note = root * 4 * [1, 1.5, 2, 1.25][Math.floor(s * 4) % 4];
+      const saw = ((s * note) % 1) * 2 - 1, sq = ((s * note * 2.01) % 1) < 0.5 ? 1 : -1;
+      const lead = (0.16 * saw + 0.06 * sq) * Math.exp(-((s * 4) % 1) * 3);
+      waveBuf[i] = 0.9 * kick + bass * (0.6 + 0.4 * Math.sin(s * 0.9)) + hat + lead;
+    }
+    frame.frameIndex++;
+    return /** @type {import('../../web/sdk/tidalviz').AudioFrame} */ (frame);
+  }
   return { update };
 }

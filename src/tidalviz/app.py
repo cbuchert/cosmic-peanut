@@ -19,7 +19,8 @@ APP_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
 
 
 def builtin_dirs() -> list[Path]:
-    return [APP_ROOT / "plugins" / "builtin", APP_ROOT / "plugins" / "template"]
+    plugins = APP_ROOT / "plugins"
+    return [plugins / "builtin", plugins / "cosmic-peanut", plugins / "template"]
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

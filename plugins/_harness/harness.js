@@ -3,11 +3,13 @@
  * Throwaway fake SDK (not shipped). Loads one visualizer from a local repo folder, feeds it
  * synthetic audio on rAF, and publishes timing stats on `window.__stats()`.
  *
- * Query: ?repo=builtin&viz=bars[&rep=N][&reduce=0|1][&strobe=1][&finish=1][&lum=1][&p.<id>=v]
+ * Query: ?repo=builtin&viz=bars[&rep=N][&reduce=0|1][&motion=reduce][&audio=proto][&strobe=1]
+ *        [&finish=1][&lum=1][&p.<id>=v]
+ *   audio=proto  the Cosmic Peanut prototype's demo signal instead of the synth
  *   finish=1  gl.finish() inside the timed region, so the number includes GPU work
  *   lum=1     record mean frame luminance (for the flash-limiter check)
  */
-import { createSynth } from "./synth.js";
+import { createProtoDemo, createSynth } from "./synth.js";
 
 const q = new URLSearchParams(location.search);
 const repo = q.get("repo") ?? "builtin";
@@ -53,6 +55,7 @@ async function main() {
     ctx2d: null, gl: null, gpu: null, three: null,
     params, size, renderScale: 1, quality: "high",
     reduceFlashing: q.get("reduce") !== "0",
+    reduceMotion: q.get("motion") === "reduce",
     log: (/** @type {unknown[]} */ ...a) => console.log("[plugin]", ...a),
     assets: {
       url: (/** @type {string} */ p) => new URL(p, location.origin + base).href,
@@ -103,7 +106,35 @@ async function main() {
     viz.dispose?.();
   };
 
-  const synth = createSynth({ strobe: q.get("strobe") === "1" });
+  const synth = q.get("audio") === "proto" ? createProtoDemo() : createSynth({ strobe: q.get("strobe") === "1" });
+
+  // Drags on the canvas go to the plugin's pointer hook (one reused event object).
+  const pe = { kind: /** @type {"down" | "move" | "up"} */ ("move"), x: 0, y: 0, dx: 0, dy: 0 };
+  let dragging = false;
+  let lx = 0;
+  let ly = 0;
+  /** @param {PointerEvent} e @param {"down" | "move" | "up"} kind */
+  const forward = (e, kind) => {
+    pe.kind = kind;
+    pe.x = e.offsetX;
+    pe.y = e.offsetY;
+    pe.dx = kind === "down" ? 0 : e.clientX - lx;
+    pe.dy = kind === "down" ? 0 : e.clientY - ly;
+    lx = e.clientX;
+    ly = e.clientY;
+    viz.pointer?.(pe);
+  };
+  canvas.addEventListener("pointerdown", (e) => {
+    dragging = true;
+    canvas.setPointerCapture(e.pointerId);
+    forward(e, "down");
+  });
+  canvas.addEventListener("pointermove", (e) => dragging && forward(e, "move"));
+  canvas.addEventListener("pointerup", (e) => {
+    if (!dragging) return;
+    dragging = false;
+    forward(e, "up");
+  });
   /** @type {number[]} */ const times = [];
   /** @type {number[]} */ const intervals = [];
   /** @type {number[]} */ const lum = [];
