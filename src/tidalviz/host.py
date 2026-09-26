@@ -112,6 +112,7 @@ class Host:
         )
         self._loop: asyncio.AbstractEventLoop | None = None
         self._last_click = -CLICK_INTERVAL_S
+        self._throttled: bool | None = None
         self._tasks: set[asyncio.Future[Any]] = set()
         self._notices: list[dict[str, Any]] = []  # sent to the next shell after its hello
         # Onset frames published (index, host time) — appended on the analysis thread; deque
@@ -279,6 +280,7 @@ class Host:
             case "params":
                 self.settings.set_params(msg["key"], msg["values"])
             case "perf":
+                self._log_rate(msg["key"], msg["fps"])
                 self._maybe_click(msg["fps"])
             case "onsetSeen":
                 self._onset_seen(msg["frameIndex"])
@@ -307,6 +309,12 @@ class Host:
                 self._window_action(msg["action"])
             case _:
                 pass
+
+    def _log_rate(self, key: str, fps: float) -> None:
+        throttled = 0 < fps < THROTTLED_FPS
+        if throttled != self._throttled:
+            self._throttled = throttled
+            log.info("%s %s at %.0f fps", key, "throttled" if throttled else "running", fps)
 
     def _maybe_click(self, fps: float) -> None:
         """Lift WebKit's 20 Hz throttle on a fresh plugin iframe with one native click."""

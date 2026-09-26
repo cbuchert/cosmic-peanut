@@ -459,3 +459,21 @@ async def test_open_permissions_opens_the_audio_capture_privacy_pane(
         ]
     finally:
         await h.stop()
+
+
+@pytest.mark.asyncio
+async def test_plugin_rate_changes_are_logged_once_per_crossing(
+    host: Host, http, caplog: pytest.LogCaptureFixture
+):
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    with caplog.at_level("INFO", logger="tidalviz.host"):
+        for fps in (21, 22, 60, 61, 20):
+            await shell.send(perf(fps))
+        await asyncio.sleep(0.2)
+    lines = [r.getMessage() for r in caplog.records if "fps" in r.getMessage()]
+    assert lines == [
+        "builtin/bars throttled at 21 fps",
+        "builtin/bars running at 60 fps",
+        "builtin/bars throttled at 20 fps",
+    ]
