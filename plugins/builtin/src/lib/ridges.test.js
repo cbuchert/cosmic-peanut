@@ -4,7 +4,15 @@ import {
   advanceScroll,
   bandAt,
   buildLine,
-  centralEnvelope, createRing, resizeRing, ringPush, ringRow, stepGain } from "./ridges.js";
+  centralEnvelope,
+  createRing,
+  drawRidges,
+  resizeRing,
+  ridgeLayout,
+  ringPush,
+  ringRow,
+  stepGain,
+} from "./ridges.js";
 
 const ramp = Float32Array.from({ length: 64 }, (_, i) => i / 63);
 
@@ -228,5 +236,131 @@ describe("buildLine", () => {
     const tail = maxAbs(out, 0, 30);
     expect(tail).toBeGreaterThan(0.006);
     expect(tail).toBeLessThan(0.04);
+  });
+});
+
+describe("ridgeLayout", () => {
+  const lay = () => ({ left: 0, width: 0, top: 0, bottom: 0, spacing: 0, amp: 0 });
+
+  it("centres a plot narrower than it is tall in a landscape window, with margins", () => {
+    const l = ridgeLayout(2560, 1440, 80, 1, lay());
+    expect(l.left + l.width / 2).toBeCloseTo(1280);
+    expect(l.width).toBeLessThan(1440);
+    expect(l.width).toBeGreaterThan(700);
+    expect(l.top).toBeGreaterThan(1440 * 0.05);
+    expect(l.bottom).toBeLessThan(1440 * 0.95);
+    expect(l.bottom).toBeGreaterThan(1440 * 0.85);
+  });
+
+  it("fits the width of a narrow portrait window, keeping side margins", () => {
+    const l = ridgeLayout(600, 1600, 80, 1, lay());
+    expect(l.left).toBeGreaterThan(20);
+    expect(l.left + l.width).toBeLessThan(580);
+  });
+
+  it("spaces lines evenly from the top baseline to the bottom one, with headroom for peaks", () => {
+    const l = ridgeLayout(2560, 1440, 80, 1, lay());
+    expect(l.spacing * 79).toBeCloseTo(l.bottom - l.top);
+    expect(l.amp).toBeGreaterThan(l.spacing * 6); // peaks overlap many lines, like the cover
+    expect(l.top - l.amp * 0.6).toBeGreaterThan(0);
+  });
+
+  it("scales peak height with the Height param without moving the lines", () => {
+    const a = ridgeLayout(2560, 1440, 80, 1, lay());
+    const b = ridgeLayout(2560, 1440, 80, 2, lay());
+    expect(b.amp).toBeCloseTo(a.amp * 2);
+    expect(b.top).toBe(a.top);
+    expect(b.spacing).toBe(a.spacing);
+  });
+});
+
+/** A 2d-context stand-in that records path, fill and stroke calls with the state at the time. */
+function fakeContext() {
+  /** @type {{ op: string, x?: number, y?: number, gco?: string, alpha?: number, style?: unknown, width?: number }[]} */
+  const log = [];
+  const g = {
+    globalCompositeOperation: "source-over",
+    globalAlpha: 1,
+    strokeStyle: /** @type {unknown} */ ("#000"),
+    fillStyle: /** @type {unknown} */ ("#000"),
+    lineWidth: 1,
+    lineJoin: "miter",
+    beginPath: () => log.push({ op: "begin" }),
+    closePath: () => log.push({ op: "close" }),
+    moveTo: (/** @type {number} */ x, /** @type {number} */ y) => log.push({ op: "move", x, y }),
+    lineTo: (/** @type {number} */ x, /** @type {number} */ y) => log.push({ op: "line", x, y }),
+    fill: () => log.push({ op: "fill", gco: g.globalCompositeOperation, alpha: g.globalAlpha }),
+    stroke: () =>
+      log.push({ op: "stroke", gco: g.globalCompositeOperation, alpha: g.globalAlpha, style: g.strokeStyle, width: g.lineWidth }),
+  };
+  return { g, log, ctx: /** @type {CanvasRenderingContext2D} */ (/** @type {unknown} */ (g)) };
+}
+
+describe("drawRidges", () => {
+  const P = 5;
+  const lay = { left: 100, width: 400, top: 50, bottom: 350, spacing: 100, amp: 200 };
+  /** Four lines; the row pushed k-th (k = 1…4) has the value k/10 at every point. */
+  function ring4() {
+    const r = createRing(4, P);
+    for (let k = 1; k <= 4; k++) {
+      const o = ringPush(r);
+      r.data.fill(k / 10, o, o + P);
+    }
+    return r;
+  }
+  /** Split the log into per-draw-call segments: the path ops before each fill/stroke. */
+  function draws(/** @type {ReturnType<typeof fakeContext>["log"]} */ log) {
+    const out = [];
+    let path = [];
+    for (const e of log) {
+      if (e.op === "begin") path = [];
+      else if (e.op === "fill" || e.op === "stroke") out.push({ ...e, path });
+      else path.push(e);
+    }
+    return out;
+  }
+
+  it("erases under each line (destination-out) and then strokes it (source-over)", () => {
+    const { log, ctx } = fakeContext();
+    drawRidges(ctx, ring4(), lay, 0, "#ffffff", 3);
+    const d = draws(log);
+    expect(d.map((e) => `${e.op}:${e.gco}`)).toEqual(
+      Array(4).fill(["fill:destination-out", "stroke:source-over"]).flat(),
+    );
+    for (const s of d.filter((e) => e.op === "stroke")) {
+      expect(s.style).toBe("#ffffff");
+      expect(s.width).toBe(3);
+    }
+  });
+
+  it("draws back to front: oldest (top) line first, newest (bottom) last", () => {
+    const { log, ctx } = fakeContext();
+    drawRidges(ctx, ring4(), lay, 0, "#fff", 1);
+    const strokes = draws(log).filter((e) => e.op === "stroke");
+    // Baselines 50, 150, 250, 350 minus value × amp (oldest row holds 0.1).
+    expect(strokes.map((s) => s.path[0].y)).toEqual([50 - 20, 150 - 40, 250 - 60, 350 - 80].map((v) => expect.closeTo(v, 4)));
+  });
+
+  it("strokes only the curve, but fills a closed region reaching below the line's baseline", () => {
+    const { log, ctx } = fakeContext();
+    drawRidges(ctx, ring4(), lay, 0, "#fff", 1);
+    const [fill, stroke] = draws(log);
+    expect(stroke.path.map((p) => p.op)).toEqual(["move", "line", "line", "line", "line"]);
+    expect(stroke.path.map((p) => p.x)).toEqual([100, 200, 300, 400, 500]);
+    expect(fill.path.at(-1)?.op).toBe("close");
+    const lowest = Math.max(...fill.path.filter((p) => p.y !== undefined).map((p) => /** @type {number} */ (p.y)));
+    expect(lowest).toBeGreaterThan(50);
+  });
+
+  it("offsets every line up by the scroll fraction and fades the oldest out, the newest in", () => {
+    const { g, log, ctx } = fakeContext();
+    drawRidges(ctx, ring4(), lay, 0.25, "#fff", 1);
+    const strokes = draws(log).filter((e) => e.op === "stroke");
+    expect(strokes[3].path[0].y).toBeCloseTo(350 - 25 - 80);
+    expect(strokes.map((s) => s.alpha)).toEqual([0.75, 1, 1, 0.25]);
+    const fills = draws(log).filter((e) => e.op === "fill");
+    expect(fills.map((s) => s.alpha)).toEqual([0.75, 1, 1, 0.25]);
+    expect(g.globalAlpha).toBe(1);
+    expect(g.globalCompositeOperation).toBe("source-over");
   });
 });

@@ -190,3 +190,92 @@ function hash(seed, i) {
   const h = Math.sin(seed * 12.9898 + i * 78.233) * 43758.5453;
   return 2 * (h - Math.floor(h)) - 1;
 }
+
+const PAD_Y = 0.07;
+const PAD_X = 0.06;
+/** Plot width / height. */
+const PLOT_ASPECT = 0.78;
+/** Full peak height as a fraction of the plot height (at Height = 1). */
+const AMP_FRAC = 0.13;
+/** Room above the oldest baseline, as a fraction of the default full peak height. */
+const HEADROOM = 0.7;
+
+/**
+ * Where the plot goes: centred, with margins, a portrait-ish width like the cover. Baselines run
+ * from `top` (oldest line) to `bottom` (newest); `amp` is the full peak height in pixels.
+ * @template {{ left: number, width: number, top: number, bottom: number, spacing: number, amp: number }} T
+ * @param {number} w canvas width, pixels
+ * @param {number} h canvas height, pixels
+ * @param {number} lines
+ * @param {number} height the Height param (1 = default)
+ * @param {T} out
+ * @returns {T}
+ */
+export function ridgeLayout(w, h, lines, height, out) {
+  const padY = h * PAD_Y;
+  const padX = w * PAD_X;
+  const plotH = h - 2 * padY;
+  out.width = Math.min(w - 2 * padX, plotH * PLOT_ASPECT);
+  out.left = (w - out.width) / 2;
+  out.bottom = h - padY;
+  out.top = padY + plotH * AMP_FRAC * HEADROOM;
+  out.spacing = (out.bottom - out.top) / Math.max(1, lines - 1);
+  out.amp = plotH * AMP_FRAC * height;
+  return out;
+}
+
+/**
+ * Draw the history with hidden-line removal on a transparent canvas: back to front, each line
+ * first erases what lies behind it (destination-out fill under its curve), then strokes itself.
+ * @param {CanvasRenderingContext2D} g
+ * @param {ReturnType<typeof createRing>} ring
+ * @param {{ left: number, width: number, bottom: number, spacing: number, amp: number }} lay
+ * @param {number} frac scroll fraction 0–1 from {@link advanceScroll}
+ * @param {string} color stroke color
+ * @param {number} lineWidth pixels
+ */
+export function drawRidges(g, ring, lay, frac, color, lineWidth) {
+  const { data, points, lines } = ring;
+  const { left, spacing, amp } = lay;
+  const dx = lay.width / (points - 1);
+  const right = left + lay.width;
+  g.strokeStyle = color;
+  g.lineWidth = lineWidth;
+  g.lineJoin = "round";
+  for (let age = lines - 1; age >= 0; age--) {
+    const o = ringRow(ring, age);
+    const base = lay.bottom - (age + frac) * spacing;
+    // The oldest line fades out as it leaves, the newest fades in as it arrives: no popping.
+    g.globalAlpha = age === lines - 1 ? 1 - frac : age === 0 ? frac : 1;
+
+    tracePoints(g, data, o, points, left, dx, base, amp);
+    const floor = base + spacing;
+    g.lineTo(right, floor);
+    g.lineTo(left, floor);
+    g.closePath();
+    g.globalCompositeOperation = "destination-out";
+    g.fill();
+
+    g.globalCompositeOperation = "source-over";
+    tracePoints(g, data, o, points, left, dx, base, amp);
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+}
+
+/**
+ * Begin a path along one row's curve.
+ * @param {CanvasRenderingContext2D} g
+ * @param {Float32Array} data
+ * @param {number} o row offset
+ * @param {number} points
+ * @param {number} left
+ * @param {number} dx
+ * @param {number} base baseline y
+ * @param {number} amp
+ */
+function tracePoints(g, data, o, points, left, dx, base, amp) {
+  g.beginPath();
+  g.moveTo(left, base - data[o] * amp);
+  for (let i = 1; i < points; i++) g.lineTo(left + i * dx, base - data[o + i] * amp);
+}
