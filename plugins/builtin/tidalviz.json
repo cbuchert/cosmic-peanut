@@ -47,6 +47,22 @@
         { "id": "bloom", "type": "number", "label": "Bloom", "min": 0, "max": 2, "step": 0.01, "default": 1 },
         { "id": "spin", "type": "number", "label": "Camera speed", "min": 0, "max": 2, "step": 0.01, "default": 1 }
       ]
+    },
+    {
+      "id": "pulsar",
+      "name": "Pulsar",
+      "description": "Ridge lines after the Unknown Pleasures cover: each new line is a moment of the music.",
+      "author": "Tidalviz",
+      "entry": "src/pulsar.js",
+      "renderer": "2d",
+      "thumbnail": "thumbs/pulsar.jpg",
+      "params": [
+        { "id": "lines", "type": "select", "label": "Lines", "options": ["40", "60", "80", "100", "120"], "default": "80" },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 1, "max": 30, "step": 0.5, "default": 10 },
+        { "id": "height", "type": "number", "label": "Height", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "color", "type": "color", "label": "Color", "default": "#ffffff" },
+        { "id": "lineWidth", "type": "number", "label": "Line width", "min": 0.5, "max": 4, "step": 0.1, "default": 1.5 }
+      ]
     }
   ]
 }

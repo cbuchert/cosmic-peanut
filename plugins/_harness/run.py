@@ -17,6 +17,7 @@ VIZ = {
     "bars": "builtin",
     "undertow": "builtin",
     "orbit": "builtin",
+    "pulsar": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }

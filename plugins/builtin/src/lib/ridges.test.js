@@ -1,5 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
+import { fakeContext } from "./fake-2d.test-helper.js";
 import {
   advanceScroll,
   bandAt,
@@ -273,28 +274,6 @@ describe("ridgeLayout", () => {
     expect(b.spacing).toBe(a.spacing);
   });
 });
-
-/** A 2d-context stand-in that records path, fill and stroke calls with the state at the time. */
-function fakeContext() {
-  /** @type {{ op: string, x?: number, y?: number, gco?: string, alpha?: number, style?: unknown, width?: number }[]} */
-  const log = [];
-  const g = {
-    globalCompositeOperation: "source-over",
-    globalAlpha: 1,
-    strokeStyle: /** @type {unknown} */ ("#000"),
-    fillStyle: /** @type {unknown} */ ("#000"),
-    lineWidth: 1,
-    lineJoin: "miter",
-    beginPath: () => log.push({ op: "begin" }),
-    closePath: () => log.push({ op: "close" }),
-    moveTo: (/** @type {number} */ x, /** @type {number} */ y) => log.push({ op: "move", x, y }),
-    lineTo: (/** @type {number} */ x, /** @type {number} */ y) => log.push({ op: "line", x, y }),
-    fill: () => log.push({ op: "fill", gco: g.globalCompositeOperation, alpha: g.globalAlpha }),
-    stroke: () =>
-      log.push({ op: "stroke", gco: g.globalCompositeOperation, alpha: g.globalAlpha, style: g.strokeStyle, width: g.lineWidth }),
-  };
-  return { g, log, ctx: /** @type {CanvasRenderingContext2D} */ (/** @type {unknown} */ (g)) };
-}
 
 describe("drawRidges", () => {
   const P = 5;

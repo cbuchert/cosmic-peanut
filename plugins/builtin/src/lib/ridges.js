@@ -5,23 +5,29 @@
  */
 
 /** Half-width of the central eruption, as a fraction of the line (the cover's is ≈ 0.2–0.25). */
-export const ENV_HALF_WIDTH = 0.25;
+export const ENV_HALF_WIDTH = 0.27;
+/** Fraction of the envelope's half-width that is flat at full height. */
+const PLATEAU = 0.2;
 /** Band read at the bump's edges; the centre reads band 0 (bass). */
 const MAX_BAND = 48;
+/** Relative boost of the bump's edges (higher bands) over its centre (bass). */
+const TILT = 0.25;
 /** > 1 sharpens peaks relative to the slopes between them. */
-const SHARPNESS = 1.4;
+const SHARPNESS = 1.25;
 /** Coarse jitter knots across the whole line (≈ half of them fall inside the bump). */
 const KNOTS = 22;
 /** Waveform samples between knots: far enough apart to be independent. */
 const KNOT_STRIDE = 89;
-/** Coarse jitter depth: peak heights vary by ±JITTER. */
-const JITTER = 0.75;
+/** Coarse jitter depth: knot factors range from 1 − JITTER to 1 + 3·JITTER. */
+const JITTER = 0.55;
 /** Fine, per-point jaggedness inside the bump, relative to the local height. */
-const JAG = 0.06;
+const JAG = 0.1;
 /** Most bands the right half reads offset from the left. */
 const SKEW = 4;
 /** Waveform-driven wiggle everywhere (units of full peak height). */
 const WIGGLE = 0.012;
+/** Soft-ceiling strength: heights approach 1 / CEILING. */
+const CEILING = 0.45;
 /** Always-on tiny wiggle (units of full peak height) so silent lines aren't ruled straight. */
 const WIGGLE_FLOOR = 0.004;
 
@@ -34,7 +40,8 @@ export function centralEnvelope(out, halfWidth) {
   const last = out.length - 1;
   for (let i = 0; i <= last; i++) {
     const d = Math.abs(i / last - 0.5) / halfWidth;
-    out[i] = d < 1 ? 0.5 + 0.5 * Math.cos(Math.PI * d) : 0;
+    // Flat top, then a raised-cosine shoulder: the eruption fills the middle, not one spire.
+    out[i] = d <= PLATEAU ? 1 : d < 1 ? 0.5 + 0.5 * Math.cos((Math.PI * (d - PLATEAU)) / (1 - PLATEAU)) : 0;
   }
 }
 
@@ -168,13 +175,18 @@ export function buildLine(out, offset, env, bands, wave, gain, seed) {
       // Coarse multiplicative jitter, smoothly interpolated between waveform-picked knots.
       const u = x * KNOTS;
       const j = Math.floor(u);
-      let f = u - j;
-      f = f * f * (3 - 2 * f);
+      // Linear between knots: corners make the sharp, triangular peaks of the original.
+      const f = u - j;
       const k0 = wave[(j * KNOT_STRIDE + knotBase) % n] / wmax;
       const k1 = wave[((j + 1) * KNOT_STRIDE + knotBase) % n] / wmax;
-      const m = 1 + JITTER * (k0 + (k1 - k0) * f);
-      const g = gain * r;
-      y += Math.pow(g * (m > 0 ? m : 0), SHARPNESS) + JAG * g * (w / wmax);
+      // Squared: most knots sit low and a few run tall, so each ridge has a few dominant peaks.
+      const c = 0.5 + 0.5 * (k0 + (k1 - k0) * f);
+      const m = 1 - JITTER + 4 * JITTER * c * c; // 1 when the waveform is silent (c = ½)
+      // Tilt up the higher bands so the bass doesn't always win the middle.
+      const g = gain * r * (1 - TILT + 2 * TILT * t);
+      const v = Math.pow(g * (m > 0 ? m : 0), SHARPNESS);
+      // Soft ceiling: the tallest peaks stop short of flying off the plot.
+      y += v / (1 + CEILING * v) + JAG * g * (w / wmax);
     }
     out[offset + i] = y;
   }
@@ -196,7 +208,7 @@ const PAD_X = 0.06;
 /** Plot width / height. */
 const PLOT_ASPECT = 0.78;
 /** Full peak height as a fraction of the plot height (at Height = 1). */
-const AMP_FRAC = 0.13;
+const AMP_FRAC = 0.15;
 /** Room above the oldest baseline, as a fraction of the default full peak height. */
 const HEADROOM = 0.7;
 
