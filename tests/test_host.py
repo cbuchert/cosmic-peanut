@@ -518,3 +518,24 @@ async def test_transparency_is_a_shell_setting_and_borderless_persists(
     await asyncio.sleep(0.2)
     assert host.settings.data["transparent"] is False
     assert host.settings.data["borderless"] is False and window.calls == ["borderless"]
+
+
+@pytest.mark.asyncio
+async def test_recovery_never_loops(tmp_path: Path, window: FakeWindow, http):
+    h = Host(
+        root=tmp_path / "home",
+        builtin_dirs=BUILTINS,
+        source_id="synthetic:demo",
+        window=window,
+        hang_after=0.2,
+    )
+    await h.start()
+    try:
+        for _ in range(3):  # the reloaded page keeps failing to heartbeat
+            shell = await connect(h, http)
+            await shell.next_json("hello")
+            await asyncio.sleep(0.5)
+            await shell.ws.close()
+        assert window.calls.count("recover") == 1
+    finally:
+        await h.stop()

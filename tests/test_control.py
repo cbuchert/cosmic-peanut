@@ -360,3 +360,21 @@ def test_on_connect_gets_each_new_client_once(clock: FakeClock) -> None:
     channel.connect(a)
     channel.connect(b)
     assert seen == [a, b]
+
+
+def test_hidden_window_pauses_the_watchdog_until_visible_again(
+    channel: ControlChannel, rec: Recorder, clock: FakeClock
+) -> None:
+    c = FakeClient()
+    channel.connect(c)
+    channel.handle_text(c, '{"type":"visibility","visible":false}')
+    clock.now += 30  # WebKit throttles a hidden page's timers: heartbeats stall
+    channel.check_watchdog()
+    assert rec.hangs == 0
+    channel.handle_text(c, '{"type":"visibility","visible":true}')
+    clock.now += 1.9
+    channel.check_watchdog()
+    assert rec.hangs == 0
+    clock.now += 0.2
+    channel.check_watchdog()
+    assert rec.hangs == 1

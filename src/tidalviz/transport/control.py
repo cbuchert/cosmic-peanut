@@ -68,6 +68,7 @@ class ControlChannel:
         self._max_bytes = max_message_bytes
         self._clients: list[TextSocket] = []
         self._last_beat: float | None = None  # None: watchdog disarmed
+        self._hidden = False  # the shell reported its window hidden: watchdog paused
         self._tasks: set[asyncio.Task[None]] = set()
         self._watchdog: asyncio.Task[None] | None = None
 
@@ -174,8 +175,13 @@ class ControlChannel:
         if not known:
             log.debug("control: ignored unknown type %r", message.get("type"))
             return
-        if message["type"] == "heartbeat":
+        if message["type"] == "heartbeat" and not self._hidden:
             self._last_beat = self._clock()
+        elif message["type"] == "visibility":
+            # A hidden/minimized window's timers are throttled past the hang threshold, so the
+            # watchdog pauses while hidden and re-arms from "now" when visible again.
+            self._hidden = not message["visible"]
+            self._last_beat = None if self._hidden else self._clock()
         self._dispatch(client, message)
 
     def _dispatch(self, client: TextSocket, msg: dict[str, Any]) -> None:

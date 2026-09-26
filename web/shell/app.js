@@ -600,7 +600,12 @@ export function createApp(deps) {
       }
     }, 0);
   });
-  doc.addEventListener("visibilitychange", () => pluginHost.setVisible(doc.visibilityState !== "hidden"));
+  doc.addEventListener("visibilitychange", () => {
+    const visible = doc.visibilityState !== "hidden";
+    pluginHost.setVisible(visible);
+    // Hidden pages' timers are throttled past the hang threshold: the host pauses its watchdog.
+    send({ type: "visibility", visible });
+  });
   sourceSel.addEventListener("change", () => {
     activeSource = sourceSel.value;
     send({ type: "setSource", id: sourceSel.value });

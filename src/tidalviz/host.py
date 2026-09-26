@@ -39,6 +39,7 @@ log = logging.getLogger(__name__)
 PROTOCOL_VERSION = 1
 THROTTLED_FPS = 40  # WebKit runs a never-clicked cross-origin iframe's rAF at 20 Hz
 CLICK_INTERVAL_S = 2.0
+RECOVER_INTERVAL_S = 60.0  # a web view that keeps failing after a reload must not loop
 STATS_INTERVAL_S = 1.0
 # System Settings → Privacy & Security → Screen & System Audio Recording (process taps).
 PERMISSIONS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
@@ -118,6 +119,7 @@ class Host:
         )
         self._loop: asyncio.AbstractEventLoop | None = None
         self._last_click = -CLICK_INTERVAL_S
+        self._last_recover = -RECOVER_INTERVAL_S
         self._throttled: bool | None = None
         self._tasks: set[asyncio.Future[Any]] = set()
         self._notices: list[dict[str, Any]] = []  # sent to the next shell after its hello
@@ -259,6 +261,13 @@ class Host:
     def _on_hang(self) -> None:
         """No heartbeat for 2 s: a plugin froze the shared WebContent process (spike).
         Disable the active visualizer so the reload doesn't hang again, then kill-and-reset."""
+        now = time.monotonic()
+        if now - self._last_recover < RECOVER_INTERVAL_S:
+            log.warning(
+                "shell stopped responding again within %.0f s; not reloading", RECOVER_INTERVAL_S
+            )
+            return
+        self._last_recover = now
         key = self.settings.data["active"]
         if key is not None:
             self.registry.disable(key)

@@ -441,3 +441,19 @@ describe("app: transparent background and borderless window", () => {
     expect(root.querySelector(".topbar")?.classList.contains("pywebview-drag-region")).toBe(true);
   });
 });
+
+describe("app: visibility", () => {
+  it("tells the host when the window is hidden so the hang watchdog pauses", () => {
+    const { app, sent, host } = setup();
+    app.handle(hello());
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(sent.filter((m) => m.type === "visibility")).toEqual([
+      { type: "visibility", visible: false },
+      { type: "visibility", visible: true },
+    ]);
+    expect(host.setVisible.mock.calls).toEqual([[false], [true]]);
+  });
+});

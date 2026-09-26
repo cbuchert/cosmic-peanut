@@ -83,6 +83,7 @@ _SCHEMAS: dict[str, dict[str, tuple[Check, bool]]] = {
     "remove": {"repo": (_str, True)},
     "enable": {"key": (_str, True)},
     "openPermissions": {},
+    "visibility": {"visible": (_bool, True)},
     "window": {"action": (_one_of("fullscreen", "floatOnTop", "borderless", "quit"), True)},
 }
 

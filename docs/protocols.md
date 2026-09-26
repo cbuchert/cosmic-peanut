@@ -181,6 +181,7 @@ Shell → host:
 | type | Fields |
 | --- | --- |
 | `heartbeat` | `t` — every 500 ms; 2 s without one (counted from connect or the last heartbeat, while ≥1 client is connected) ⇒ host reloads the web view with the active visualizer disabled |
+| `visibility` | `visible` — the window was hidden/minimized or shown; the hang watchdog pauses while hidden (WebKit throttles hidden pages' timers past 2 s) |
 | `select` | `key` — active visualizer changed (persisted) |
 | `params` | `key`, `values` (full set, persisted) |
 | `setSource` | `id` |
