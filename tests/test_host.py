@@ -477,3 +477,30 @@ async def test_plugin_rate_changes_are_logged_once_per_crossing(
         "builtin/bars running at 60 fps",
         "builtin/bars throttled at 20 fps",
     ]
+
+
+@pytest.mark.asyncio
+async def test_bench_mode_activates_the_key_and_records_perf_and_stats(
+    tmp_path: Path, window: FakeWindow, http
+):
+    h = Host(
+        root=tmp_path / "home",
+        builtin_dirs=BUILTINS,
+        source_id="synthetic:demo",
+        window=window,
+        bench_key="builtin/orbit",
+    )
+    await h.start()
+    try:
+        shell = await connect(h, http)
+        hello = await shell.next_json("hello")
+        assert hello["active"] == "builtin/orbit"
+        for _ in range(4):
+            await shell.send({**perf(60), "key": "builtin/orbit"})
+        await shell.next_json("stats", timeout=2.5)
+        assert h.bench is not None
+        report = h.bench.report()
+        assert report["key"] == "builtin/orbit" and report["reports"] == 2  # after warm-up
+        assert report["rssMbMax"] > 0
+    finally:
+        await h.stop()

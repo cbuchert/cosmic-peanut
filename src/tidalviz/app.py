@@ -6,12 +6,18 @@ own thread, plus the pipeline's capture and analysis threads.
 
 import argparse
 import asyncio
+import json
 import logging
 import sys
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tidalviz.paths import default_root
+
+if TYPE_CHECKING:
+    from tidalviz.host import Host
+    from tidalviz.window import PyWebviewWindow
 
 log = logging.getLogger("tidalviz")
 
@@ -40,7 +46,7 @@ def main(argv: list[str] | None = None) -> None:
     import webview  # type: ignore[import-untyped]
 
     from tidalviz.host import Host
-    from tidalviz.window import PyWebviewWindow, patch_webkit
+    from tidalviz.window import PyWebviewWindow
 
     dev = args.dev is not None
     window = PyWebviewWindow()
@@ -50,6 +56,7 @@ def main(argv: list[str] | None = None) -> None:
         window=window,
         source_id=args.source,
         dev=dev,
+        bench_key=args.bench,
     )
     if args.dev is not None:
         host.use_dev_folder(args.dev)
@@ -59,8 +66,6 @@ def main(argv: list[str] | None = None) -> None:
     asyncio.run_coroutine_threadsafe(host.start(), loop).result(timeout=10)
     log.info("shell %s  plugins %s", host.servers.shell_origin, host.servers.plugin_origin)
 
-    # 120 Hz where the display offers it (WebKit prefers 60 by default); inspectable in dev.
-    patch_webkit(features={"PreferPageRenderingUpdatesNear60FPSEnabled": False})
     win = webview.create_window(  # pyright: ignore[reportUnknownMemberType]
         "Tidalviz",
         host.servers.shell_url,
@@ -70,11 +75,24 @@ def main(argv: list[str] | None = None) -> None:
         background_color="#000000",
     )
     window.attach(win)
+    if args.bench is not None:
+        threading.Thread(target=_finish_bench, args=(host, window, args), daemon=True).start()
     try:
         webview.start(debug=dev)  # pyright: ignore[reportUnknownMemberType]
     finally:
         asyncio.run_coroutine_threadsafe(host.stop(), loop).result(timeout=10)
         loop.call_soon_threadsafe(loop.stop)
+
+
+def _finish_bench(host: "Host", window: "PyWebviewWindow", args: argparse.Namespace) -> None:
+    import time
+
+    time.sleep(args.seconds)
+    assert host.bench is not None
+    report = host.bench.report()
+    args.out.write_text(json.dumps(report, indent=2) + "\n")
+    log.info("bench report written to %s: %s", args.out, report)
+    window.quit()
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from typing import Any, Protocol
 import numpy as np
 import psutil
 
+from tidalviz.bench import BenchRecorder
 from tidalviz.capture import (
     AudioSource,
     CatapAppSource,
@@ -91,12 +92,16 @@ class Host:
         hang_after: float = HANG_AFTER_S,
         fetcher: GitFetcher | None = None,
         open_url: Callable[[str], None] = open_url,
+        bench_key: str | None = None,
     ) -> None:
         root.mkdir(parents=True, exist_ok=True)
         self.settings = Settings(root / "settings.json")
         if source_id is not None:
             self.settings.data["source"] = source_id  # this launch only; not persisted
         self.registry = PluginRegistry(root, builtin_dirs, fetcher=fetcher)
+        self.bench = BenchRecorder(bench_key) if bench_key is not None else None
+        if bench_key is not None:
+            self.settings.data["active"] = bench_key  # this launch only; not persisted
         self.window = window
         self._open_url = open_url
         self.dev = dev
@@ -274,6 +279,8 @@ class Host:
                 self.pipeline.pause()
 
     def _on_message(self, client: TextSocket, msg: dict[str, Any]) -> None:
+        if self.bench is not None:
+            self.bench.add(msg)
         match msg["type"]:
             case "select":
                 self.settings.update({"active": msg["key"]})
@@ -390,7 +397,10 @@ class Host:
         while True:
             await asyncio.sleep(STATS_INTERVAL_S)
             if self.servers.control.client_count:
-                await self.servers.control.broadcast_json(self.stats())
+                stats = self.stats()
+                if self.bench is not None:
+                    self.bench.add(stats)
+                await self.servers.control.broadcast_json(stats)
 
     # --- installs (blocking registry work runs in a thread) --------------------------------
 

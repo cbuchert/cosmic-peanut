@@ -10,34 +10,6 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 
-def patch_webkit(*, features: dict[str, bool]) -> None:
-    """Make pywebview's WKWebViewConfiguration set WebKit feature flags (no hook exists)."""
-    import WebKit  # type: ignore[import-not-found]
-    from webview.platforms import cocoa  # type: ignore[import-not-found]
-
-    real = WebKit
-
-    class _Config:
-        @staticmethod
-        def alloc() -> "_Config":
-            return _Config()
-
-        def init(self) -> Any:
-            c = real.WKWebViewConfiguration.alloc().init()
-            for f in real.WKPreferences._features():
-                if str(f.key()) in features:
-                    c.preferences()._setEnabled_forFeature_(features[str(f.key())], f)
-            return c
-
-    class _Proxy:
-        WKWebViewConfiguration = _Config
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(real, name)
-
-    cocoa.WebKit = _Proxy()
-
-
 def _on_main(fn: Any) -> None:
     from PyObjCTools import AppHelper  # type: ignore[import-not-found]
 
