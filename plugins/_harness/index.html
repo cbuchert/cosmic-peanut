@@ -1,7 +1,17 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>Tidalviz plugin harness</title>
-<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+<style>
+  html,body{margin:0;height:100%;background:transparent;overflow:hidden}
+  /* The backdrop the shell would supply: black, or (bg=light) a stand-in for a bright, busy desktop. */
+  #bg{position:fixed;inset:0;background:#000}
+  #bg.light{background:linear-gradient(120deg,#fdfcf7 0%,#ffd9a8 30%,#bfe8ff 60%,#f4f4f4 100%);
+    color:#1b2433;font:600 28px/1.5 -apple-system,Helvetica,sans-serif;padding:24px;box-sizing:border-box}
+  #bg.light span{display:inline-block;margin:0 18px 8px 0}
+  #bg.light .box{display:inline-block;width:140px;height:80px;margin:8px;border-radius:10px}
+  canvas{position:fixed;inset:0;display:block;width:100vw;height:100vh}
+</style>
 <script type="importmap">{"imports":{"three":"/web/vendor/three/three.module.js","three/addons/":"/web/vendor/three/addons/"}}</script>
+<div id="bg"></div>
 <canvas id="c"></canvas>
 <script type="module" src="./harness.js"></script>

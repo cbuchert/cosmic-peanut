@@ -76,6 +76,7 @@ export default async function create(ctx) {
   // Soft lines: rings go to a 1× (CSS-pixel) multisampled RGBA8 buffer (the prototype's canvas had
   // antialias on; the host's doesn't), resolve into a texture, then upscale linearly to the canvas.
   // 2× MSAA matches the prototype's smoothness side by side at ~20% less GPU time than 4×.
+  // RGBA8 end to end: the rings' premultiplied alpha survives the resolve and the blit.
   const samples = Math.min(2, gl.getParameter(gl.MAX_SAMPLES));
   const msaaRb = gl.createRenderbuffer();
   const msaaFbo = gl.createFramebuffer();
@@ -132,7 +133,7 @@ export default async function create(ctx) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, msaaFbo);
         gl.viewport(0, 0, softW, softH);
       }
-      gl.clearColor(0, 0, 0, 1);
+      gl.clearColor(0, 0, 0, 0); // transparent canvas: the shell supplies black or the desktop
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.disable(gl.DEPTH_TEST);
       gl.enable(gl.BLEND);

@@ -57,7 +57,19 @@ the app renders the controls. Read them from `ctx.params` (always current) and i
 never in `frame` (no `new`, no array/object literals, no string building per frame). Size your
 work from `ctx.size`, not `window.devicePixelRatio`.
 
-## Photosensitivity
+## Transparent canvas
+
+The canvas is **transparent and premultiplied**. The app draws black behind it by default, or the
+user's desktop when they turn on *Transparent background*. So:
+
+- Clear to transparent (`gl.clearColor(0, 0, 0, 0)`, or `clearRect` in 2D), never to opaque black.
+- Output premultiplied colour with a meaningful alpha. For glowing, additive looks, draw as if on
+  black and set `alpha = max(r, g, b)` — the last lines of `src/scene.frag` do exactly that. Over
+  black it looks identical to an opaque canvas; over the desktop it glows on top of it.
+- Alpha `1.0` everywhere paints a black rectangle over the desktop; alpha lower than your brightest
+  channel gives bright fringes. Offscreen buffers can keep whatever alpha they like, as long as the
+  final pass to the canvas follows the rule.
+
 
 Users have a "Reduce flashing" setting, on by default, exposed as `ctx.reduceFlashing`. When it's
 on, keep full-screen brightness changes to **at most 3 per second**. `src/flash.js` does that for you:
