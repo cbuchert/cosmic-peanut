@@ -12,7 +12,7 @@ export const RESTART = 0xffffffff;
  * @param {number} M points per ring
  */
 export function buildGrid(N, M) {
-  const verts = new Float32Array(N * (M + 1) * 2);
+  const verts = new Uint16Array(N * (M + 1) * 2);
   const indices = new Uint32Array(N * (M + 2));
   let v = 0;
   let k = 0;
