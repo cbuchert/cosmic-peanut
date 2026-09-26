@@ -26,7 +26,7 @@ def test_sleeps_until_shortly_before_the_next_chunk_is_due():
 
 def test_jittery_detection_still_paces_but_irregular_arrival_stops_it():
     pacer = DrainPacer()
-    for t in (0.0, P + 0.0009, 2 * P + 0.0001):  # ±1 ms detection jitter
+    for t in (0.0, P + 0.0009, 2 * P + 0.0001):  # ~1 ms detection jitter
         pacer.polled(True, t)
     assert pacer.idle_wait(2 * P + 0.0005) > 0.005
     pacer.polled(True, 4 * P)  # a chunk came late (two periods): distrust the period
@@ -63,20 +63,69 @@ class FakeEvent:
         return False
 
 
-def test_install_sleeps_after_an_empty_read_once_the_period_is_known(monkeypatch):
-    import tidalviz.capture.catap_drain as cd
+class SimulatedCatap:
+    """catap's drain loop against a ring that receives a chunk every P (plus jitter)."""
 
-    cls = type("Rec", (FakeRecorder,), {})
-    assert cd.install(cls, promote=lambda: None) and cd.install(cls)  # idempotent
-    clock = iter([0.0, P, 2 * P, 2 * P + 0.0002, 3 * P])  # one read per call, two after a sleep
-    monkeypatch.setattr(cd.time, "monotonic", lambda: next(clock))
-    rec, ev = cls([True, True, True, False, True]), FakeEvent()
-    for _ in range(3):
-        assert rec._drain_native_recorder(None, ev)
-    assert ev.waits == []
-    assert rec._drain_native_recorder(None, ev)  # empty read → sleep → read again → chunk
-    assert rec.calls == 5
-    assert abs(ev.waits[0] - (P - DrainPacer.EARLY_S - 0.0002)) < 1e-9
+    def __init__(self, monkeypatch, jitter: list[float]) -> None:
+        import tidalviz.capture.catap_drain as cd
+
+        self.now = 0.0
+        self.jitter = jitter
+        self.next_k = 0  # next chunk not yet read
+        self.reads = 0
+        self.latency: list[float] = []
+        self.bunched = 0
+        monkeypatch.setattr(cd.time, "monotonic", lambda: self.now)
+        sim = self
+
+        class Rec:
+            def _drain_native_recorder(self, native_recorder: object, abort_event: object) -> bool:
+                sim.reads += 1
+                arrived = [
+                    k for k in range(sim.next_k, sim.next_k + 3) if sim.arrival(k) <= sim.now
+                ]
+                if not arrived:
+                    return False
+                sim.bunched += len(arrived) > 1
+                sim.latency += [sim.now - sim.arrival(k) for k in arrived]
+                sim.next_k = arrived[-1] + 1
+                return True
+
+        class Ev:
+            def wait(self, timeout: float) -> bool:
+                sim.now += timeout
+                return False
+
+        cd.install(Rec, promote=lambda: None)
+        self.rec, self.ev = Rec(), Ev()
+
+    def arrival(self, k: int) -> float:
+        return k * P + self.jitter[k % len(self.jitter)]
+
+    def run(self, seconds: float) -> None:
+        while self.now < seconds:
+            if not self.rec._drain_native_recorder(None, self.ev):
+                self.now += 0.001  # catap: stop_event.wait(0.001) after an empty read
+
+
+def test_paced_drain_reads_about_twice_per_chunk_with_low_latency(monkeypatch):
+    # Measured with a 0.2 ms real-time poll: intervals 10.43–10.91 ms (p0.1–p99.9).
+    sim = SimulatedCatap(monkeypatch, jitter=[0.0, 0.00025, -0.0002, 0.0001, 0.00025, -0.00025])
+    sim.run(1.0)
+    warm = sim.reads
+    chunks = sim.next_k
+    sim.run(3.0)
+    per_chunk = (sim.reads - warm) / (sim.next_k - chunks)
+    assert per_chunk <= 2.2, per_chunk  # catap alone: ~10.7
+    assert sim.bunched == 0
+    assert max(sim.latency) < 0.002 and sum(sim.latency) / len(sim.latency) < 0.001
+
+
+def test_irregular_chunks_fall_back_to_catap_polling_without_bunching(monkeypatch):
+    sim = SimulatedCatap(monkeypatch, jitter=[0.0, 0.0025, -0.002, 0.0, 0.002, 0.0005, -0.0025])
+    sim.run(3.0)
+    assert sim.bunched == 0  # a pair would cost a frame
+    assert max(sim.latency) < 0.008  # bounded by the (unrealistic, ±2.5 ms) jitter
 
 
 def test_install_leaves_a_recorder_without_the_hook_alone():
