@@ -24,6 +24,7 @@ DEFAULTS: dict[str, Any] = {
     "window": None,
     "transparent": True,  # show the desktop behind the visual
     "borderless": True,  # no title bar or window chrome
+    "onTop": True,  # float above other apps
 }
 
 
@@ -52,6 +53,7 @@ _VALID: dict[str, Callable[[Any], bool]] = {
     "window": _is_window,
     "transparent": _is_bool,
     "borderless": _is_bool,
+    "onTop": _is_bool,
 }
 
 

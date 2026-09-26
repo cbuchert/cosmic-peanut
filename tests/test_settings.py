@@ -54,3 +54,9 @@ def test_transparent_and_borderless_default_on(tmp_path: Path):
     s = Settings(tmp_path / "settings.json")
     assert s.data["transparent"] is True and s.data["borderless"] is True
     assert s.update({"transparent": False, "borderless": "no"}) == {"transparent": False}
+
+
+def test_float_on_top_defaults_on(tmp_path: Path):
+    s = Settings(tmp_path / "settings.json")
+    assert s.data["onTop"] is True
+    assert s.update({"onTop": False}) == {"onTop": False}

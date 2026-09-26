@@ -539,3 +539,13 @@ async def test_recovery_never_loops(tmp_path: Path, window: FakeWindow, http):
         assert window.calls.count("recover") == 1
     finally:
         await h.stop()
+
+
+@pytest.mark.asyncio
+async def test_float_on_top_toggle_persists(host: Host, window: FakeWindow, http):
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    assert host.settings.data["onTop"] is True
+    await shell.send({"type": "window", "action": "floatOnTop"})
+    await asyncio.sleep(0.2)
+    assert host.settings.data["onTop"] is False and window.calls == ["floatOnTop"]

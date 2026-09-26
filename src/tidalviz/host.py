@@ -349,8 +349,9 @@ class Host:
         }
         if (fn := actions.get(action)) is not None:
             fn()
-        if action == "borderless":
-            self.settings.update({"borderless": not self.settings.data["borderless"]})
+        persisted = {"borderless": "borderless", "floatOnTop": "onTop"}
+        if (key := persisted.get(action)) is not None:
+            self.settings.update({key: not self.settings.data[key]})
 
     async def _broadcast_visualizers(self) -> None:
         await self.servers.control.broadcast_json(

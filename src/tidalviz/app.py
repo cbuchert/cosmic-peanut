@@ -79,6 +79,7 @@ def main(argv: list[str] | None = None) -> None:
         # steal drags meant for the visual, e.g. Cosmic Peanut's orbit).
         transparent=True,
         frameless=host.settings.data["borderless"],
+        on_top=host.settings.data["onTop"],
         easy_drag=False,
     )
     window.attach(win, borderless=host.settings.data["borderless"])
