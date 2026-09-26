@@ -181,6 +181,11 @@ export interface VisualizerContext {
    * most 3 per second (photosensitivity).
    */
   readonly reduceFlashing: boolean;
+  /**
+   * macOS "Reduce motion" (live). When true, default to gentler motion (e.g. stop
+   * self-orbiting cameras); users can still raise it through params.
+   */
+  readonly reduceMotion: boolean;
 
   /** Log to the host's plugin console (dev overlay). Strings only are rendered, never HTML. */
   log(...args: unknown[]): void;
@@ -199,6 +204,21 @@ export interface Visualizer {
   params?(changed: ParamValues): void;
   /** Optional. Release GPU resources, timers, listeners. */
   dispose?(): void;
+  /**
+   * Optional. Pointer input on the visual (drag to orbit, etc.). The event object is reused:
+   * read it during the call. Coordinates are CSS pixels in the canvas.
+   */
+  pointer?(e: PointerInput): void;
+}
+
+export interface PointerInput {
+  kind: "down" | "move" | "up";
+  /** Position in CSS pixels from the canvas's top-left. */
+  x: number;
+  y: number;
+  /** Movement since the previous event, CSS pixels. */
+  dx: number;
+  dy: number;
 }
 
 /** The entry module's default export. May be async. */

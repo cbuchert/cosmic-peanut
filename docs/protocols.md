@@ -212,6 +212,7 @@ Shell → SDK (port):
 | `{type:"params", changed}` | |
 | `{type:"settings", quality?, maxDpr?, fpsCap?, reduceFlashing?}` | |
 | `{type:"visibility", visible}` | Hidden ⇒ SDK stops its rAF loop |
+| `{type:"pointer", kind, x, y, dx, dy}` | Drag on the stage, active plugin only. `kind` ∈ down/move/up; CSS px in the canvas. SDK validates and calls the plugin's `pointer` hook |
 | `{type:"dispose"}` | SDK calls `dispose()`, then the shell removes the iframe |
 
 SDK → shell (port):

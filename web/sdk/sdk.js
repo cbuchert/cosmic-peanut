@@ -77,6 +77,10 @@ async function start(opts, init, port, load) {
     devicePixelRatio: () => window.devicePixelRatio || 1,
     fetch: (url) => fetch(url),
     createImageBitmap: (b) => createImageBitmap(b),
+    reduceMotion: (() => {
+      const mq = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+      return () => mq?.matches ?? false;
+    })(),
   });
 
   port.onmessage = (e) => rt.handleMessage(e.data); // setting onmessage also starts the port

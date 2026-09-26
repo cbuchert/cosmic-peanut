@@ -217,6 +217,34 @@ export function createApp(deps) {
     onEvent,
   });
 
+  // ---- pointer input: drags on the stage go to the active plugin -----------------------------
+  /** @type {{ id: number, x: number, y: number } | null} */
+  let drag = null;
+  /** @param {PointerEvent} e @param {"down" | "move" | "up"} kind */
+  const forward = (e, kind) => {
+    const r = stage.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    const dx = kind === "move" && drag ? x - drag.x : 0, dy = kind === "move" && drag ? y - drag.y : 0;
+    if (drag) (drag.x = x), (drag.y = y);
+    pluginHost.pointer(kind, x, y, dx, dy);
+  };
+  stage.addEventListener("pointerdown", (e) => {
+    drag = { id: e.pointerId, x: 0, y: 0 };
+    stage.setPointerCapture?.(e.pointerId);
+    forward(e, "down");
+  });
+  stage.addEventListener("pointermove", (e) => {
+    if (drag && e.pointerId === drag.id) forward(e, "move");
+  });
+  for (const type of ["pointerup", "pointercancel"]) {
+    stage.addEventListener(type, (e) => {
+      const pe = /** @type {PointerEvent} */ (e);
+      if (!drag || pe.pointerId !== drag.id) return;
+      forward(pe, "up");
+      drag = null;
+    });
+  }
+
   // ---- helpers -------------------------------------------------------------------------------
   /** @param {string} key */
   const find = (key) => visualizers.find((v) => v.key === key);

@@ -305,6 +305,16 @@ export function createPluginHost(deps) {
       for (const s of live()) post(s, { type: "settings", ...partial });
     },
 
+    /**
+     * Pointer input on the stage, for the active plugin only (iframes don't get pointer
+     * events themselves, so the shell keeps its idle/overlay handling).
+     * @param {"down" | "move" | "up"} kind @param {number} x @param {number} y
+     * @param {number} dx @param {number} dy
+     */
+    pointer(kind, x, y, dx, dy) {
+      if (active?.port) post(active, { type: "pointer", kind, x, y, dx, dy });
+    },
+
     /** @param {boolean} visible */
     setVisible(visible) {
       for (const s of live()) post(s, { type: "visibility", visible });

@@ -38,6 +38,7 @@ function fakeHost() {
     setParams: vi.fn(),
     setSettings: vi.fn(),
     setVisible: vi.fn(),
+    pointer: vi.fn(),
     shellStats: vi.fn(() => ({ count: 94, p50: 0.05, p99: 0.1, max: 0.2 })),
     dispose: vi.fn(),
     /** @param {import("./pluginHost.js").PluginEvent} e */
@@ -392,5 +393,25 @@ describe("app: settings", () => {
     app.handle(hello());
     document.dispatchEvent(new Event("visibilitychange"));
     expect(host.setVisible).toHaveBeenCalled();
+  });
+});
+
+
+describe("app: pointer input", () => {
+  it("drags on the stage go to the plugin host as down/move/up with deltas", () => {
+    const { app, root, host } = setup();
+    app.handle(hello());
+    const stage = /** @type {HTMLElement} */ (root.querySelector("#stage"));
+    const fire = (/** @type {string} */ type, /** @type {number} */ x, /** @type {number} */ y) =>
+      stage.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, bubbles: true, pointerId: 1 }));
+    fire("pointerdown", 100, 100);
+    fire("pointermove", 110, 95);
+    fire("pointerup", 110, 95);
+    fire("pointermove", 200, 200); // not dragging: ignored
+    expect(host.pointer.mock.calls).toEqual([
+      ["down", 100, 100, 0, 0],
+      ["move", 110, 95, 10, -5],
+      ["up", 110, 95, 0, 0],
+    ]);
   });
 });

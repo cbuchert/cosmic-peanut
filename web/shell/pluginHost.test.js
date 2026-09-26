@@ -267,6 +267,19 @@ describe("pluginHost", () => {
     ]);
   });
 
+  it("forwards pointer input to the active plugin only", () => {
+    const { host, load } = setup();
+    host.show(vizA, {});
+    const pa = load(0);
+    pa.emit({ type: "ready" });
+    host.pointer("down", 10, 20, 0, 0);
+    host.pointer("move", 14, 19, 4, -1);
+    expect(pa.posted.map((p) => p.msg)).toEqual([
+      { type: "pointer", kind: "down", x: 10, y: 20, dx: 0, dy: 0 },
+      { type: "pointer", kind: "move", x: 14, y: 19, dx: 4, dy: -1 },
+    ]);
+  });
+
   it("measures shell time per frame", () => {
     const { host, load } = setup();
     host.show(vizA, {});

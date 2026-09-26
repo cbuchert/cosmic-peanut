@@ -110,6 +110,7 @@ export default async function create(ctx) {
     resize(size) {},         // canvas was resized; size === ctx.size
     params(changed) {},      // only the keys that changed
     dispose() {},            // free GPU resources, timers, listeners
+    pointer(e) {},           // drag on the visual: e = { kind: "down"|"move"|"up", x, y, dx, dy } (reused object)
   };
 }
 ```
@@ -130,6 +131,7 @@ own rAF loop and don't resize the canvas.
 | `renderScale` | 0.5–1, lowered automatically in Auto quality when frames run over budget |
 | `quality` | `auto`, `high`, `balanced`, `battery` |
 | `reduceFlashing` | Live; when true, at most 3 full-screen brightness changes per second |
+| `reduceMotion` | Live; macOS "Reduce motion". When true, default to gentler motion (e.g. no self-orbit) |
 | `log(...)` | Prints to the dev overlay's console |
 | `id`, `name`, `renderer`, `apiVersion` | From the manifest |
 
