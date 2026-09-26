@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover - numpy < 2
 
 
 def rfft(x: np.ndarray, out: np.ndarray) -> None:
-    """``out[:] = np.fft.rfft(x)`` for an even-length float64 ``x``."""
+    """``out[:] = np.fft.rfft(x)`` for an even-length float32 or float64 ``x``."""
     if _rfft_gufunc is not None:
         _rfft_gufunc(x, 1.0, out=out)
     else:  # pragma: no cover

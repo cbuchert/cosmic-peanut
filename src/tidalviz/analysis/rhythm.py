@@ -32,7 +32,7 @@ class Onset:
     def __init__(self, ctx: AnalysisContext) -> None:
         nb = ctx.settings.n_bands
         self._inv_nb = 1.0 / nb
-        self._diff = np.zeros(nb, dtype=np.float64)
+        self._diff = np.zeros(nb, dtype=np.float32)
         # Recent flux as plain floats with a running sum: a numpy mean per hop costs more.
         self._hist = [0.0] * max(2, round(self.HISTORY_S / ctx.dt))
         self._hist_sum = 0.0

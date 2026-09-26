@@ -6,7 +6,6 @@ import numpy as np
 
 from tidalviz.analysis.analyzer import (
     BASS_MID_TREB_HZ,
-    F64,
     SUM_BASS,
     SUM_FREQ,
     SUM_MAG,
@@ -103,7 +102,7 @@ class Spectrum:
 
     def __init__(self, ctx: AnalysisContext) -> None:
         self._fold = (ctx.n_bins - 1) // N_SPECTRUM  # 1 for FFT 2048, 2 for 4096
-        self._folded: F64 = np.zeros(N_SPECTRUM, dtype=np.float64)
+        self._folded: F32 = np.zeros(N_SPECTRUM, dtype=np.float32)
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
         body = ctx.mag[: N_SPECTRUM * self._fold]
@@ -139,7 +138,7 @@ class Bands:
         # so the per-band offset folds into the weights. The weights are sparse (each band
         # covers a few bins): one take + multiply + reduceat instead of a 64 × 1025 product.
         # A constant 1.0 after the last bin carries the 1e-12 floor into each band's sum.
-        self._scale = 10.0 / db_range
+        self._scale = np.float32(10.0 / db_range)
         c = 10.0 ** ((tilt_db - self.DB_FLOOR) / 10.0)
         idx: list[np.ndarray] = []
         wts: list[np.ndarray] = []
@@ -152,16 +151,16 @@ class Bands:
             wts += [weights[b, bins] * c[b], np.array([1e-12 * c[b]])]
             pos += bins.size + 1
         self._idx = np.concatenate(idx).astype(np.intp)
-        self._wts: F64 = np.concatenate(wts)
+        self._wts: F32 = np.concatenate(wts).astype(np.float32)
         self._starts = starts
-        self._vals: F64 = np.zeros(self._idx.size, dtype=np.float64)
-        self._power: F64 = np.ones(nb + 1, dtype=np.float64)  # [nb] stays 1.0
-        self._x: F64 = np.zeros(s.n_bands, dtype=np.float64)
+        self._vals: F32 = np.zeros(self._idx.size, dtype=np.float32)
+        self._power: F32 = np.ones(nb + 1, dtype=np.float32)  # [nb] stays 1.0
+        self._x: F32 = np.zeros(s.n_bands, dtype=np.float32)
         self._lv: F32 = np.zeros(s.n_bands, dtype=np.float32)
-        self._level_floor = -10.0 / db_range  # Onset sees levels down to floor − 10 dB
+        self._level_floor = np.float32(-10.0 / db_range)  # Onset sees down to floor − 10 dB
         self._decay = np.float32(math.exp(-ctx.dt / self.RELEASE_S))
         # Two level buffers alternate so Onset can compare against the previous hop, no copy.
-        self._levels: F64 = np.zeros((2, s.n_bands), dtype=np.float64)
+        self._levels: F32 = np.zeros((2, s.n_bands), dtype=np.float32)
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
         power, x, lv = self._power[:-1], self._x, self._lv

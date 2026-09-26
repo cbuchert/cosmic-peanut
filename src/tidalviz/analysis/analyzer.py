@@ -45,36 +45,36 @@ class AnalysisContext:
         self.bin_hz = sample_rate / n
         self.freqs: F32 = np.fft.rfftfreq(n, 1.0 / sample_rate).astype(np.float32)
         # Hann window with the magnitude scale folded in (a full-scale sine reads 1.0 at its
-        # peak bin). float32 like the samples, so the product is computed in float32 and only
-        # cast into the float64 FFT input (with out= numpy's pocketfft then needs no scratch).
+        # peak bin). The spectrum path is float32 end to end: no casting ufunc loops (numpy
+        # sets up a buffered iterator for those, which is most of a small call's cost).
         hann = np.hanning(n)
         self.window: F32 = (hann * (2.0 / float(np.sum(hann)))).astype(np.float32)
         self._mix: F32 = np.full(channels, 1.0 / channels, dtype=np.float32)
         self.pcm: F32 = np.zeros((channels, n), dtype=np.float32)  # planar; a ring view per hop
         self.mono: F32 = np.zeros(n, dtype=np.float32)  # pcm[0] itself when mono
-        self.windowed: F64 = np.zeros(n, dtype=np.float64)
+        self.windowed: F64 = np.zeros(n, dtype=np.float64)  # float32 input makes the FFT allocate
         self.spec = np.zeros(nb, dtype=np.complex128)
         # Rows 0 and 1 alternate as this hop's and the previous hop's magnitude (no copy); row 2
         # is their elementwise minimum, for flux. Linear amplitude, not gained.
-        self._mags: F64 = np.zeros((3, nb), dtype=np.float64)
-        self.mag: F64 = self._mags[0]
-        self.prev_mag: F64 = self._mags[1]
+        self._mags: F32 = np.zeros((3, nb), dtype=np.float32)
+        self.mag: F32 = self._mags[0]
+        self.prev_mag: F32 = self._mags[1]
         # (bins, 5): ones, frequency / Nyquist, and the bass, mid and treble bin masks.
-        cols = np.zeros((nb, 5), dtype=np.float64)
+        cols = np.zeros((nb, 5), dtype=np.float32)
         cols[:, SUM_MAG] = 1.0
         cols[:, SUM_FREQ] = self.freqs / (sample_rate / 2)
         for c, (lo, hi) in zip((SUM_BASS, SUM_MID, SUM_TREB), BASS_MID_TREB_HZ, strict=True):
             cols[int(np.ceil(lo / self.bin_hz)) : min(int(np.ceil(hi / self.bin_hz)), nb), c] = 1
         self._cols = cols
-        self._sums: F64 = np.zeros((3, 5), dtype=np.float64)
-        self.sums: F64 = self._sums[0]  # Σ mag · column, this hop (SUM_* indices)
-        self.prev_sums: F64 = self._sums[1]  # the same for the previous hop
+        self._sums: F32 = np.zeros((3, 5), dtype=np.float32)
+        self.sums: F32 = self._sums[0]  # Σ mag · column, this hop (SUM_* indices)
+        self.prev_sums: F32 = self._sums[1]  # the same for the previous hop
         self.sum_min = 0.0  # Σ min(mag, prev_mag)
         self.gain = 1.0  # auto-gain factor for display features (set by AutoGain)
         self.silent = True  # set by Level
         # Tilted band levels on the 0–1 display scale, unclipped (floored at −10 dB below 0).
-        self.band_level: F64 = np.zeros(settings.n_bands, dtype=np.float64)  # set by Bands
-        self.prev_band_level: F64 = np.zeros(settings.n_bands, dtype=np.float64)  # last hop's
+        self.band_level: F32 = np.zeros(settings.n_bands, dtype=np.float32)  # set by Bands
+        self.prev_band_level: F32 = np.zeros(settings.n_bands, dtype=np.float32)  # last hop's
         self.hop_ms = 0.0  # mean square of the newest hop (set by Level)
         self.odf = 0.0  # onset detection function value this hop (set by Onset, read by Tempo)
         self.onset = False  # set by Onset
