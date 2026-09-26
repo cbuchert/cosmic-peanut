@@ -104,7 +104,7 @@ describe("decodeInto validation and layout", () => {
   });
   it("a fresh frame is silent and zeroed with default sizes", () => {
     const f = createAudioFrame();
-    expect([f.bands.length, f.spectrum.length, f.waveform.length]).toEqual([64, 1024, 512]);
+    expect([f.bands.length, f.spectrum.length, f.waveform.length]).toEqual([64, 1024, 2048]);
     expect(f.silent).toBe(true);
     expect(f.onset).toBe(false);
     expect(f.left).toBeNull();

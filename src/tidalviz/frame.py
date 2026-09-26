@@ -17,7 +17,7 @@ SCALAR_INDEX: dict[str, int] = {name: i for i, name in enumerate(SCALAR_NAMES)}
 N_SCALARS = len(SCALAR_NAMES)
 N_BANDS = 64
 N_SPECTRUM = 1024
-N_WAVEFORM = 512
+N_WAVEFORM = 2048  # newest samples per channel; overlaps between frames
 
 
 @dataclass(slots=True)

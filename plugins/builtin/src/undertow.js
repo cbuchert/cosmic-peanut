@@ -75,7 +75,10 @@ export default async function create(ctx) {
       // Audio → texture (zero-copy views straight into texSubImage2D).
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, audioTex);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 512, 1, gl.RED, gl.FLOAT, audio.waveform);
+      // Newest 512 samples; srcOffset avoids a subarray allocation per frame.
+      const samples = audio.waveform;
+      const newest = Math.max(0, samples.length - 512);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 512, 1, gl.RED, gl.FLOAT, samples, newest);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 1, 64, 1, gl.RED, gl.FLOAT, audio.bands);
 
       // 1. Warp previous frame into the other target.

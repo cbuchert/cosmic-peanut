@@ -39,7 +39,7 @@ def build(*, stereo: bool) -> AudioFrame:
     f.scalars[13] = 0.0625  # onsetAge
     f.bands[:] = np.arange(64, dtype=np.float32) / 64
     f.spectrum[:] = (np.arange(1024, dtype=np.float32) % 32) / 32
-    f.waveform[:] = (np.arange(512, dtype=np.float32) - 256) / 256
+    f.waveform[:] = (np.arange(2048, dtype=np.float32) - 1024) / 1024
     if f.left is not None and f.right is not None:
         f.left[:] = f.waveform * 0.5
         f.right[:] = -f.waveform

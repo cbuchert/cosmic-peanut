@@ -35,11 +35,11 @@ export interface AudioFrame {
   readonly bands: Float32Array;
   /** 1024-bin linear magnitude spectrum, normalized 0–1 (bin i ≈ i * sampleRate / 2048 Hz). */
   readonly spectrum: Float32Array;
-  /** Latest 512 samples, mono mix, −1 to 1. */
+  /** Latest 2048 samples, mono mix, −1 to 1 (overlaps between frames; read `.length`). */
   readonly waveform: Float32Array;
-  /** Latest 512 left-channel samples when the source is stereo, else null. */
+  /** Latest 2048 left-channel samples when the source is stereo, else null. */
   readonly left: Float32Array | null;
-  /** Latest 512 right-channel samples when the source is stereo, else null. */
+  /** Latest 2048 right-channel samples when the source is stereo, else null. */
   readonly right: Float32Array | null;
 
   /** Root-mean-square level of the latest hop, 0–1. */

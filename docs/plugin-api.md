@@ -157,8 +157,8 @@ keep (`myCopy.set(audio.bands)`).
 | --- | --- | --- |
 | `bands` | `Float32Array(64)` | Smoothed band levels 0–1, log-spaced 30 Hz – 16 kHz |
 | `spectrum` | `Float32Array(1024)` | Linear magnitude, normalized 0–1 |
-| `waveform` | `Float32Array(512)` | Latest samples, mono mix, −1..1 |
-| `left`, `right` | `Float32Array(512) \| null` | Per-channel samples when the source is stereo |
+| `waveform` | `Float32Array(2048)` | Latest samples, mono mix, −1..1; consecutive frames overlap (≈94 frames/s × 512-sample hop) |
+| `left`, `right` | `Float32Array(2048) \| null` | Per-channel samples when the source is stereo |
 | `rms`, `peak` | number | Level of the latest hop |
 | `bass`, `mid`, `treb` | number | 1.0 = recent average for that band (≈0–2, MilkDrop style) |
 | `bassAtt`, `midAtt`, `trebAtt` | number | Smoothed versions; good for motion |
