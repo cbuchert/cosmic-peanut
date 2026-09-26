@@ -17,9 +17,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import catap
+import catap.recorder
 import numpy as np
 
+from tidalviz.capture import catap_drain
 from tidalviz.capture.base import OnSamples, SourceFormat
+
+catap_drain.install(catap.recorder.AudioRecorder)  # ~1,000 → ~300 drain wakeups a second
 
 BufferCallback = Callable[[catap.AudioBuffer], None]
 
