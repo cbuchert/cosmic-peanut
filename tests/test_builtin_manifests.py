@@ -32,7 +32,12 @@ def test_manifest_validates_against_schema(repo: str):
 
 def test_builtin_renderers():
     got = {v["id"]: (v["renderer"], v.get("libs", [])) for v in _manifest("builtin")["visualizers"]}
-    assert got == {"bars": ("2d", []), "undertow": ("webgl2", []), "orbit": ("three", ["three"])}
+    assert got == {
+        "bars": ("2d", []),
+        "undertow": ("webgl2", []),
+        "orbit": ("three", ["three"]),
+        "pulsar": ("2d", []),
+    }
 
 
 def test_template_is_one_webgl2_visualizer():
@@ -93,6 +98,21 @@ def test_template_readme_covers_the_workflow():
     readme = (REPOS["template"] / "README.md").read_text()
     for needle in ("tidalviz --dev", "Add folder", "reduceFlashing", "bassAtt", "sandbox", "git"):
         assert needle in readme, needle
+
+
+def test_pulsar_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "pulsar"]
+    assert (v["name"], v["entry"], v["thumbnail"]) == (
+        "Pulsar",
+        "src/pulsar.js",
+        "thumbs/pulsar.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["lines", "speed", "height", "color", "lineWidth"]
+    assert params["lines"]["default"] == "80"
+    assert all(40 <= int(o) <= 120 for o in params["lines"]["options"])
+    assert params["speed"]["default"] == 10
+    assert params["color"]["default"] == "#ffffff"
 
 
 def test_cosmic_peanut_manifest_matches_prd():
