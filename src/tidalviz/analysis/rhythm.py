@@ -5,6 +5,7 @@ import math
 import numpy as np
 
 from tidalviz.analysis.analyzer import AnalysisContext
+from tidalviz.analysis.fft import irfft, rfft
 from tidalviz.frame import F32, SCALAR_INDEX, AudioFrame
 
 
@@ -30,9 +31,11 @@ class Onset:
 
     def __init__(self, ctx: AnalysisContext) -> None:
         nb = ctx.settings.n_bands
-        self._prev = np.zeros(nb, dtype=np.float64)
+        self._inv_nb = 1.0 / nb
         self._diff = np.zeros(nb, dtype=np.float64)
-        self._hist: F32 = np.zeros(max(2, round(self.HISTORY_S / ctx.dt)), dtype=np.float32)
+        # Recent flux as plain floats with a running sum: a numpy mean per hop costs more.
+        self._hist = [0.0] * max(2, round(self.HISTORY_S / ctx.dt))
+        self._hist_sum = 0.0
         self._hi = 0
         self._peak = 1e-6
         self._peak_decay = math.exp(-ctx.dt / self.PEAK_DECAY_S)
@@ -51,15 +54,18 @@ class Onset:
         self._last_time: float | None = None
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
-        np.subtract(ctx.band_level, self._prev, out=self._diff)
+        np.subtract(ctx.band_level, ctx.prev_band_level, out=self._diff)
         np.maximum(self._diff, 0.0, out=self._diff)
-        odf = 0.0 if ctx.silent else float(self._diff.mean())
-        np.copyto(self._prev, ctx.band_level)
+        odf = 0.0 if ctx.silent else float(np.add.reduce(self._diff)) * self._inv_nb
 
-        threshold = self.THRESHOLD_RATIO * float(np.mean(self._hist))
+        hist = self._hist
+        threshold = self.THRESHOLD_RATIO * max(self._hist_sum, 0.0) / len(hist)
         threshold += self.THRESHOLD_FLOOR * self._peak
-        self._hist[self._hi] = odf
-        self._hi = (self._hi + 1) % self._hist.size
+        self._hist_sum += odf - hist[self._hi]
+        hist[self._hi] = odf
+        self._hi = (self._hi + 1) % len(hist)
+        if self._hi == 0:
+            self._hist_sum = math.fsum(hist)  # no drift from the running sum
         self._peak = max(odf, self._peak * self._peak_decay, 1e-6)
 
         above = odf > threshold
@@ -170,14 +176,13 @@ class Tempo:
         np.subtract(body, float(np.mean(body)), out=body)
 
     def _estimate(self, ctx: AnalysisContext) -> None:
-        h = self.HISTORY
         self._ordered()
-        np.fft.rfft(self._lin, out=self._spec)
+        rfft(self._lin, self._spec)
         np.abs(self._spec, out=self._pow)
         np.square(self._pow, out=self._pow)
         self._spec.imag[:] = 0.0  # |X|² as a complex array: irfft of a real array would cast
         self._spec.real[:] = self._pow
-        np.fft.irfft(self._spec, n=2 * h, out=self._acf)
+        irfft(self._spec, self._acf)
         acf = self._acf
         zero = float(acf[0])
         if zero <= 1e-12:

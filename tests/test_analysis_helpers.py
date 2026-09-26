@@ -19,3 +19,17 @@ def frames(
     for _ in range(int(seconds * sr / settings.hop)):
         ring.write(src.render(settings.hop), 0.0)
         yield an.process(ring, ring.written / sr)
+
+
+def test_fast_fft_helpers_match_numpy_fft():
+    import numpy as np
+
+    from tidalviz.analysis.fft import irfft, rfft
+
+    x = np.random.default_rng(1).standard_normal(2048)
+    spec = np.zeros(1025, dtype=np.complex128)
+    rfft(x, spec)
+    np.testing.assert_allclose(spec, np.fft.rfft(x), atol=1e-9)
+    back = np.zeros(2048, dtype=np.float64)
+    irfft(spec, back)
+    np.testing.assert_allclose(back, x, atol=1e-9)

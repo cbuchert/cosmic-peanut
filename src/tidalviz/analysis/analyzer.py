@@ -1,17 +1,33 @@
 """The Analyzer: one AudioFrame per hop from an ordered list of FeatureExtractors.
 
 The Analyzer computes the shared per-hop inputs once (newest window, mono mix, Hann-windowed
-magnitude spectrum) into an :class:`AnalysisContext`, then runs each extractor in order. Every
-array is allocated in ``__init__``; the hot path writes through ``out=`` arguments only.
+magnitude spectrum and a few spectral sums) into an :class:`AnalysisContext`, then runs each
+extractor in order. Every array is allocated in ``__init__``; the hot path writes through
+``out=`` arguments only.
+
+Cost model: the analysis thread wakes every ~10.7 ms for well under a millisecond of work, so
+it always runs on cold caches and each numpy call costs ~3–8 µs rather than ~1 µs. The hot
+path is written to make as few numpy calls as possible: the window is a zero-copy view of the
+ring, the frame's waveform planes are views of it, and centroid, flux and bass/mid/treb all
+come from one small matrix product.
 """
 
 from typing import Protocol
 
 import numpy as np
+from numpy.typing import NDArray
 
+from tidalviz.analysis.fft import rfft
 from tidalviz.analysis.settings import AnalysisSettings
 from tidalviz.capture.ring import RingBuffer
 from tidalviz.frame import F32, AudioFrame, new_frame
+
+F64 = NDArray[np.float64]
+
+BASS_MID_TREB_HZ = ((20.0, 250.0), (250.0, 4000.0), (4000.0, 16000.0))
+
+# Columns of AnalysisContext.sums, all from one matrix product per hop.
+SUM_MAG, SUM_FREQ, SUM_BASS, SUM_MID, SUM_TREB = range(5)
 
 
 class AnalysisContext:
@@ -25,26 +41,41 @@ class AnalysisContext:
         self.hop = settings.hop
         self.dt = settings.hop / sample_rate  # seconds per frame
         self.fft_size = n
-        self.n_bins = n // 2 + 1
+        self.n_bins = nb = n // 2 + 1
         self.bin_hz = sample_rate / n
         self.freqs: F32 = np.fft.rfftfreq(n, 1.0 / sample_rate).astype(np.float32)
-        self.window: F32 = np.hanning(n).astype(np.float32)
-        # Scale |rfft| so a full-scale sine reads 1.0 at its peak bin.
-        self.mag_scale = 2.0 / float(np.sum(self.window))
-        self.pcm: F32 = np.zeros((n, channels), dtype=np.float32)  # newest window, oldest first
-        self.mono: F32 = np.zeros(n, dtype=np.float32)
-        # float64 FFT: with out= numpy's pocketfft needs no scratch (float32 input allocates
-        # ~34 KB per call) and it is slightly faster (5.7 vs 6.7 µs for 2048 points on M1).
-        self.windowed = np.zeros(n, dtype=np.float64)
-        self.spec = np.zeros(self.n_bins, dtype=np.complex128)
-        self._mag64 = np.zeros(self.n_bins, dtype=np.float64)
-        self.mag: F32 = np.zeros(self.n_bins, dtype=np.float32)  # linear amplitude, not gained
+        # Hann window with the magnitude scale folded in (a full-scale sine reads 1.0 at its
+        # peak bin). float32 like the samples, so the product is computed in float32 and only
+        # cast into the float64 FFT input (with out= numpy's pocketfft then needs no scratch).
+        hann = np.hanning(n)
+        self.window: F32 = (hann * (2.0 / float(np.sum(hann)))).astype(np.float32)
+        self._mix: F32 = np.full(channels, 1.0 / channels, dtype=np.float32)
+        self.pcm: F32 = np.zeros((channels, n), dtype=np.float32)  # planar; a ring view per hop
+        self.mono: F32 = np.zeros(n, dtype=np.float32)  # pcm[0] itself when mono
+        self.windowed: F64 = np.zeros(n, dtype=np.float64)
+        self.spec = np.zeros(nb, dtype=np.complex128)
+        # Rows 0 and 1 alternate as this hop's and the previous hop's magnitude (no copy); row 2
+        # is their elementwise minimum, for flux. Linear amplitude, not gained.
+        self._mags: F64 = np.zeros((3, nb), dtype=np.float64)
+        self.mag: F64 = self._mags[0]
+        self.prev_mag: F64 = self._mags[1]
+        # (bins, 5): ones, frequency / Nyquist, and the bass, mid and treble bin masks.
+        cols = np.zeros((nb, 5), dtype=np.float64)
+        cols[:, SUM_MAG] = 1.0
+        cols[:, SUM_FREQ] = self.freqs / (sample_rate / 2)
+        for c, (lo, hi) in zip((SUM_BASS, SUM_MID, SUM_TREB), BASS_MID_TREB_HZ, strict=True):
+            cols[int(np.ceil(lo / self.bin_hz)) : min(int(np.ceil(hi / self.bin_hz)), nb), c] = 1
+        self._cols = cols
+        self._sums: F64 = np.zeros((3, 5), dtype=np.float64)
+        self.sums: F64 = self._sums[0]  # Σ mag · column, this hop (SUM_* indices)
+        self.prev_sums: F64 = self._sums[1]  # the same for the previous hop
+        self.sum_min = 0.0  # Σ min(mag, prev_mag)
         self.gain = 1.0  # auto-gain factor for display features (set by AutoGain)
         self.silent = True  # set by Level
         # Tilted band levels on the 0–1 display scale, unclipped (floored at −10 dB below 0).
-        self.band_level = np.zeros(settings.n_bands, dtype=np.float64)  # set by Bands
+        self.band_level: F64 = np.zeros(settings.n_bands, dtype=np.float64)  # set by Bands
+        self.prev_band_level: F64 = np.zeros(settings.n_bands, dtype=np.float64)  # last hop's
         self.hop_ms = 0.0  # mean square of the newest hop (set by Level)
-        self.mag_sum = 0.0  # Σ mag (set by Centroid, read by Flux)
         self.odf = 0.0  # onset detection function value this hop (set by Onset, read by Tempo)
         self.onset = False  # set by Onset
         self.onset_time = 0.0  # host time of the latest onset, sub-hop accurate (set by Onset)
@@ -53,18 +84,21 @@ class AnalysisContext:
 
     def load(self, ring: RingBuffer, host_time: float) -> None:
         self.host_time = host_time
-        ring.latest(self.fft_size, self.pcm)
-        # Channel sum with explicit ufuncs: np.mean(axis=1) allocates a temporary.
-        np.copyto(self.mono, self.pcm[:, 0])
-        for c in range(1, self.channels):
-            np.add(self.mono, self.pcm[:, c], out=self.mono)
-        if self.channels > 1:
-            np.multiply(self.mono, np.float32(1.0 / self.channels), out=self.mono)
+        self.pcm = pcm = ring.view(self.fft_size)
+        if self.channels == 1:
+            self.mono = pcm[0]
+        else:
+            np.matmul(self._mix, pcm, out=self.mono)
         np.multiply(self.mono, self.window, out=self.windowed)
-        np.fft.rfft(self.windowed, out=self.spec)
-        np.abs(self.spec, out=self._mag64)  # same-dtype out: a casting ufunc would buffer 8 KB
-        np.multiply(self._mag64, self.mag_scale, out=self._mag64)
-        np.copyto(self.mag, self._mag64)
+        rfft(self.windowed, self.spec)
+        mags, sums = self._mags, self._sums
+        cur = self.index & 1
+        self.mag, self.prev_mag = mags[cur], mags[cur ^ 1]
+        self.sums, self.prev_sums = sums[cur], sums[cur ^ 1]
+        np.abs(self.spec, out=self.mag)
+        np.minimum(mags[0], mags[1], out=mags[2])
+        np.matmul(mags, self._cols, out=sums)
+        self.sum_min = float(sums[2, SUM_MAG])
 
 
 class FeatureExtractor(Protocol):
