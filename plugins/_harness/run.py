@@ -102,7 +102,7 @@ def main() -> None:
                 "console", lambda m, c=console: m.type in ("error", "warning") and c.append(m.text)
             )
             page.on("pageerror", lambda e, c=console: c.append(str(e)))
-            q = f"repo={VIZ[viz]}&viz={viz}&{args.query}"
+            q = f"repo={args.prefix}{VIZ[viz]}&viz={viz}&{args.query}"
             page.goto(f"{base}?{q}")
             page.wait_for_function("window.__ready === true", timeout=20000)
             page.wait_for_timeout(2500)
