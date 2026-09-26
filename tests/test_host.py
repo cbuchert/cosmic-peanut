@@ -330,3 +330,107 @@ async def test_stats_are_broadcast_with_onset_latency(tmp_path: Path, window: Fa
         assert 0 <= stats["latencyMsP95"] < 50
     finally:
         await h.stop()
+
+
+# --- install flow (local fixture repos; no network) -----------------------------------------
+
+from tests.test_git_fetch import commit_files, plugin_files  # noqa: E402
+from tidalviz.plugins.git import GitFetcher, local_transport  # noqa: E402
+
+VIZ_URL = "https://example.com/me/viz"
+
+
+@pytest_asyncio.fixture
+async def installer(tmp_path: Path, window: FakeWindow) -> AsyncIterator[tuple[Host, Path]]:
+    origin = tmp_path / "origin"
+    commit_files(origin, plugin_files("waves"), "first")
+    home = tmp_path / "home"
+    fetcher = GitFetcher(home / "cache", transport=local_transport({VIZ_URL: origin}))
+    h = Host(
+        root=home, builtin_dirs=BUILTINS, source_id="synthetic:demo", window=window, fetcher=fetcher
+    )
+    await h.start()
+    yield h, origin
+    await h.stop()
+
+
+async def install_via_shell(shell: Shell, accept: bool = True) -> dict[str, Any]:
+    await shell.send({"type": "install", "url": VIZ_URL})
+    prompt = await shell.next_json("installPrompt")
+    await shell.send({"type": "installConfirm", "id": prompt["id"], "accept": accept})
+    return prompt
+
+
+@pytest.mark.asyncio
+async def test_install_prompts_then_registers_on_accept(installer, http):
+    host, _ = installer
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    prompt = await install_via_shell(shell)
+    assert prompt["url"] == VIZ_URL and len(prompt["commit"]) == 40
+    assert [v["id"] for v in prompt["visualizers"]] == ["waves"]
+    result = await shell.next_json("installResult")
+    assert result == {"type": "installResult", "id": prompt["id"], "ok": True}
+    viz = await shell.next_json("visualizers")
+    assert any(v["id"] == "waves" for v in viz["visualizers"])
+
+
+@pytest.mark.asyncio
+async def test_declining_the_trust_prompt_installs_nothing(installer, http):
+    host, _ = installer
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    prompt = await install_via_shell(shell, accept=False)
+    result = await shell.next_json("installResult")
+    assert result["id"] == prompt["id"] and result["ok"] is False
+    assert not any(v["id"] == "waves" for v in host.visualizers())
+
+
+@pytest.mark.asyncio
+async def test_bad_url_reports_an_install_error(installer, http):
+    host, _ = installer
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    await shell.send({"type": "install", "url": "git@github.com:me/viz.git"})
+    result = await shell.next_json("installResult")
+    assert result["ok"] is False and result["error"]
+
+
+@pytest.mark.asyncio
+async def test_update_then_rollback_then_remove(installer, http):
+    host, origin = installer
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    first = await install_via_shell(shell)
+    await shell.next_json("installResult")
+    await shell.next_json("visualizers")  # the install's broadcast
+    repo = next(v["repo"] for v in host.visualizers() if v["id"] == "waves")
+
+    commit_files(origin, {"src/waves.js": "// v2\n"}, "second")
+    await shell.send({"type": "update", "repo": repo})
+    second = await shell.next_json("installPrompt")
+    assert second["commit"] != first["commit"]
+    await shell.send({"type": "installConfirm", "id": second["id"], "accept": True})
+    await shell.next_json("installResult")
+    await shell.next_json("visualizers")  # the update's broadcast
+
+    await shell.send({"type": "rollback", "repo": repo})
+    viz = await shell.next_json("visualizers")
+    info = next(r for r in viz["repos"] if r["repo"] == repo)
+    assert info["commit"] == first["commit"]
+
+    await shell.send({"type": "remove", "repo": repo})
+    viz = await shell.next_json("visualizers")
+    assert not any(v["repo"] == repo for v in viz["visualizers"])
+
+
+@pytest.mark.asyncio
+async def test_add_folder_with_a_path_registers_a_dev_repo(installer, http, tmp_path: Path):
+    host, _ = installer
+    folder = tmp_path / "mine"
+    write_dev_plugin(folder)
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    await shell.send({"type": "addFolder", "path": str(folder)})
+    viz = await shell.next_json("visualizers")
+    assert any(v["id"] == "pulse" and v["dev"] for v in viz["visualizers"])

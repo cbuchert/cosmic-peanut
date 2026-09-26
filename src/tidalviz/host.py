@@ -10,7 +10,7 @@ import logging
 import struct
 import time
 from collections import deque
-from collections.abc import Coroutine, Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -26,6 +26,8 @@ from tidalviz.capture import (
 )
 from tidalviz.pipeline import AudioPipeline
 from tidalviz.plugins import DevFolderWatcher, ManifestError, PluginRegistry
+from tidalviz.plugins.git import GitFetcher
+from tidalviz.plugins.registry import PendingInstall
 from tidalviz.server.runner import DEFAULT_WEB_DIR, HostServers
 from tidalviz.settings import Settings
 from tidalviz.transport.control import HANG_AFTER_S, TextSocket
@@ -80,12 +82,13 @@ class Host:
         web_dir: Path = DEFAULT_WEB_DIR,
         dev: bool = False,
         hang_after: float = HANG_AFTER_S,
+        fetcher: GitFetcher | None = None,
     ) -> None:
         root.mkdir(parents=True, exist_ok=True)
         self.settings = Settings(root / "settings.json")
         if source_id is not None:
             self.settings.data["source"] = source_id  # this launch only; not persisted
-        self.registry = PluginRegistry(root, builtin_dirs)
+        self.registry = PluginRegistry(root, builtin_dirs, fetcher=fetcher)
         self.window = window
         self.dev = dev
         self.servers = HostServers(
@@ -277,6 +280,18 @@ class Host:
                 self._spawn(self._broadcast_visualizers())
             case "settings":
                 self.settings.update({k: v for k, v in msg.items() if k in SHELL_SETTINGS})
+            case "install":
+                self._spawn(self._prompt(self.registry.prepare_install, msg["url"]))
+            case "update":
+                self._spawn(self._prompt(self.registry.update, msg["repo"]))
+            case "installConfirm":
+                self._spawn(self._confirm(msg["id"], msg["accept"]))
+            case "rollback":
+                self._spawn(self._registry_op("Rollback", self.registry.rollback, msg["repo"]))
+            case "remove":
+                self._spawn(self._registry_op("Remove", self.registry.remove, msg["repo"]))
+            case "addFolder":
+                self._spawn(self._add_folder(msg.get("path")))
             case "window":
                 self._window_action(msg["action"])
             case _:
@@ -357,3 +372,68 @@ class Host:
             await asyncio.sleep(STATS_INTERVAL_S)
             if self.servers.control.client_count:
                 await self.servers.control.broadcast_json(self.stats())
+
+    # --- installs (blocking registry work runs in a thread) --------------------------------
+
+    async def _send_all(self, msg: dict[str, Any]) -> None:
+        await self.servers.control.broadcast_json(msg)
+
+    async def _prompt(self, prepare: Callable[[str], PendingInstall], arg: str) -> None:
+        """Fetch + validate, then show the trust prompt (install and update share this)."""
+        try:
+            pending = await asyncio.to_thread(prepare, arg)
+        except Exception as e:  # user-facing boundary: report, don't crash the loop
+            log.warning("install of %s failed: %s", arg, e)
+            await self._send_all({"type": "installResult", "id": "", "ok": False, "error": str(e)})
+            return
+        await self._send_all(
+            {
+                "type": "installPrompt",
+                "id": pending.id,
+                "url": pending.spec.url,
+                "commit": pending.commit,
+                "visualizers": [{"id": v["id"], "name": v["name"]} for v in pending.visualizers],
+            }
+        )
+
+    async def _confirm(self, pending_id: str, accept: bool) -> None:
+        if not accept:
+            await asyncio.to_thread(self.registry.cancel_install, pending_id)
+            await self._send_all(
+                {"type": "installResult", "id": pending_id, "ok": False, "error": "Cancelled"}
+            )
+            return
+        try:
+            await asyncio.to_thread(self.registry.confirm_install, pending_id)
+        except Exception as e:
+            await self._send_all(
+                {"type": "installResult", "id": pending_id, "ok": False, "error": str(e)}
+            )
+            return
+        await self._send_all({"type": "installResult", "id": pending_id, "ok": True})
+        await self._broadcast_visualizers()
+
+    async def _registry_op(self, what: str, fn: Callable[[str], Any], repo: str) -> None:
+        try:
+            await asyncio.to_thread(fn, repo)
+        except Exception as e:
+            await self._send_all(
+                {"type": "status", "level": "error", "text": f"{what} failed: {e}"}
+            )
+            return
+        await self._broadcast_visualizers()
+
+    async def _add_folder(self, path: str | None) -> None:
+        if path is None:
+            path = await asyncio.to_thread(self.window.pick_folder)
+            if path is None:
+                return
+        try:
+            key = await asyncio.to_thread(self.registry.add_dev_folder, Path(path))
+        except Exception as e:
+            await self._send_all(
+                {"type": "status", "level": "error", "text": f"Add folder failed: {e}"}
+            )
+            return
+        self.watcher.add(key, Path(path))
+        await self._broadcast_visualizers()
