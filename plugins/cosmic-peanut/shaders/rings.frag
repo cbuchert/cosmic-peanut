@@ -1,5 +1,7 @@
 #version 300 es
 // Additive glow: cosine palette by age, far side dimmer (implies the sphere), newest brightest.
+// Premultiplied for the transparent canvas: alpha = brightest channel, so with blend ONE, ONE the
+// summed alpha always covers the summed colour and the rings composite as light over any backdrop.
 precision highp float;
 
 in float vAge, vDepth, vSample, vEmpty;
@@ -18,5 +20,6 @@ void main() {
   float depthFade = mix(1.0, 0.16, back);
   float fresh = mix(1.5, 0.35, vAge);
   vec3 c = pal(vAge * 0.55 - uPulse * 0.08) + abs(vSample) * 0.35 + uPulse * 0.12;
-  o = vec4(c * edges * depthFade * fresh * uGain * (1.0 - vEmpty), 1.0);
+  c *= edges * depthFade * fresh * uGain * (1.0 - vEmpty);
+  o = vec4(c, max(c.r, max(c.g, c.b)));
 }

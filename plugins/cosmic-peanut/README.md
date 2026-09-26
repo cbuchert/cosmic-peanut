@@ -40,6 +40,10 @@ motion on, Orbit speed and Bass pulse act as 0 and 0.1 until you move them off t
   ring i at latitude π·age, radius (1 + amp·s)(1 + 0.06·p).
 - **Color** (`shaders/rings.frag`): additive blending, cosine palette by age, depth cue from view
   depth, newest brightest, gain × √(240 ÷ N).
+- **Transparency**: the canvas is transparent and premultiplied. Each fragment outputs
+  (c, max(c)) and blends ONE, ONE onto a 0,0,0,0 clear, so summed alpha always covers summed
+  colour; the 2× MSAA resolve and the soft blit carry that RGBA through. Over black it's the same
+  image as before; over the desktop the rings read as light, with no dark box.
 - **Pulse** (`pulse.js`): target clamp((bass − 1) × 1.2, 0, 1.5), approached at 18/s rising and
   4/s falling, × Pulse. Falls back to a 140 Hz low-passed RMS of the waveform when there's no
   `audio.bass`.
