@@ -58,8 +58,10 @@ export function createApp(deps) {
   /** @type {Map<string, ParamValues>} */ const values = new Map();
   /** @type {string | null} */ let selected = null;
   /** @type {string[]} */ const history = [];
-  /** @type {Required<Pick<Settings, "quality" | "reduceFlashing" | "autoCycleSeconds" | "hudVisible">>} */
-  const settings = { quality: "auto", reduceFlashing: true, autoCycleSeconds: 0, hudVisible: false };
+  /** @type {Required<Pick<Settings, "quality" | "reduceFlashing" | "autoCycleSeconds" | "hudVisible" | "transparent">>} */
+  const settings = { quality: "auto", reduceFlashing: true, autoCycleSeconds: 0, hudVisible: false, transparent: false };
+  // Transparent: no backdrop, so the desktop shows behind the (alpha) plugin canvas.
+  const applyTransparent = () => root.classList.toggle("transparent", settings.transparent);
   let dev = false;
   let overlaysHidden = false;
   /** @type {PanelName | null} */ let openPanel = null;
@@ -164,7 +166,8 @@ export function createApp(deps) {
 
   const topbar = h(
     "header",
-    { class: "topbar overlay" },
+    // pywebview drags the frameless window from elements with this class.
+    { class: "topbar overlay pywebview-drag-region" },
     h("div", { class: "now" }, nowName, nowRepo),
     h(
       "div",
@@ -332,6 +335,12 @@ export function createApp(deps) {
       send({ type: "settings", reduceFlashing: reduce.checked });
       pluginHost.setSettings({ reduceFlashing: reduce.checked });
     });
+    const transparent = /** @type {HTMLInputElement} */ (h("input", { id: "transparent", type: "checkbox", checked: settings.transparent }));
+    transparent.addEventListener("change", () => {
+      settings.transparent = transparent.checked;
+      applyTransparent();
+      send({ type: "settings", transparent: transparent.checked });
+    });
     const cycle = /** @type {HTMLSelectElement} */ (
       h("select", { id: "auto-cycle" }, AUTO_CYCLE_CHOICES.map((s) => h("option", { value: String(s) }, cycleLabel(s))))
     );
@@ -348,6 +357,7 @@ export function createApp(deps) {
       field("quality", "Quality", quality),
       h("p", { class: "hint muted" }, "Balanced caps resolution at 1.5×; Battery at 1× and 30 fps."),
       h("div", { class: "field field-inline" }, h("label", { for: "reduce-flashing" }, "Reduce flashing"), reduce),
+      h("div", { class: "field field-inline" }, h("label", { for: "transparent" }, "Transparent background"), transparent),
       field("auto-cycle", "Auto-cycle", cycle),
       h("h3", { class: "section-title" }, "Window"),
       h(
@@ -621,6 +631,7 @@ export function createApp(deps) {
         Object.assign(settings, msg.settings);
         pluginHost.setSettings({ quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality, dpr) });
         hud.setVisible(settings.hudVisible);
+        applyTransparent();
         renderSettings();
         renderSources();
         armCycle();

@@ -74,8 +74,14 @@ def main(argv: list[str] | None = None) -> None:
         height=720,
         min_size=(320, 180),
         background_color="#000000",
+        # Always transparent-capable; the shell paints a black backdrop unless the user turns on
+        # "Transparent background". Frameless: the top bar is the drag region (easy_drag would
+        # steal drags meant for the visual, e.g. Cosmic Peanut's orbit).
+        transparent=True,
+        frameless=host.settings.data["borderless"],
+        easy_drag=False,
     )
-    window.attach(win)
+    window.attach(win, borderless=host.settings.data["borderless"])
     if args.bench is not None:
         threading.Thread(target=_finish_bench, args=(host, window, args), daemon=True).start()
     try:

@@ -23,8 +23,9 @@ class PyWebviewWindow:
         self.win: Any = None
         self._borderless = False
 
-    def attach(self, win: Any) -> None:
+    def attach(self, win: Any, *, borderless: bool) -> None:
         self.win = win
+        self._borderless = borderless  # created frameless or not; `borderless()` toggles
 
     def _webview(self) -> Any:
         import WebKit  # type: ignore[import-not-found]

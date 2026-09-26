@@ -504,3 +504,17 @@ async def test_bench_mode_activates_the_key_and_records_perf_and_stats(
         assert report["rssMbMax"] > 0
     finally:
         await h.stop()
+
+
+@pytest.mark.asyncio
+async def test_transparency_is_a_shell_setting_and_borderless_persists(
+    host: Host, window: FakeWindow, http
+):
+    shell = await connect(host, http)
+    hello = await shell.next_json("hello")
+    assert hello["settings"]["transparent"] is True and hello["settings"]["borderless"] is True
+    await shell.send({"type": "settings", "transparent": False})
+    await shell.send({"type": "window", "action": "borderless"})
+    await asyncio.sleep(0.2)
+    assert host.settings.data["transparent"] is False
+    assert host.settings.data["borderless"] is False and window.calls == ["borderless"]

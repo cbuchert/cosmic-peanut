@@ -48,3 +48,9 @@ def test_loaded_values_are_validated_too(tmp_path: Path):
     path.write_text(json.dumps({"quality": "nope", "reduceFlashing": False}))
     s = Settings(path)
     assert s.data["quality"] == "auto" and s.data["reduceFlashing"] is False
+
+
+def test_transparent_and_borderless_default_on(tmp_path: Path):
+    s = Settings(tmp_path / "settings.json")
+    assert s.data["transparent"] is True and s.data["borderless"] is True
+    assert s.update({"transparent": False, "borderless": "no"}) == {"transparent": False}

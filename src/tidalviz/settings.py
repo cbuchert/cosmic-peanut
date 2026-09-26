@@ -22,6 +22,8 @@ DEFAULTS: dict[str, Any] = {
     "source": "system",
     "params": {},
     "window": None,
+    "transparent": True,  # show the desktop behind the visual
+    "borderless": True,  # no title bar or window chrome
 }
 
 
@@ -48,6 +50,8 @@ _VALID: dict[str, Callable[[Any], bool]] = {
     "active": lambda v: v is None or (isinstance(v, str) and 0 < len(v) <= 200),
     "source": lambda v: isinstance(v, str) and 0 < len(v) <= 200,
     "window": _is_window,
+    "transparent": _is_bool,
+    "borderless": _is_bool,
 }
 
 

@@ -24,7 +24,7 @@
 html, body {
   margin: 0;
   height: 100%;
-  background: var(--bg);
+  background: transparent; /* the stage paints the backdrop, or nothing when transparent */
   color: var(--fg);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -49,6 +49,7 @@ button, input, select { font: inherit; color: inherit; }
 .shell { position: fixed; inset: 0; }
 
 .stage { position: absolute; inset: 0; background: var(--bg); }
+.shell.transparent .stage { background: transparent; }
 
 .viz-frame {
   position: absolute; inset: 0; width: 100%; height: 100%;

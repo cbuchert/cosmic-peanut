@@ -49,6 +49,7 @@ SHELL_SETTINGS = (
     "autoCycleSeconds",
     "hudVisible",
     "photosensitivityNoticeSeen",
+    "transparent",
 )
 
 
@@ -339,6 +340,8 @@ class Host:
         }
         if (fn := actions.get(action)) is not None:
             fn()
+        if action == "borderless":
+            self.settings.update({"borderless": not self.settings.data["borderless"]})
 
     async def _broadcast_visualizers(self) -> None:
         await self.servers.control.broadcast_json(

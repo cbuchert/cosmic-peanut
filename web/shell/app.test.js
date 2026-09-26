@@ -415,3 +415,29 @@ describe("app: pointer input", () => {
     ]);
   });
 });
+
+describe("app: transparent background and borderless window", () => {
+  it("applies the transparent setting from hello and lets the user turn it off", () => {
+    const { app, root, sent } = setup();
+    app.handle(hello({ settings: { transparent: true } }));
+    expect(root.classList.contains("transparent")).toBe(true);
+    const box = /** @type {HTMLInputElement} */ (root.querySelector("#transparent"));
+    expect(box.checked).toBe(true);
+    box.checked = false;
+    box.dispatchEvent(new Event("change"));
+    expect(root.classList.contains("transparent")).toBe(false);
+    expect(sent).toContainEqual({ type: "settings", transparent: false });
+  });
+
+  it("stays opaque when the setting is off", () => {
+    const { app, root } = setup();
+    app.handle(hello({ settings: { transparent: false } }));
+    expect(root.classList.contains("transparent")).toBe(false);
+  });
+
+  it("the top bar drags the frameless window", () => {
+    const { app, root } = setup();
+    app.handle(hello());
+    expect(root.querySelector(".topbar")?.classList.contains("pywebview-drag-region")).toBe(true);
+  });
+});
