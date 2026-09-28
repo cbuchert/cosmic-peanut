@@ -63,6 +63,63 @@
         { "id": "color", "type": "color", "label": "Color", "default": "#ffffff" },
         { "id": "lineWidth", "type": "number", "label": "Line width", "min": 0.5, "max": 4, "step": 0.1, "default": 1.5 }
       ]
+    },
+    {
+      "id": "stargate",
+      "name": "Stargate",
+      "description": "Hurtle and roll between two infinite planes of slit-scan light seeded by the waveform, after 2001's Star Gate.",
+      "author": "Tidalviz",
+      "entry": "src/stargate.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/stargate.jpg",
+      "params": [
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 3, "step": 0.05, "default": 1 },
+        { "id": "roll", "type": "number", "label": "Roll (rad/s)", "min": -1.5, "max": 1.5, "step": 0.01, "default": 0.25 },
+        { "id": "detail", "type": "select", "label": "Detail", "options": ["low", "medium", "high"], "default": "medium" },
+        { "id": "streak", "type": "number", "label": "Streak", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
+        { "id": "spread", "type": "number", "label": "Field of view", "min": 0.5, "max": 1.8, "step": 0.01, "default": 1 },
+        { "id": "brightness", "type": "number", "label": "Brightness", "min": 0.2, "max": 2.5, "step": 0.01, "default": 1 },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["film", "ember", "ice", "mono"], "default": "film" }
+      ]
+    },
+    {
+      "id": "blaze",
+      "name": "Blaze",
+      "description": "A fire simulation fed by the waveform: loud, jagged passages throw up tall tongues, bass stokes it, beats flare.",
+      "author": "Tidalviz",
+      "entry": "src/blaze.js",
+      "renderer": "webgl2",
+      "libs": [],
+      "thumbnail": "thumbs/blaze.jpg",
+      "params": [
+        { "id": "intensity", "type": "number", "label": "Intensity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "height", "type": "number", "label": "Flame height", "min": 0.3, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "turbulence", "type": "number", "label": "Turbulence", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0.2, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "glow", "type": "number", "label": "Glow", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["natural", "blue gas", "green chemical", "ember mono"], "default": "natural" },
+        { "id": "detail", "type": "number", "label": "Detail", "min": 0.15, "max": 0.5, "step": 0.05, "default": 0.3 }
+      ]
+    },
+    {
+      "id": "cascade",
+      "name": "Cascade",
+      "description": "A waterfall seeded by the waveform: loud, jagged passages pour heavy ropes of water, bass surges the flow.",
+      "author": "Tidalviz",
+      "entry": "src/cascade.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/cascade.jpg",
+      "params": [
+        { "id": "flow", "type": "number", "label": "Flow", "min": 0.2, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "density", "type": "select", "label": "Density", "options": ["16k", "32k", "64k"], "default": "32k" },
+        { "id": "width", "type": "number", "label": "Lip width", "min": 0.2, "max": 1, "step": 0.01, "default": 0.7 },
+        { "id": "height", "type": "number", "label": "Lip height", "min": 0.4, "max": 0.95, "step": 0.01, "default": 0.84 },
+        { "id": "gravity", "type": "number", "label": "Gravity", "min": 0.4, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "spray", "type": "number", "label": "Spray", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "mist", "type": "number", "label": "Mist", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "turbulence", "type": "number", "label": "Turbulence", "min": 0, "max": 1, "step": 0.01, "default": 0.4 },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["glacier", "tropical", "moonlit", "mono"], "default": "glacier" }
+      ]
     }
   ]
 }

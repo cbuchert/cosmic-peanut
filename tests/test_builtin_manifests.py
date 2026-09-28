@@ -37,6 +37,9 @@ def test_builtin_renderers():
         "undertow": ("webgl2", []),
         "orbit": ("three", ["three"]),
         "pulsar": ("2d", []),
+        "stargate": ("webgl2", []),
+        "blaze": ("webgl2", []),
+        "cascade": ("webgl2", []),
     }
 
 
@@ -144,3 +147,62 @@ def test_cosmic_peanut_manifest_matches_prd():
     }
     assert [p["id"] for p in v["params"]] == list(got)
     assert {p["id"]: p.get("step") for p in v["params"]}["travel"] == 0.5
+
+
+def test_stargate_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "stargate"]
+    assert (v["name"], v["entry"], v["thumbnail"]) == (
+        "Stargate",
+        "src/stargate.js",
+        "thumbs/stargate.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["speed", "roll", "detail", "streak", "spread", "brightness", "palette"]
+    assert params["roll"]["default"] == 0.25
+    assert params["roll"]["min"] < 0 < params["roll"]["max"]
+    assert params["palette"]["options"] == ["film", "ember", "ice", "mono"]
+    assert params["palette"]["default"] == "film"
+    assert (REPOS["builtin"] / "shaders/stargate/stargate.frag").is_file()
+
+
+def test_blaze_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "blaze"]
+    assert (v["name"], v["entry"], v["renderer"]) == ("Blaze", "src/blaze.js", "webgl2")
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "intensity",
+        "height",
+        "turbulence",
+        "speed",
+        "glow",
+        "palette",
+        "detail",
+    ]
+    assert params["palette"]["options"] == ["natural", "blue gas", "green chemical", "ember mono"]
+    assert params["palette"]["default"] == "natural"
+    assert (params["detail"]["min"], params["detail"]["max"]) == (0.15, 0.5)
+
+
+def test_cascade_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "cascade"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Cascade",
+        "src/cascade.js",
+        "webgl2",
+        "thumbs/cascade.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "flow",
+        "density",
+        "width",
+        "height",
+        "gravity",
+        "spray",
+        "mist",
+        "turbulence",
+        "palette",
+    ]
+    assert params["density"]["options"] == ["16k", "32k", "64k"]
+    assert params["palette"]["options"] == ["glacier", "tropical", "moonlit", "mono"]
+    assert params["palette"]["default"] == "glacier"
