@@ -85,7 +85,7 @@
     {
       "id": "blaze",
       "name": "Blaze",
-      "description": "A fire simulation fed by the waveform: loud, jagged passages throw up tall tongues, bass stokes it, beats flare.",
+      "description": "A fire simulation fed by the spectrum: bass is the central column, highs lick at the edges, and every kick, snare and hat blasts its own jet of flame.",
       "author": "Tidalviz",
       "entry": "src/blaze.js",
       "renderer": "webgl2",
@@ -93,11 +93,13 @@
       "thumbnail": "thumbs/blaze.jpg",
       "params": [
         { "id": "intensity", "type": "number", "label": "Intensity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
         { "id": "height", "type": "number", "label": "Flame height", "min": 0.3, "max": 2, "step": 0.01, "default": 1 },
         { "id": "turbulence", "type": "number", "label": "Turbulence", "min": 0, "max": 2, "step": 0.01, "default": 1 },
         { "id": "speed", "type": "number", "label": "Speed", "min": 0.2, "max": 2, "step": 0.01, "default": 1 },
         { "id": "glow", "type": "number", "label": "Glow", "min": 0, "max": 2, "step": 0.01, "default": 1 },
         { "id": "palette", "type": "select", "label": "Palette", "options": ["natural", "blue gas", "green chemical", "ember mono"], "default": "natural" },
+        { "id": "feed", "type": "select", "label": "Feed", "options": ["spectrum", "waveform"], "default": "spectrum" },
         { "id": "detail", "type": "number", "label": "Detail", "min": 0.15, "max": 0.5, "step": 0.05, "default": 0.3 }
       ]
     },

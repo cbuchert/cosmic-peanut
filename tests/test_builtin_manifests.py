@@ -171,13 +171,19 @@ def test_blaze_manifest():
     params = {p["id"]: p for p in v["params"]}
     assert list(params) == [
         "intensity",
+        "reactivity",
         "height",
         "turbulence",
         "speed",
         "glow",
         "palette",
+        "feed",
         "detail",
     ]
+    r = params["reactivity"]
+    assert (r["type"], r["min"], r["max"], r["default"]) == ("number", 0, 2, 1)
+    assert params["feed"]["options"] == ["spectrum", "waveform"]
+    assert params["feed"]["default"] == "spectrum"
     assert params["palette"]["options"] == ["natural", "blue gas", "green chemical", "ember mono"]
     assert params["palette"]["default"] == "natural"
     assert (params["detail"]["min"], params["detail"]["max"]) == (0.15, 0.5)
