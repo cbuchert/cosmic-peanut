@@ -40,6 +40,7 @@ def test_builtin_renderers():
         "stargate": ("webgl2", []),
         "blaze": ("webgl2", []),
         "cascade": ("webgl2", []),
+        "radar": ("webgl2", []),
     }
 
 
@@ -206,3 +207,37 @@ def test_cascade_manifest():
     assert params["density"]["options"] == ["16k", "32k", "64k"]
     assert params["palette"]["options"] == ["glacier", "tropical", "moonlit", "mono"]
     assert params["palette"]["default"] == "glacier"
+
+
+def test_radar_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "radar"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Radar",
+        "src/radar.js",
+        "webgl2",
+        "thumbs/radar.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "sync",
+        "speed",
+        "persistence",
+        "gain",
+        "palette",
+        "graticule",
+        "contacts",
+    ]
+    assert params["sync"]["options"] == ["off", "beat", "bar"]
+    assert params["sync"]["default"] == "bar"
+    # lib/radar.js DEFAULT_SPEED: Reduce motion slows the sweep only while it's at this default.
+    assert params["speed"]["default"] == 0.25
+    assert params["palette"]["options"] == ["green", "amber", "blue", "white"]
+    assert params["palette"]["default"] == "green"
+    assert params["contacts"] == {
+        "id": "contacts",
+        "type": "boolean",
+        "label": "Contacts",
+        "default": True,
+    }
+    for f in ("fullscreen.vert", "paint.frag", "composite.frag"):
+        assert (REPOS["builtin"] / "shaders/radar" / f).is_file(), f

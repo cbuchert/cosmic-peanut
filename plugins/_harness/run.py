@@ -21,6 +21,7 @@ VIZ = {
     "stargate": "builtin",
     "blaze": "builtin",
     "cascade": "builtin",
+    "radar": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }
