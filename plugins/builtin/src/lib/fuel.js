@@ -82,3 +82,87 @@ export function createBandGain(count, { release = 4, floor = 0.05 } = {}) {
     },
   };
 }
+
+/** Attack detection time constants and thresholds (seconds; normalised level units). */
+const ATTACK = {
+  fast: 0.015, // follows the band closely
+  slow: 0.2, // the band's recent level
+  average: 1.5, // the band's recent attack activity
+  decay: 0.1, // jet envelope: ~5 % left after 300 ms
+  minFlux: 0.06, // rises smaller than this are noise
+  relative: 1.8, // … or less than this × the band's recent average
+  full: 0.3, // a rise this big throws a full-strength jet
+  retrigger: 0.08, // at most ~12 jets/s per band
+  retriggerReduced: 1 / 3, // with reduceFlashing, at most 3 per second
+};
+
+/**
+ * Per-band transient detector for the fire's jets. A band's attack is the positive gap between a
+ * fast and a slow follower of its (normalised) level, so a rising step registers and a steady
+ * tone doesn't. An attack well above the band's recent average (and above an absolute noise
+ * floor) throws a jet: strength ∝ the rise, clamped to 1, growing while the rise grows, then decaying
+ * over ~300 ms. A new jet can start at most every `retrigger` s per band (3 per second with
+ * reduceFlashing, like the flash limiter). Output = jet × reactivity (so 0–2). All followers are
+ * exact per `dt`, so 60 and 120 Hz agree.
+ * @param {number} count bands
+ */
+export function createAttacks(count) {
+  const fast = new Float32Array(count);
+  const slow = new Float32Array(count);
+  const avg = new Float32Array(count);
+  const jet = new Float32Array(count);
+  const since = new Float32Array(count).fill(1e9);
+  const active = new Uint8Array(count);
+  const last = new Float32Array(count);
+  return {
+    /**
+     * @param {ArrayLike<number>} levels normalised band levels, 0–1
+     * @param {number} dt seconds
+     * @param {number} reactivity 0–2, scales the output
+     * @param {boolean} reduceFlashing
+     * @param {Float32Array} out jet strength per band, 0–reactivity
+     */
+    step(levels, dt, reactivity, reduceFlashing, out) {
+      const kf = 1 - Math.exp(-dt / ATTACK.fast);
+      const ks = 1 - Math.exp(-dt / ATTACK.slow);
+      const ka = 1 - Math.exp(-dt / ATTACK.average);
+      const kd = Math.exp(-dt / ATTACK.decay);
+      const gap = reduceFlashing ? ATTACK.retriggerReduced : ATTACK.retrigger;
+      const r = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
+      for (let i = 0; i < count; i++) {
+        const v = levels[i];
+        fast[i] += (v - fast[i]) * kf;
+        slow[i] += (v - slow[i]) * ks;
+        const d = fast[i] - slow[i];
+        const flux = d > 0 ? d : 0;
+        const thr = ATTACK.relative * avg[i];
+        avg[i] += (flux - avg[i]) * ka;
+        since[i] += dt;
+        let j = jet[i] * kd;
+        if (flux > ATTACK.minFlux && flux > thr) {
+          if (!active[i] && since[i] >= gap) {
+            active[i] = 1;
+            since[i] = 0;
+          }
+          if (active[i] && flux > last[i]) {
+            const s = flux / ATTACK.full;
+            const strength = s < 1 ? s : 1;
+            if (strength > j) j = strength;
+          }
+        } else active[i] = 0;
+        last[i] = flux;
+        jet[i] = j;
+        out[i] = j * r;
+      }
+    },
+    reset() {
+      fast.fill(0);
+      slow.fill(0);
+      avg.fill(0);
+      jet.fill(0);
+      since.fill(1e9);
+      active.fill(0);
+      last.fill(0);
+    },
+  };
+}
