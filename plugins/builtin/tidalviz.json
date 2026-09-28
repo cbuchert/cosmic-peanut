@@ -85,7 +85,7 @@
     {
       "id": "blaze",
       "name": "Blaze",
-      "description": "A fire simulation fed by the waveform: loud, jagged passages throw up tall tongues, bass stokes it, beats flare.",
+      "description": "A fire simulation fed by the spectrum: bass is the central column, highs lick at the edges, and every kick, snare and hat blasts its own jet of flame.",
       "author": "Tidalviz",
       "entry": "src/blaze.js",
       "renderer": "webgl2",
@@ -93,32 +93,52 @@
       "thumbnail": "thumbs/blaze.jpg",
       "params": [
         { "id": "intensity", "type": "number", "label": "Intensity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
         { "id": "height", "type": "number", "label": "Flame height", "min": 0.3, "max": 2, "step": 0.01, "default": 1 },
         { "id": "turbulence", "type": "number", "label": "Turbulence", "min": 0, "max": 2, "step": 0.01, "default": 1 },
         { "id": "speed", "type": "number", "label": "Speed", "min": 0.2, "max": 2, "step": 0.01, "default": 1 },
         { "id": "glow", "type": "number", "label": "Glow", "min": 0, "max": 2, "step": 0.01, "default": 1 },
         { "id": "palette", "type": "select", "label": "Palette", "options": ["natural", "blue gas", "green chemical", "ember mono"], "default": "natural" },
+        { "id": "feed", "type": "select", "label": "Feed", "options": ["spectrum", "waveform"], "default": "spectrum" },
         { "id": "detail", "type": "number", "label": "Detail", "min": 0.15, "max": 0.5, "step": 0.05, "default": 0.3 }
       ]
     },
     {
       "id": "cascade",
       "name": "Cascade",
-      "description": "A waterfall seeded by the waveform: loud, jagged passages pour heavy ropes of water, bass surges the flow.",
+      "description": "A window-filling waterfall seeded by the waveform: loud, jagged passages pour heavy ropes of water, bass surges the flow. Width and Drop narrow or shorten it.",
       "author": "Tidalviz",
       "entry": "src/cascade.js",
       "renderer": "webgl2",
       "thumbnail": "thumbs/cascade.jpg",
       "params": [
         { "id": "flow", "type": "number", "label": "Flow", "min": 0.2, "max": 2, "step": 0.01, "default": 1 },
-        { "id": "density", "type": "select", "label": "Density", "options": ["16k", "32k", "64k"], "default": "32k" },
-        { "id": "width", "type": "number", "label": "Lip width", "min": 0.2, "max": 1, "step": 0.01, "default": 0.7 },
-        { "id": "height", "type": "number", "label": "Lip height", "min": 0.4, "max": 0.95, "step": 0.01, "default": 0.84 },
+        { "id": "density", "type": "select", "label": "Density", "options": ["16k", "32k", "64k"], "default": "64k" },
+        { "id": "width", "type": "number", "label": "Width (fraction of window)", "min": 0.2, "max": 1, "step": 0.01, "default": 1 },
+        { "id": "height", "type": "number", "label": "Drop (fraction of window)", "min": 0.4, "max": 1, "step": 0.01, "default": 1 },
         { "id": "gravity", "type": "number", "label": "Gravity", "min": 0.4, "max": 2, "step": 0.01, "default": 1 },
         { "id": "spray", "type": "number", "label": "Spray", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
         { "id": "mist", "type": "number", "label": "Mist", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
         { "id": "turbulence", "type": "number", "label": "Turbulence", "min": 0, "max": 1, "step": 0.01, "default": 0.4 },
         { "id": "palette", "type": "select", "label": "Palette", "options": ["glacier", "tropical", "moonlit", "mono"], "default": "glacier" }
+      ]
+    },
+    {
+      "id": "radar",
+      "name": "Radar",
+      "description": "A radar scope painted by the music: the sweep writes the spectrum around the dial, transients leave glowing contacts.",
+      "author": "Tidalviz",
+      "entry": "src/radar.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/radar.jpg",
+      "params": [
+        { "id": "sync", "type": "select", "label": "Tempo lock", "options": ["off", "beat", "bar"], "default": "bar" },
+        { "id": "speed", "type": "number", "label": "Speed (rotations/s)", "min": 0.02, "max": 2, "step": 0.01, "default": 0.25 },
+        { "id": "persistence", "type": "number", "label": "Afterglow (rotations)", "min": 0.1, "max": 2, "step": 0.05, "default": 0.6 },
+        { "id": "gain", "type": "number", "label": "Gain", "min": 0, "max": 3, "step": 0.05, "default": 1 },
+        { "id": "palette", "type": "select", "label": "Phosphor", "options": ["green", "amber", "blue", "white"], "default": "green" },
+        { "id": "graticule", "type": "number", "label": "Graticule", "min": 0, "max": 1, "step": 0.05, "default": 0.6 },
+        { "id": "contacts", "type": "boolean", "label": "Contacts", "default": true }
       ]
     }
   ]

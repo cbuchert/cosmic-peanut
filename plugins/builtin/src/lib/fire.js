@@ -91,7 +91,7 @@ export function createEnvelope(attack, release) {
  * - `stoke` follows the bass (1.0 = recent average) and feeds more fuel across the whole line;
  * - `flare` is thrown by an onset (bounded attack, ~0.25 s decay) and adds a burst of heat;
  * - `boost` is the combined full-frame swing the renderer uses, routed through the flash limiter,
- *   so with `reduceFlashing` it rises at most 3 times per second.
+ *   so with `reduceFlashing` it rises at most 3 times per second. `reactivity` (0–2) scales it.
  */
 export function createDrive() {
   const stokeEnv = createEnvelope(0.06, 0.4);
@@ -106,8 +106,9 @@ export function createDrive() {
      * @param {{ bass: number, onset: boolean, onsetStrength: number }} audio
      * @param {number} dt seconds
      * @param {boolean} reduceFlashing
+     * @param {number} [reactivity] 0–2 (clamped), scales the boost; default 1
      */
-    step(audio, dt, reduceFlashing) {
+    step(audio, dt, reduceFlashing, reactivity = 1) {
       hit *= Math.exp(-dt / 0.25);
       if (audio.onset) {
         const h = 0.5 + 0.5 * Math.min(1, audio.onsetStrength);
@@ -117,7 +118,8 @@ export function createDrive() {
       const s = (bass - 0.7) / 1.3;
       this.stoke = stokeEnv.step(s < 0 ? 0 : s > 1 ? 1 : s, dt);
       this.flare = flareEnv.step(hit, dt);
-      this.boost = limiter.step(0.5 * this.stoke + this.flare, dt, reduceFlashing);
+      const r = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
+      this.boost = limiter.step(r * (0.5 * this.stoke + this.flare), dt, reduceFlashing);
     },
     reset() {
       hit = 0;
@@ -244,22 +246,24 @@ export function rampColor(palette, t, out) {
 }
 
 /** Manifest defaults for the motion params (a test keeps tidalviz.json in step). */
-export const MOTION_DEFAULTS = { turbulence: 1, speed: 1 };
-/** What those defaults become under macOS "Reduce motion": a slower, steadier fire. */
-export const REDUCED_MOTION = { turbulence: 0.45, speed: 0.6 };
+export const MOTION_DEFAULTS = { turbulence: 1, speed: 1, reactivity: 1 };
+/** What those defaults become under macOS "Reduce motion": a slower, steadier, gentler fire. */
+export const REDUCED_MOTION = { turbulence: 0.45, speed: 0.6, reactivity: 0.55 };
 
 /**
- * Effective turbulence and speed. With `reduceMotion`, a param still at its manifest default is
- * swapped for the calmer value; a value the user chose is respected.
+ * Effective turbulence, speed and reactivity. With `reduceMotion`, a param still at its manifest
+ * default is swapped for the calmer value; a value the user chose is respected.
  * @param {Record<string, unknown>} params live ctx.params
  * @param {boolean} reduceMotion
- * @param {{ turbulence: number, speed: number }} out
+ * @param {{ turbulence: number, speed: number, reactivity: number }} out
  */
 export function motion(params, reduceMotion, out) {
   const t = Number(params.turbulence);
   const s = Number(params.speed);
+  const r = Number(params.reactivity ?? MOTION_DEFAULTS.reactivity);
   out.turbulence = reduceMotion && t === MOTION_DEFAULTS.turbulence ? REDUCED_MOTION.turbulence : t;
   out.speed = reduceMotion && s === MOTION_DEFAULTS.speed ? REDUCED_MOTION.speed : s;
+  out.reactivity = reduceMotion && r === MOTION_DEFAULTS.reactivity ? REDUCED_MOTION.reactivity : r;
   return out;
 }
 

@@ -23,7 +23,8 @@ uniform float u_pulse;     // 0-1 onset pulse (flash-limited)
 uniform float u_lipY;
 uniform float u_lipHalf;
 uniform float u_poolY;
-uniform float u_halfW;     // half the screen width in height units
+uniform float u_floorY;    // water that didn't splash dies below this (under the bottom edge)
+uniform float u_killX;     // particles past ±killX (just beyond the lip and the side edges) die
 layout(location = 0) out vec4 o0;
 layout(location = 1) out vec4 o1;
 
@@ -67,7 +68,7 @@ void main() {
       float xs = mix(a, b, q - float(j));
       float s = seedAt(xs);
       float strong = clamp(s, 0.0, 1.6);
-      p = vec2((xs * 2.0 - 1.0) * u_lipHalf, u_lipY + rnd(seed) * 0.012);
+      p = vec2((xs * 2.0 - 1.0) * u_lipHalf, u_lipY + rnd(seed) * 0.012); // lipX() in the lib
       // Heavier flow leaves the lip faster, and fans out slightly away from the centre.
       float down = 0.06 + 0.42 * strong + 0.25 * u_pulse + 0.05 * rnd(seed);
       float out_ = (xs * 2.0 - 1.0) * 0.05 * (0.4 + strong) + (rnd(seed) - 0.5) * 0.012 * (0.3 + strong);
@@ -83,7 +84,8 @@ void main() {
     v.x += u_turb * wobble(p, u_time + float(id & 7)) * 0.35 * u_dt;
     v *= exp(-0.12 * u_dt);
     p += v * u_dt;
-    if (p.y < u_poolY) {
+    // Crossing the pool line: splash (once), or plunge on through the bottom edge.
+    if (s0.y >= u_poolY && p.y < u_poolY) {
       if (rnd(seed) < u_spray * 0.85) {
         // Impact: splash back up with random velocity, strong drag, short life, dimmer.
         float impact = length(v);
@@ -95,19 +97,18 @@ void main() {
         kind = 2.0;
         life = 0.35 + 0.9 * rnd(seed);
         wt *= 0.55;
-      } else {
-        kind = 0.0;
       }
     }
+    if (p.y < u_floorY) kind = 0.0;
   } else {
     age += u_dt;
     v.y -= u_gravity * 0.7 * u_dt;
     v.x += u_turb * wobble(p * 0.5, u_time) * 0.2 * u_dt;
     v *= exp(-2.6 * u_dt);
     p += v * u_dt;
-    if (age > life || p.y < u_poolY - 0.04) kind = 0.0;
+    if (age > life || p.y < u_floorY) kind = 0.0;
   }
-  if (abs(p.x) > u_halfW + 0.05 || p.y < -0.05) kind = 0.0;
+  if (abs(p.x) > u_killX || p.y < u_floorY) kind = 0.0;
   if (kind < 0.5) { p = vec2(0.0, -2.0); v = vec2(0.0); }
   o0 = vec4(p, v);
   o1 = vec4(age, kind, wt, life);

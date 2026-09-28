@@ -1,13 +1,17 @@
 // @ts-check
 /**
- * Blaze — a real-time fire simulation seeded by the waveform, for the `webgl2` renderer.
+ * Blaze — a real-time fire simulation fed by the music, for the `webgl2` renderer.
  *
- * Per frame (CPU, allocation-free): resample the newest 2,048 waveform samples into a 256-texel
- * fuel line (lib/fire.js), scale it by a slow auto-gain, and step the music drive (bass stoke +
- * onset flare, flash-limited). Then run a fixed 120 Hz simulation on a grid of canvas × Detail:
+ * Per frame (CPU, allocation-free): build a 256-texel fuel line (lib/fuel.js). With Feed =
+ * "spectrum" (default) the 64 bands are auto-gained per band, gated and expanded (Reactivity),
+ * and mirrored across the line (bass the central column, highs at both edges), with the waveform
+ * as a ±20 % flicker; each band's attacks throw a jet (upward velocity + heat at that band's x,
+ * ~300 ms). Feed = "waveform" is the original feed: the resampled waveform × a slow auto-gain.
+ * Then step the music drive (bass stoke + onset flare, flash-limited, × Reactivity) and run a
+ * fixed 120 Hz simulation on a grid of canvas × Detail:
  *   curl      vorticity of the velocity field
- *   velocity  self-advection, buoyancy, animated curl-noise turbulence, vorticity confinement
- *   scalar    advect temperature + fuel, feed fuel from the seed along the bottom, burn, cool
+ *   velocity  self-advection, buoyancy, curl-noise turbulence, vorticity confinement, jets
+ *   scalar    advect temperature + fuel, feed fuel from the seed along the bottom, jet heat, burn, cool
  * and composite the temperature through the palette ramp onto the transparent canvas.
  *
  * Sim targets are RGBA16F when the GPU can render to half floats (EXT_color_buffer_float or
@@ -15,21 +19,17 @@
  * offset-encoded (±4 heights/s in 8 bits), temperature clamps at 1 and vorticity confinement is
  * off, so the fire is coarser and calmer but still works.
  */
-import {
-  createAutoGain,
-  createDrive,
-  createStepper,
-  fillRampLut,
-  motion,
-  resampleSeed,
-  simSize,
-} from "./lib/fire.js";
+import { createDrive, createStepper, fillRampLut, motion, simSize } from "./lib/fire.js";
+import { createFeed } from "./lib/fuel.js";
 import { createProgram } from "./lib/gl.js";
 
 const SEED = 256;
+const BANDS = 64;
 const SIM_RATE = 120; // sim steps per second
 const MAX_STEPS = 4;
 const JACOBI = 8; // even, so the warm start stays in pres[0]
+const JET_VEL = 3.6; // upward speed a full-strength jet drives its column to, heights/s
+const JET_HEAT = 1.5; // heat a full-strength jet adds at its root
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
@@ -103,9 +103,7 @@ export default async function create(ctx) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  // Waveform seed: 256×1 RG16F (r = |w| × gain, g = w × gain), linear across the fuel line.
-  const mag = new Float32Array(SEED);
-  const signed = new Float32Array(SEED);
+  // Fuel line: 256×1 RG16F (r = fuel, g = jet strength), linear across the bottom of the sim.
   const seedBuf = new Float32Array(SEED * 2);
   const seedTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, seedTex);
@@ -131,10 +129,10 @@ export default async function create(ctx) {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, lut);
   }
 
-  const gain = createAutoGain();
+  const feed = createFeed(SEED, BANDS);
   const drive = createDrive();
   const stepper = createStepper(SIM_RATE, MAX_STEPS);
-  const mo = { turbulence: 1, speed: 1 };
+  const mo = { turbulence: 1, speed: 1, reactivity: 1 };
   let clock = 0;
 
   applyPalette();
@@ -157,19 +155,19 @@ export default async function create(ctx) {
       const intensity = Number(p.intensity);
       const height = Number(p.height);
 
-      // 1. Waveform → seed (CPU, no allocation).
-      resampleSeed(audio.waveform, mag, signed);
-      let peak = 0;
-      for (let i = 0; i < SEED; i++) if (mag[i] > peak) peak = mag[i];
-      const g = audio.silent ? 0 : gain.step(peak, time.dt);
+      // 1. Audio → fuel line + jets (CPU, no allocation).
+      feed.step(audio, time.dt, String(p.feed), mo.reactivity, ctx.reduceFlashing);
+      const fuel = feed.fuel;
+      const jet = feed.jet;
       for (let i = 0; i < SEED; i++) {
-        seedBuf[2 * i] = mag[i] * g;
-        seedBuf[2 * i + 1] = signed[i] * g;
+        seedBuf[2 * i] = fuel[i];
+        seedBuf[2 * i + 1] = jet[i];
       }
       bind(2, seedTex);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, SEED, 1, gl.RG, gl.FLOAT, seedBuf);
 
-      drive.step(audio, time.dt, ctx.reduceFlashing);
+      drive.step(audio, time.dt, ctx.reduceFlashing, mo.reactivity);
+      const react = mo.reactivity > 0 ? Math.min(2, mo.reactivity) : 0;
       const boost = drive.boost;
 
       gl.bindVertexArray(vao);
@@ -207,7 +205,9 @@ export default async function create(ctx) {
         const u = velP.u;
         gl.uniform1i(u.u_vel, 0);
         gl.uniform1i(u.u_scal, 1);
+        gl.uniform1i(u.u_seed, 2);
         gl.uniform1i(u.u_curl, 3);
+        gl.uniform1f(u.u_jetVel, JET_VEL);
         gl.uniform2f(u.u_venc, VENC_X, VENC_Y);
         gl.uniform1f(u.u_aspect, aspect);
         gl.uniform1f(u.u_dt, dtSim);
@@ -265,8 +265,10 @@ export default async function create(ctx) {
         gl.uniform1f(w.u_time, clock);
         gl.uniform1f(w.u_inject, 2.6 * intensity * (0.7 + 0.6 * boost));
         gl.uniform1f(w.u_ember, 0.08 * intensity);
+        gl.uniform1f(w.u_jetHeat, JET_HEAT * intensity);
+        gl.uniform1f(w.u_jetVel, JET_VEL);
         // The flash-limited share of the boost that isn't bass stoke: the onset flare.
-        const flare = boost - 0.5 * drive.stoke;
+        const flare = boost - 0.5 * react * drive.stoke;
         gl.uniform1f(w.u_flare, 0.6 * intensity * (flare > 0 ? flare : 0));
         gl.uniform1f(w.u_cool, 9 / Math.max(0.3, height));
         gl.uniform1f(w.u_burn, 3);
