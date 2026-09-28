@@ -67,3 +67,65 @@ export function resampleSpectrum(spec, sampleRate, lo, hi, out) {
     out[i] = v;
   }
 }
+
+/**
+ * Magnitude → display level (0–1) in dB, per column:
+ *   dB = 20·log10(mag) + tilt (+3 dB/octave around 1 kHz, so pink music reads level; see setTilt)
+ *   Anything under `floorDb` (the gate) is 0.
+ *   Each column tracks its own peak dB (instant attack, falling `releaseDb` dB/s) and the
+ *   loudest column's peak is the mix's reference. A column's reference sits `own` of the way from
+ *   the mix's toward its own peak, so a quiet register gets some lift without being flattened to
+ *   the loudest one: two sustained tones 20 dB apart still read clearly different.
+ *   level = (dB − base) / (ref − base), base = max(floorDb, ref − rangeDb), clamped 0–1.
+ * A quieter mix (same shape) normalises to the same levels once the peaks settle.
+ * @param {number} count columns
+ * @param {{ floorDb?: number, rangeDb?: number, own?: number, releaseDb?: number }} [opts]
+ */
+export function createSpectroGain(count, { floorDb = -66, rangeDb = 30, own = 0.35, releaseDb = 3 } = {}) {
+  const env = new Float32Array(count).fill(floorDb);
+  const db = new Float32Array(count);
+  const tilt = new Float32Array(count);
+  return {
+    /**
+     * Pink tilt per column from its frequency edges: +3 dB per octave above 1 kHz, −3 below.
+     * @param {Float32Array} lo Hz
+     * @param {Float32Array} hi Hz
+     */
+    setTilt(lo, hi) {
+      for (let i = 0; i < count; i++) tilt[i] = 1.5 * Math.log2((lo[i] * hi[i]) / 1e6);
+    },
+    /**
+     * @param {ArrayLike<number>} mags linear magnitude per column
+     * @param {number} dt seconds
+     * @param {Float32Array} out level per column, 0–1
+     */
+    step(mags, dt, out) {
+      const fall = releaseDb * dt;
+      let top = floorDb;
+      for (let i = 0; i < count; i++) {
+        const m = mags[i];
+        const d = m > 1e-9 ? 20 * Math.log10(m) + tilt[i] : -180;
+        db[i] = d;
+        const e = env[i] - fall;
+        const pk = d > e ? d : e > floorDb ? e : floorDb;
+        env[i] = pk;
+        if (pk > top) top = pk;
+      }
+      for (let i = 0; i < count; i++) {
+        const d = db[i];
+        if (d <= floorDb) {
+          out[i] = 0;
+          continue;
+        }
+        const ref = top - own * (top - env[i]);
+        const lowest = ref - rangeDb;
+        const base = lowest > floorDb ? lowest : floorDb;
+        const x = (d - base) / (ref - base);
+        out[i] = x > 0 ? (x < 1 ? x : 1) : 0;
+      }
+    },
+    reset() {
+      env.fill(floorDb);
+    },
+  };
+}

@@ -1,6 +1,8 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { logColumns, resampleSpectrum } from "./spectro.js";
+import { createSpectroGain, logColumns, resampleSpectrum } from "./spectro.js";
+
+const DT = 1 / 60;
 
 const F_MIN = 30;
 const F_MAX = 16000;
@@ -106,5 +108,63 @@ describe("resampleSpectrum", () => {
       }
     }
     expect(seen).toBeGreaterThan(2);
+  });
+});
+
+/** Run a gain on fixed column magnitudes for `seconds`; returns its last output. */
+function settleGain(/** @type {ReturnType<typeof createSpectroGain>} */ g, /** @type {Float32Array} */ mags, /** @type {number} */ seconds, dt = DT) {
+  const out = new Float32Array(mags.length);
+  for (let t = 0; t < seconds; t += dt) g.step(mags, dt, out);
+  return out;
+}
+
+describe("createSpectroGain", () => {
+  it("silence and hiss under the floor read 0", () => {
+    const g = createSpectroGain(32);
+    expect(Array.from(settleGain(g, new Float32Array(32), 2))).toEqual(new Array(32).fill(0));
+    const hiss = settleGain(createSpectroGain(32), new Float32Array(32).fill(3e-4), 2); // ≈ −70 dB
+    for (const v of hiss) expect(v).toBe(0);
+  });
+
+  it("is monotonic in magnitude; a tone 20 dB under the loudest reads clearly lower but not dead", () => {
+    const mags = new Float32Array(32).map((_, i) => 1e-3 * 10 ** (i / 16)); // −60 … −21 dB
+    const out = settleGain(createSpectroGain(32), mags, 3);
+    for (let i = 1; i < 32; i++) expect(out[i]).toBeGreaterThanOrEqual(out[i - 1]);
+    expect(out[31]).toBeCloseTo(1, 5);
+    const two = new Float32Array(32);
+    two[8] = 0.1; // −20 dB
+    two[24] = 0.01; // −40 dB
+    const lv = settleGain(createSpectroGain(32), two, 3);
+    expect(lv[8]).toBeCloseTo(1, 5);
+    expect(lv[24]).toBeGreaterThan(0.2);
+    expect(lv[24]).toBeLessThan(0.75);
+  });
+
+  it("a quieter mix of the same shape normalises to the same levels", () => {
+    const loud = new Float32Array(32).map((_, i) => 0.2 * Math.exp(-i / 8));
+    const quiet = loud.map((v) => v * 0.25); // −12 dB
+    const a = settleGain(createSpectroGain(32), loud, 3);
+    const b = settleGain(createSpectroGain(32), quiet, 3);
+    for (let i = 0; i < 16; i++) expect(b[i]).toBeCloseTo(a[i], 3); // well above the gate
+  });
+
+  it("the gain is slow: after a loud passage a drop reads low at once and recovers over seconds", () => {
+    const g = createSpectroGain(4);
+    settleGain(g, new Float32Array(4).fill(0.1), 2);
+    const soft = new Float32Array(4).fill(0.01); // −20 dB
+    const now = settleGain(g, soft, DT);
+    expect(now[0]).toBeLessThan(0.45);
+    const later = settleGain(g, soft, 8);
+    expect(later[0]).toBeCloseTo(1, 3);
+  });
+
+  it("the pink tilt lifts highs and lowers the bass, 3 dB per octave around 1 kHz", () => {
+    const lo = Float32Array.of(125, 1000, 8000);
+    const hi = Float32Array.of(125, 1000, 8000);
+    const g = createSpectroGain(3, { rangeDb: 60 });
+    g.setTilt(lo, hi);
+    const out = settleGain(g, new Float32Array(3).fill(0.01), 0.5);
+    expect(out[0]).toBeLessThan(out[1]);
+    expect(out[1]).toBeLessThan(out[2]);
   });
 });
