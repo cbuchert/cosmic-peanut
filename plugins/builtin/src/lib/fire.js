@@ -179,3 +179,66 @@ export function simSize(width, height, detail) {
   }
   return { width: Math.max(SIM_MIN, Math.round(w)), height: Math.max(SIM_MIN, Math.round(h)) };
 }
+
+export const PALETTES = ["natural", "blue gas", "green chemical", "ember mono"];
+
+/**
+ * Colour keys per palette: [t, r, g, b] rows, t rising from 0 (cold, black) to 1 (hottest).
+ * "natural" follows a blackbody: deep red → orange → yellow → white-hot.
+ * @type {Record<string, number[]>}
+ */
+const RAMPS = {
+  natural: [
+    0, 0, 0, 0,
+    0.14, 0.22, 0.015, 0.0,
+    0.32, 0.62, 0.08, 0.01,
+    0.52, 0.96, 0.33, 0.03,
+    0.72, 1.0, 0.64, 0.16,
+    0.88, 1.0, 0.86, 0.5,
+    1, 1.0, 0.97, 0.86,
+  ],
+  "blue gas": [
+    0, 0, 0, 0,
+    0.18, 0.01, 0.03, 0.22,
+    0.4, 0.04, 0.2, 0.75,
+    0.65, 0.2, 0.55, 1.0,
+    0.85, 0.6, 0.85, 1.0,
+    1, 0.94, 0.97, 1.0,
+  ],
+  "green chemical": [
+    0, 0, 0, 0,
+    0.18, 0.0, 0.16, 0.03,
+    0.4, 0.08, 0.5, 0.08,
+    0.65, 0.35, 0.85, 0.15,
+    0.85, 0.72, 1.0, 0.45,
+    1, 0.95, 1.0, 0.85,
+  ],
+  "ember mono": [
+    0, 0, 0, 0,
+    0.2, 0.2, 0.02, 0.0,
+    0.5, 0.62, 0.1, 0.02,
+    0.8, 0.95, 0.28, 0.06,
+    1, 1.0, 0.5, 0.2,
+  ],
+};
+
+/**
+ * Sample a palette at temperature `t` (clamped to 0–1) into `out` as premultiplied RGBA: colour
+ * is light-on-black and alpha is its brightest channel (docs/plugin-api.md, "The canvas is
+ * transparent"), so cold gas is fully transparent rather than black smoke. Unknown palettes fall
+ * back to "natural".
+ * @param {string} palette
+ * @param {number} t
+ * @param {Float32Array | number[]} out length ≥ 4
+ */
+export function rampColor(palette, t, out) {
+  const k = RAMPS[palette] ?? RAMPS.natural;
+  const x = t < 0 ? 0 : t > 1 ? 1 : t;
+  let j = 0;
+  while (j + 8 < k.length && k[j + 4] < x) j += 4;
+  const span = k[j + 4] - k[j];
+  const f = span > 0 ? (x - k[j]) / span : 0;
+  for (let c = 0; c < 3; c++) out[c] = k[j + 1 + c] + (k[j + 5 + c] - k[j + 1 + c]) * f;
+  out[3] = Math.max(out[0], out[1], out[2]);
+  return out;
+}

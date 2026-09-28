@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createAutoGain, createDrive, createEnvelope, createStepper, resampleSeed, simSize } from "./fire.js";
+import { createAutoGain, createDrive, createEnvelope, createStepper, PALETTES, rampColor, resampleSeed, simSize } from "./fire.js";
 
 const DT = 1 / 60;
 
@@ -203,6 +203,54 @@ describe("simSize", () => {
     expect(simSize(1000, 500, NaN)).toEqual({ width: 300, height: 150 });
     expect(simSize(40, 20, 0.3)).toEqual({ width: 16, height: 16 });
     expect(simSize(6000, 3000, 0.5)).toEqual({ width: 1024, height: 512 });
+  });
+});
+
+const lum = (/** @type {Float32Array} */ c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+
+describe("rampColor", () => {
+  it("gets brighter from cold to hot in every palette", () => {
+    const c = new Float32Array(4);
+    for (const p of PALETTES) {
+      let prev = -1;
+      for (let i = 0; i <= 100; i++) {
+        rampColor(p, i / 100, c);
+        const l = lum(c);
+        expect(l, `${p} at ${i}`).toBeGreaterThanOrEqual(prev);
+        prev = l;
+      }
+      expect(prev, p).toBeGreaterThan(0.55); // the hottest gas is bright (ember mono stays orange)
+    }
+  });
+
+  it("is premultiplied with alpha = brightest channel: cold gas is fully transparent, not black smoke", () => {
+    const c = new Float32Array(4);
+    for (const p of PALETTES) {
+      rampColor(p, 0, c);
+      expect([...c]).toEqual([0, 0, 0, 0]);
+      rampColor(p, -3, c);
+      expect(c[3]).toBe(0);
+      for (let i = 1; i <= 20; i++) {
+        rampColor(p, i / 20, c);
+        expect(c[3]).toBeCloseTo(Math.max(c[0], c[1], c[2]), 6);
+        expect(c[3]).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("natural runs deep red → orange → white-hot; unknown palettes fall back to natural", () => {
+    const c = new Float32Array(4);
+    rampColor("natural", 0.2, c);
+    expect(c[0]).toBeGreaterThan(4 * c[1]); // red tips
+    rampColor("natural", 0.55, c);
+    expect(c[0]).toBeGreaterThan(c[1]);
+    expect(c[1]).toBeGreaterThan(c[2]); // orange body
+    rampColor("natural", 1, c);
+    expect(Math.min(c[0], c[1], c[2])).toBeGreaterThan(0.8); // white-yellow core
+    const d = new Float32Array(4);
+    rampColor("plaid", 0.6, d);
+    rampColor("natural", 0.6, c);
+    expect([...d]).toEqual([...c]);
   });
 });
 
