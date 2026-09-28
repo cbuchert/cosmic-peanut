@@ -128,3 +128,63 @@ export function bandProfile(bands, gain, out) {
   }
   return out;
 }
+
+/** Ground clutter lives inside this radius and never exceeds CLUTTER_MAX. */
+export const CLUTTER_R = 0.22;
+export const CLUTTER_MAX = 0.35;
+
+/**
+ * Ground-clutter amplitude by radius from the waveform: each radius near the center takes the mean
+ * |sample| of its own slice of the waveform, fading to nothing at CLUTTER_R. The shader multiplies
+ * it by per-texel noise to speckle it.
+ * @param {ArrayLike<number>} waveform `audio.waveform` (any length; read `.length`)
+ * @param {Float32Array} out
+ */
+export function clutterProfile(waveform, out) {
+  const n = out.length;
+  const len = waveform.length;
+  const zone = Math.ceil(CLUTTER_R * n);
+  for (let k = 0; k < n; k++) {
+    const r = (k + 0.5) / n;
+    if (r >= CLUTTER_R || len === 0) {
+      out[k] = 0;
+      continue;
+    }
+    const a = Math.floor((k * len) / zone);
+    const b = Math.max(a + 1, Math.floor(((k + 1) * len) / zone));
+    let sum = 0;
+    for (let j = a; j < b; j++) sum += Math.abs(waveform[j]);
+    out[k] = CLUTTER_MAX * Math.min(1, (3 * sum) / (b - a)) * (1 - r / CLUTTER_R);
+  }
+  return out;
+}
+
+/** Phosphor decay runs in fixed steps of this many seconds, whatever the display rate. */
+export const DECAY_STEP = 1 / 240;
+/** Floor on the rate used for decay (turns/s), so a stopped sweep still fades. */
+const DECAY_MIN_RATE = 0.05;
+
+/**
+ * Fixed-timestep phosphor decay. `persistence` is the afterglow's time constant in rotations, so
+ * the trail always fades over about the same arc whatever the sweep speed.
+ */
+export function createDecay() {
+  const d = {
+    /** Unconsumed time, seconds. */
+    acc: 0,
+    /**
+     * @param {number} dt seconds
+     * @param {number} rate sweep rate, turns/s
+     * @param {number} persistence afterglow, rotations
+     * @returns {number} factor to multiply the phosphor by this frame
+     */
+    step(dt, rate, persistence) {
+      d.acc += dt;
+      const n = Math.floor(d.acc / DECAY_STEP + 1e-9);
+      d.acc = Math.max(0, d.acc - n * DECAY_STEP);
+      const perStep = (DECAY_STEP * Math.max(DECAY_MIN_RATE, rate)) / Math.max(0.01, persistence);
+      return Math.exp(-n * perStep);
+    },
+  };
+  return d;
+}

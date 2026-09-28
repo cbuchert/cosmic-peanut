@@ -2,6 +2,10 @@
 import { describe, expect, it } from "vitest";
 import {
   bandProfile,
+  CLUTTER_MAX,
+  CLUTTER_R,
+  clutterProfile,
+  createDecay,
   createSweep,
   DEFAULT_SPEED,
   GATE,
@@ -173,5 +177,49 @@ describe("bandProfile", () => {
     expect(a).toBeGreaterThan(0.3);
     expect(b).toBeCloseTo(2 * a, 5);
     expect(at(out.fill(9) && bandProfile(bands, 1, out), 0.995)).toBe(0); // nothing past the outermost band
+  });
+});
+
+describe("clutterProfile", () => {
+  const noise = (/** @type {number} */ n, /** @type {number} */ amp) => {
+    let seed = 7;
+    return Float32Array.from({ length: n }, () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 2 * amp);
+  };
+
+  it("speckles only near the center, bounded, louder waveform → more clutter", () => {
+    for (const len of [2048, 512]) {
+      const loud = clutterProfile(noise(len, 1), new Float32Array(256));
+      const soft = clutterProfile(noise(len, 0.1), new Float32Array(256));
+      const sum = (/** @type {Float32Array} */ a) => a.reduce((x, y) => x + y, 0);
+      expect(Math.max(...loud)).toBeLessThanOrEqual(CLUTTER_MAX);
+      expect(sum(loud), `${len}`).toBeGreaterThan(sum(soft) * 2);
+      expect(sum(soft)).toBeGreaterThan(0);
+      for (let k = 0; k < 256; k++) if ((k + 0.5) / 256 >= CLUTTER_R) expect(loud[k]).toBe(0);
+    }
+  });
+
+  it("is dark for silence", () => {
+    const out = clutterProfile(new Float32Array(2048), new Float32Array(256).fill(1));
+    expect(Math.max(...out)).toBe(0);
+  });
+});
+
+describe("createDecay", () => {
+  const run = (/** @type {number} */ hz, /** @type {number} */ seconds, rate = 0.5, persistence = 0.6) => {
+    const d = createDecay();
+    let v = 1;
+    for (let f = 0; f < Math.round(seconds * hz); f++) v *= d.step(1 / hz, rate, persistence);
+    return v;
+  };
+
+  it("fades the same at 60 and 120 Hz: one rotation later the trail is at exp(−1/persistence)", () => {
+    expect(run(60, 2)).toBeCloseTo(Math.exp(-1 / 0.6), 6);
+    expect(run(120, 2)).toBeCloseTo(run(60, 2), 9);
+    expect(run(144, 2)).toBeCloseTo(run(60, 2), 2); // within one fixed step
+  });
+
+  it("holds longer with more persistence and still fades when the sweep stops", () => {
+    expect(run(60, 2, 0.5, 1.5)).toBeGreaterThan(run(60, 2, 0.5, 0.6));
+    expect(run(60, 60, 0, 0.6)).toBeLessThan(0.1);
   });
 });
