@@ -207,6 +207,11 @@ def test_cascade_manifest():
     assert params["density"]["options"] == ["16k", "32k", "64k"]
     assert params["palette"]["options"] == ["glacier", "tropical", "moonlit", "mono"]
     assert params["palette"]["default"] == "glacier"
+    # Fills the window by default; width and height narrow the lip and shorten the drop.
+    for pid in ("width", "height"):
+        assert params[pid]["default"] == params[pid]["max"] == 1
+        assert 0 < params[pid]["min"] < 1
+    assert params["density"]["default"] == "64k"
 
 
 def test_radar_manifest():

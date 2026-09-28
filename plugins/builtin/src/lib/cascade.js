@@ -209,9 +209,9 @@ export function createStepper(hz, maxSteps) {
   };
 }
 
-/** Density options (particle counts) and the default, sized for 60 fps at 1440p on an M1 Air. */
+/** Density options (particle counts) and the default, sized for 60 fps at 1440p on an M1 Air (64k: ~2 ms GPU filling the window). */
 export const DENSITIES = { "16k": 16384, "32k": 32768, "64k": 65536 };
-export const DEFAULT_DENSITY = "32k";
+export const DEFAULT_DENSITY = "64k";
 
 /**
  * Particle count and state-texture size for a density option: power-of-two width, just enough
@@ -304,4 +304,86 @@ export function triggerIndex(wave, search) {
     }
   }
   return best;
+}
+
+/** Where the lip sits: just above the top edge, so the pour enters from outside the window. */
+export const LIP_TOP = 1.005;
+/** How far the full-width lip reaches past each side (fraction of the half-width), so turbulence
+ * and fan-out carry water in from off-screen instead of opening a gap at the edges. */
+export const OVERSCAN = 0.04;
+/** The plunge pool: splashes start just above the bottom edge (so spray has room to show). */
+export const POOL_Y = 0.035;
+/** Water that doesn't splash falls on through the bottom edge and dies below this. */
+export const FLOOR_Y = -0.05;
+
+/** Reference canvas (1440p) for the pixel-size scale factors. */
+const REF_W = 2560;
+const REF_H = 1440;
+/** Streak half-width at the reference canvas (px) and the streak length (s of motion). */
+const LINE_WIDTH = 1.1;
+const STREAK = 0.1;
+/** Mist buffer downscale and blob size as a fraction of that buffer's geometric-mean side. */
+export const MIST_DIV = 4;
+const MIST_BLOB = 1 / 16;
+/** Bounds on the canvas-size brightness compensation. */
+export const GAIN_MIN = 0.3;
+export const GAIN_MAX = 2;
+
+/**
+ * @typedef {object} Layout
+ * @property {number} halfW half the canvas width, height units
+ * @property {number} lipHalf half the lip's span
+ * @property {number} lipY lip height
+ * @property {number} poolY plunge-pool height (splashes start here)
+ * @property {number} floorY water that didn't splash dies below this
+ * @property {number} killX particles past ±killX are gone
+ * @property {number} streak seconds of motion a streak spans (so a fixed fraction of the canvas)
+ * @property {number} lineWidth streak half-width, px
+ * @property {number} mistW mist buffer size, px
+ * @property {number} mistH
+ * @property {number} mistSize mist point size, mist-buffer px
+ * @property {number} gain brightness compensation for the canvas size (1 at 1440p landscape)
+ */
+
+/**
+ * The fall's layout in height units (y: 0 bottom .. 1 top, x centred, ±halfW at the side edges),
+ * from the canvas size and the width/height params. By default the lip spans the full width just
+ * above the top edge and the pool sits on the bottom edge, for any aspect; `width` narrows the lip
+ * and `height` shortens the drop, both as fractions. Writes into `out` (allocates nothing).
+ * @param {number} w canvas width (px)
+ * @param {number} h canvas height (px)
+ * @param {Readonly<Record<string, unknown>>} params `width` and `height`, 0–1
+ * @param {Partial<Layout>} out
+ * @returns {Layout}
+ */
+export function layout(w, h, params, out) {
+  const o = /** @type {Layout} */ (out);
+  const halfW = w / h / 2;
+  o.halfW = halfW;
+  o.lipHalf = halfW * (1 + OVERSCAN) * Number(params.width);
+  o.lipY = POOL_Y + (LIP_TOP - POOL_Y) * Number(params.height);
+  o.poolY = POOL_Y;
+  o.floorY = FLOOR_Y;
+  // Past this (either side) a particle is gone: just beyond the widest spawn and the canvas edge.
+  o.killX = Math.max(o.lipHalf, halfW) + 0.05;
+  o.streak = STREAK;
+  o.lineWidth = LINE_WIDTH * Math.max(1, Math.sqrt((w * h) / (REF_W * REF_H)));
+  o.mistW = Math.max(1, Math.round(w / MIST_DIV));
+  o.mistH = Math.max(1, Math.round(h / MIST_DIV));
+  o.mistSize = Math.sqrt(o.mistW * o.mistH) * MIST_BLOB;
+  // Streak length and the drop both scale with h, so additive brightness per unit of canvas goes
+  // as lineWidth / w: hold it at the reference level.
+  const want = (LINE_WIDTH / REF_W) * (w / o.lineWidth);
+  o.gain = Math.min(GAIN_MAX, Math.max(GAIN_MIN, want));
+  return o;
+}
+
+/**
+ * Lip position (height units, centred) for a draw `xs` in [0, 1] from the inverse CDF. Mirrors the
+ * respawn in update.frag.
+ * @param {number} xs
+ * @param {number} lipHalf
+ */
+export function lipX(xs, lipHalf) {
+  return (xs * 2 - 1) * lipHalf;
 }
