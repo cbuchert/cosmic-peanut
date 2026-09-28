@@ -262,3 +262,19 @@ export function motion(params, reduceMotion, out) {
   out.speed = reduceMotion && s === MOTION_DEFAULTS.speed ? REDUCED_MOTION.speed : s;
   return out;
 }
+
+const rampTmp = new Float32Array(4);
+
+/**
+ * Fill an RGBA8 lookup texture (length = texels × 4) with a palette ramp, texel i at t = i / (n − 1).
+ * Called when the palette changes, not per frame.
+ * @param {string} palette
+ * @param {Uint8Array} lut
+ */
+export function fillRampLut(palette, lut) {
+  const n = lut.length >> 2;
+  for (let i = 0; i < n; i++) {
+    rampColor(palette, n > 1 ? i / (n - 1) : 0, rampTmp);
+    for (let c = 0; c < 4; c++) lut[i * 4 + c] = Math.round(rampTmp[c] * 255);
+  }
+}

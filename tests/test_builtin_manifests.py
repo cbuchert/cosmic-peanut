@@ -37,6 +37,7 @@ def test_builtin_renderers():
         "undertow": ("webgl2", []),
         "orbit": ("three", ["three"]),
         "pulsar": ("2d", []),
+        "blaze": ("webgl2", []),
     }
 
 
@@ -144,3 +145,13 @@ def test_cosmic_peanut_manifest_matches_prd():
     }
     assert [p["id"] for p in v["params"]] == list(got)
     assert {p["id"]: p.get("step") for p in v["params"]}["travel"] == 0.5
+
+
+def test_blaze_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "blaze"]
+    assert (v["name"], v["entry"], v["renderer"]) == ("Blaze", "src/blaze.js", "webgl2")
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["intensity", "height", "turbulence", "speed", "glow", "palette", "detail"]
+    assert params["palette"]["options"] == ["natural", "blue gas", "green chemical", "ember mono"]
+    assert params["palette"]["default"] == "natural"
+    assert (params["detail"]["min"], params["detail"]["max"]) == (0.15, 0.5)

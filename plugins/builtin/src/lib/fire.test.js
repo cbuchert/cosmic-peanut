@@ -1,6 +1,7 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createAutoGain, createDrive, createEnvelope, createStepper, motion, MOTION_DEFAULTS, PALETTES, rampColor, resampleSeed, simSize } from "./fire.js";
+import manifest from "../../tidalviz.json";
+import { createAutoGain, createDrive, createEnvelope, createStepper, fillRampLut, motion, MOTION_DEFAULTS, PALETTES, rampColor, resampleSeed, simSize } from "./fire.js";
 
 const DT = 1 / 60;
 
@@ -254,6 +255,19 @@ describe("rampColor", () => {
   });
 });
 
+describe("fillRampLut", () => {
+  it("writes the ramp into RGBA8 texels, cold at 0 and hottest at the end", () => {
+    const lut = new Uint8Array(256 * 4);
+    const c = new Float32Array(4);
+    fillRampLut("natural", lut);
+    expect([...lut.slice(0, 4)]).toEqual([0, 0, 0, 0]);
+    rampColor("natural", 1, c);
+    expect([...lut.slice(1020)]).toEqual([...c].map((v) => Math.round(v * 255)));
+    rampColor("natural", 100 / 255, c);
+    expect(lut[400]).toBe(Math.round(c[0] * 255));
+  });
+});
+
 describe("motion", () => {
   it("with reduceMotion, calms turbulence and speed that are at their defaults", () => {
     const out = { turbulence: 0, speed: 0 };
@@ -266,14 +280,12 @@ describe("motion", () => {
     expect(out.speed).toBeGreaterThan(0);
   });
 
-  it("respects values the user chose, and the defaults match the manifest", async () => {
+  it("respects values the user chose, and the defaults match the manifest", () => {
     const out = { turbulence: 0, speed: 0 };
     motion({ turbulence: 1.5, speed: 0.8 }, true, out);
     expect(out).toEqual({ turbulence: 1.5, speed: 0.8 });
-    const { readFile } = await import("node:fs/promises");
-    const manifest = JSON.parse(await readFile(new URL("../../tidalviz.json", import.meta.url), "utf8"));
     const blaze = manifest.visualizers.find((/** @type {{ id: string }} */ v) => v.id === "blaze");
-    const defaults = Object.fromEntries(blaze.params.map((/** @type {any} */ p) => [p.id, p.default]));
+    const defaults = Object.fromEntries((blaze?.params ?? []).map((p) => [p.id, p.default]));
     expect(defaults.turbulence).toBe(MOTION_DEFAULTS.turbulence);
     expect(defaults.speed).toBe(MOTION_DEFAULTS.speed);
   });
