@@ -7,17 +7,19 @@ import { createFlashLimiter } from "./flash.js";
 /**
  * |wave| resampled to `out.length` texels by point sampling with linear interpolation between the
  * two nearest samples — no box filter, so the waveform's jaggedness survives. Works for any input
- * length (read `.length`; 0 → all zero).
+ * length (read `.length`; 0 → all zero). Optionally only `length` samples from `start`.
  * @param {ArrayLike<number>} wave
  * @param {Float32Array} out
+ * @param {number} [start]
+ * @param {number} [length]
  */
-export function resampleAbs(wave, out) {
-  const n = wave.length;
+export function resampleAbs(wave, out, start = 0, length = wave.length - start) {
+  const n = Math.min(wave.length, start + length);
   const m = out.length;
-  if (n === 0) return out.fill(0);
-  const step = m > 1 ? (n - 1) / (m - 1) : 0;
+  if (n - start <= 0) return out.fill(0);
+  const step = m > 1 ? (n - 1 - start) / (m - 1) : 0;
   for (let i = 0; i < m; i++) {
-    const x = i * step;
+    const x = start + i * step;
     const i0 = Math.floor(x);
     const i1 = i0 + 1 < n ? i0 + 1 : i0;
     const f = x - i0;
@@ -69,7 +71,9 @@ export function createSeed(texels) {
     values,
     /** @param {ArrayLike<number>} wave @param {number} dt @param {number} surge */
     update(wave, dt, surge) {
-      resampleAbs(wave, raw);
+      // Trigger in the oldest quarter, show the rest: the window keeps a fixed length.
+      const search = wave.length >> 2;
+      resampleAbs(wave, raw, triggerIndex(wave, search), wave.length - search);
       const a = 1 - Math.exp(-dt / SEED_TAU);
       let top = 0;
       for (let i = 0; i < texels; i++) {
@@ -273,4 +277,29 @@ export function motionParams(params, reduceMotion, out) {
   out.spray = reduceMotion && spray === DEFAULTS.spray ? spray * 0.4 : spray;
   out.turbulence = reduceMotion && turb === DEFAULTS.turbulence ? turb * 0.3 : turb;
   return out;
+}
+
+/**
+ * Oscilloscope trigger: the index in [1, search) of the steepest rising zero crossing (slope
+ * measured over a few samples, so hiss doesn't win), or 0 if there is none. Starting the window
+ * there pins periodic content in place from frame to frame, so the ropes it seeds persist instead
+ * of sliding across the lip with the waveform's phase.
+ * @param {ArrayLike<number>} wave
+ * @param {number} search
+ */
+export function triggerIndex(wave, search) {
+  const n = wave.length;
+  const end = Math.min(search, n - 3);
+  let best = 0;
+  let bestSlope = 0;
+  for (let i = 3; i < end; i++) {
+    if (wave[i - 1] <= 0 && wave[i] > 0) {
+      const slope = wave[i + 2] - wave[i - 3];
+      if (slope > bestSlope) {
+        bestSlope = slope;
+        best = i;
+      }
+    }
+  }
+  return best;
 }

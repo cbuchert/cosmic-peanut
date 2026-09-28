@@ -1,11 +1,14 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
+import manifest from "../../tidalviz.json";
 import {
   buildInverseCdf,
   createEnvelopes,
   createSeed,
   createStepper,
+  DEFAULT_DENSITY,
   DEFAULTS,
+  DENSITIES,
   motionParams,
   resampleAbs,
   PALETTES,
@@ -13,6 +16,7 @@ import {
   paletteStops,
   sampleInverse,
   stateSize,
+  triggerIndex,
 } from "./cascade.js";
 
 describe("resampleAbs", () => {
@@ -46,6 +50,43 @@ describe("resampleAbs", () => {
   it("gives all zeros for an empty waveform and a constant for a single sample", () => {
     expect([...resampleAbs(new Float32Array(0), new Float32Array(4).fill(7))]).toEqual([0, 0, 0, 0]);
     expect([...resampleAbs(new Float32Array([-0.5]), new Float32Array(3))]).toEqual([0.5, 0.5, 0.5]);
+  });
+});
+
+describe("triggerIndex (oscilloscope trigger)", () => {
+  /** @param {number} shift samples @param {number} n */
+  const tone = (shift, n = 2048) => {
+    const w = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const s = i + shift;
+      w[i] = 0.6 * Math.sin((2 * Math.PI * s) / 181) + 0.2 * Math.sin((2 * Math.PI * s) / 60.33);
+    }
+    return w;
+  };
+
+  it("pins a periodic waveform in place however its window is shifted", () => {
+    const outA = new Float32Array(256);
+    const outB = new Float32Array(256);
+    const a = tone(0);
+    const b = tone(97); // the next frame: same tone, different phase
+    const ta = triggerIndex(a, 512);
+    const tb = triggerIndex(b, 512);
+    expect(ta).toBeGreaterThan(0);
+    resampleAbs(a, outA, ta, 1536);
+    resampleAbs(b, outB, tb, 1536);
+    for (let i = 0; i < 256; i++) expect(outB[i]).toBeCloseTo(outA[i], 2);
+  });
+
+  it("starts the window at a rising zero crossing", () => {
+    const w = tone(40);
+    const t = triggerIndex(w, 512);
+    expect(w[t - 1]).toBeLessThanOrEqual(0);
+    expect(w[t]).toBeGreaterThan(0);
+  });
+
+  it("returns 0 when there is no crossing (silence, DC)", () => {
+    expect(triggerIndex(new Float32Array(2048), 512)).toBe(0);
+    expect(triggerIndex(new Float32Array(2048).fill(0.3), 512)).toBe(0);
   });
 });
 
@@ -107,6 +148,24 @@ describe("createSeed bass scaling", () => {
     run(hi, jagged(0.5), 1, 1.5);
     expect(hi.mean / lo.mean).toBeGreaterThan(2.5);
     expect(hi.mean / lo.mean).toBeLessThan(3.1);
+  });
+});
+
+describe("createSeed rope persistence", () => {
+  it("keeps distinct ropes for a tone whose phase drifts every frame (trigger-aligned)", () => {
+    const s = createSeed(256);
+    const w = new Float32Array(2048);
+    for (let f = 0; f < 90; f++) {
+      const shift = f * 512; // one 512-sample hop per frame
+      for (let i = 0; i < 2048; i++) w[i] = 0.5 * Math.sin((2 * Math.PI * (i + shift)) / 301.7);
+      s.update(w, 1 / 60, 1);
+    }
+    let mean = 0;
+    for (const v of s.values) mean += v / 256;
+    let varc = 0;
+    for (const v of s.values) varc += (v - mean) ** 2 / 256;
+    // |sin| resampled: std/mean ≈ 0.48 if pinned; phase-smeared it collapses toward flat.
+    expect(Math.sqrt(varc) / mean).toBeGreaterThan(0.35);
   });
 });
 
@@ -344,5 +403,20 @@ describe("motionParams (reduceMotion)", () => {
   it("respects values the user chose, even with reduceMotion", () => {
     motionParams({ spray: 0.9, turbulence: 0.8 }, true, out);
     expect(out).toEqual({ spray: 0.9, turbulence: 0.8 });
+  });
+});
+
+describe("manifest agreement", () => {
+  const entry = manifest.visualizers.find((v) => v.id === "cascade");
+  /** @param {string} id */
+  const param = (id) => /** @type {any} */ (entry?.params?.find((p) => p.id === id));
+
+  it("uses the manifest defaults for the reduceMotion rule, palettes and densities", () => {
+    expect(param("spray").default).toBe(DEFAULTS.spray);
+    expect(param("turbulence").default).toBe(DEFAULTS.turbulence);
+    expect(param("palette").options).toEqual(PALETTES);
+    expect(param("palette").default).toBe(PALETTES[0]);
+    expect(param("density").options).toEqual(Object.keys(DENSITIES));
+    expect(param("density").default).toBe(DEFAULT_DENSITY);
   });
 });
