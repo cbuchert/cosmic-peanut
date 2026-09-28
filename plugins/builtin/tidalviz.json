@@ -63,6 +63,24 @@
         { "id": "color", "type": "color", "label": "Color", "default": "#ffffff" },
         { "id": "lineWidth", "type": "number", "label": "Line width", "min": 0.5, "max": 4, "step": 0.1, "default": 1.5 }
       ]
+    },
+    {
+      "id": "stargate",
+      "name": "Stargate",
+      "description": "Hurtle and roll between two infinite planes of slit-scan light seeded by the waveform, after 2001's Star Gate.",
+      "author": "Tidalviz",
+      "entry": "src/stargate.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/stargate.jpg",
+      "params": [
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 3, "step": 0.05, "default": 1 },
+        { "id": "roll", "type": "number", "label": "Roll (rad/s)", "min": -1.5, "max": 1.5, "step": 0.01, "default": 0.25 },
+        { "id": "detail", "type": "select", "label": "Detail", "options": ["low", "medium", "high"], "default": "medium" },
+        { "id": "streak", "type": "number", "label": "Streak", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
+        { "id": "spread", "type": "number", "label": "Field of view", "min": 0.5, "max": 1.8, "step": 0.01, "default": 1 },
+        { "id": "brightness", "type": "number", "label": "Brightness", "min": 0.2, "max": 2.5, "step": 0.01, "default": 1 },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["film", "ember", "ice", "mono"], "default": "film" }
+      ]
     }
   ]
 }

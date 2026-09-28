@@ -18,6 +18,7 @@ VIZ = {
     "undertow": "builtin",
     "orbit": "builtin",
     "pulsar": "builtin",
+    "stargate": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }

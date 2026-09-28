@@ -37,6 +37,7 @@ def test_builtin_renderers():
         "undertow": ("webgl2", []),
         "orbit": ("three", ["three"]),
         "pulsar": ("2d", []),
+        "stargate": ("webgl2", []),
     }
 
 
@@ -144,3 +145,19 @@ def test_cosmic_peanut_manifest_matches_prd():
     }
     assert [p["id"] for p in v["params"]] == list(got)
     assert {p["id"]: p.get("step") for p in v["params"]}["travel"] == 0.5
+
+
+def test_stargate_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "stargate"]
+    assert (v["name"], v["entry"], v["thumbnail"]) == (
+        "Stargate",
+        "src/stargate.js",
+        "thumbs/stargate.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["speed", "roll", "detail", "streak", "spread", "brightness", "palette"]
+    assert params["roll"]["default"] == 0.25
+    assert params["roll"]["min"] < 0 < params["roll"]["max"]
+    assert params["palette"]["options"] == ["film", "ember", "ice", "mono"]
+    assert params["palette"]["default"] == "film"
+    assert (REPOS["builtin"] / "shaders/stargate/stargate.frag").is_file()

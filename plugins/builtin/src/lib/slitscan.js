@@ -63,7 +63,7 @@ export const GAIN_FLOOR = 0.08;
 /** Per-row release of the level tracker (≈ a few seconds at typical row rates). */
 const LEVEL_RELEASE = 0.994;
 /** Per-row decay of the streak (peak-hold) channel. */
-export const STREAK_DECAY = 0.86;
+export const STREAK_DECAY = 0.93;
 
 /**
  * Builds one history row: W RGBA texels.
