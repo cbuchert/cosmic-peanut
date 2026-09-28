@@ -1,37 +1,38 @@
 // @ts-check
 /**
- * Radar — a PPI (plan position indicator) scope painted by the music.
+ * Radar — a PPI (plan position indicator) scope whose sweep draws a spectrogram.
  *
  * The sweep arm turns at `speed`, or locked to the tempo (one rotation per bar or per beat, phase-
- * aligned to beatPhase). As it passes each bearing it writes the current spectrum along that
- * radius — bass at the center, highs at the rim — into a polar phosphor buffer that decays over
- * about one rotation, so the screen always holds a glowing polar spectrogram of the last rotation of
- * sound. Transients leave bright contacts at the bearing where the sweep was and the radius of the
- * band that fired; they flare each time the sweep passes and fade over a few rotations. The
- * waveform speckles ground clutter near the center.
+ * aligned to beatPhase). Each bearing is one time slice: as the arm passes it, it writes the
+ * current spectrum along that radius — frequency on a log scale, lowest at the center, `maxFreq`
+ * at the rim, magnitude in dB above a `floor` with a slow auto-gain — into a polar phosphor
+ * buffer that decays over about one rotation. Sustained tones trace concentric arcs, a melody
+ * steps between radii, drum hits leave radial spokes, and silence is black. It is fully deterministic.
  *
- * GPU: the phosphor is a fixed 2048 × 256 (bearing × radius) float ping-pong, independent of the
- * canvas size; each frame one pass decays it and repaints the wedge swept since the last frame, and
- * one full-screen pass draws the scope (phosphor + glow, contacts, arm, graticule) analytically.
- * Pure logic is in lib/radar.js and tested there. Nothing is allocated per frame.
+ * GPU: the phosphor is a fixed 2048 × 512 (bearing × radius) half-float ping-pong, independent of
+ * the canvas size; each frame one pass decays it and repaints the wedge swept since the last frame
+ * (blending last frame's spectrum into this one's across the wedge), and one full-screen pass draws
+ * the scope (phosphor + glow, arm, graticule) analytically. Pure logic is in lib/radar.js and
+ * tested there. Nothing is allocated per frame.
  */
 import { createFlashLimiter } from "./lib/flash.js";
 import { createProgram, createTarget } from "./lib/gl.js";
 import {
-  bandProfile,
-  clutterProfile,
-  createContacts,
   createDecay,
+  createLevel,
   createSweep,
   fitScope,
   phosphorPalette,
+  spectrumColumn,
   sweptWedge,
 } from "./lib/radar.js";
 
 /** Phosphor texels around the scope (bearing) and along a radius. */
 const N_ANG = 2048;
-const N_RAD = 256;
-const MAX_CONTACTS = 32;
+const N_RAD = 512;
+
+/** `maxFreq` param → Hz. @param {unknown} v */
+const maxHzOf = (v) => (v === "4k" ? 4000 : v === "8k" ? 8000 : 16000);
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
@@ -53,26 +54,25 @@ export default async function create(ctx) {
   }
   let cur = 0;
 
-  // This frame's radial profile: row 0 the spectrum, row 1 the clutter amplitude.
-  const profileTex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, profileTex);
+  // Spectrogram columns (one value per radial texel): row 0 last frame's, row 1 this frame's.
+  const columnTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, columnTex);
   gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R32F, N_RAD, 2);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  const spectrum = new Float32Array(N_RAD);
-  const clutter = new Float32Array(N_RAD);
+  const raw = new Float32Array(N_RAD);
+  const last = new Float32Array(N_RAD);
+  const column = new Float32Array(N_RAD);
 
   const sweep = createSweep();
   const decay = createDecay();
-  const contacts = createContacts(MAX_CONTACTS);
-  const packed = new Float32Array(4 * MAX_CONTACTS);
+  const level = createLevel();
   const wedge = new Float32Array(2);
   const scope = { cx: 0, cy: 0, radius: 0 };
   const pal = new Float32Array(6);
   const sweepIn = { sync: "bar", speed: 0.25, bpm: 0, beatPhase: 0, reduceMotion: false };
   const flash = createFlashLimiter();
   let kick = 0;
-  let seed = 0;
 
   phosphorPalette(ctx.params.palette, pal);
 
@@ -88,26 +88,25 @@ export default async function create(ctx) {
       const now = sweep.step(time.dt, sweepIn);
       sweptWedge(prev, now, wedge);
 
-      bandProfile(audio.bands, Number(p.gain), spectrum);
-      clutterProfile(audio.waveform, clutter);
-      contacts.step(prev, now, audio.onset, audio.onsetStrength, audio.bands);
-      const count = p.contacts ? contacts.pack(packed, now) : 0;
+      const sr = audio.sampleRate > 0 ? audio.sampleRate : 48000;
+      spectrumColumn(audio.spectrum, sr, Math.min(maxHzOf(p.maxFreq), sr / 2), raw);
+      last.set(column);
+      level.step(raw, time.dt, Number(p.floor), Number(p.gain), column);
 
       // A gentle whole-scope lift on onsets; full-frame, so it goes through the flash limiter.
       kick = audio.onset ? Math.min(1, 0.4 + audio.onsetStrength) : kick * Math.exp(-time.dt * 5);
       const pulse = flash.step(kick, time.dt, ctx.reduceFlashing);
-      seed = (seed + 1) % 4096;
 
       gl.bindVertexArray(vao);
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
 
       gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, profileTex);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N_RAD, 1, gl.RED, gl.FLOAT, spectrum);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 1, N_RAD, 1, gl.RED, gl.FLOAT, clutter);
+      gl.bindTexture(gl.TEXTURE_2D, columnTex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N_RAD, 1, gl.RED, gl.FLOAT, last);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 1, N_RAD, 1, gl.RED, gl.FLOAT, column);
 
-      // 1. Decay the phosphor and repaint the swept wedge.
+      // 1. Decay the phosphor and paint this frame's spectrogram slice into the swept wedge.
       const src = targets[cur];
       const dst = targets[cur ^ 1];
       gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
@@ -116,11 +115,10 @@ export default async function create(ctx) {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, src.tex);
       gl.uniform1i(paint.u.u_prev, 0);
-      gl.uniform1i(paint.u.u_profile, 1);
+      gl.uniform1i(paint.u.u_column, 1);
       gl.uniform1f(paint.u.u_decay, decay.step(time.dt, sweep.rate, Number(p.persistence)));
       gl.uniform1f(paint.u.u_start, wedge[0]);
       gl.uniform1f(paint.u.u_span, wedge[1]);
-      gl.uniform1f(paint.u.u_seed, seed);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
       // 2. The scope, to the transparent premultiplied canvas.
@@ -140,8 +138,6 @@ export default async function create(ctx) {
       gl.uniform3f(comp.u.u_hot, pal[3], pal[4], pal[5]);
       gl.uniform1f(comp.u.u_grat, Number(p.graticule));
       gl.uniform1f(comp.u.u_gain, 1 + 0.2 * pulse);
-      gl.uniform4fv(comp.u.u_contacts, packed);
-      gl.uniform1i(comp.u.u_count, count);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
       cur ^= 1;
@@ -156,7 +152,7 @@ export default async function create(ctx) {
 
     dispose() {
       for (const t of targets) t.dispose();
-      gl.deleteTexture(profileTex);
+      gl.deleteTexture(columnTex);
       gl.deleteVertexArray(vao);
       gl.deleteProgram(paint.program);
       gl.deleteProgram(comp.program);

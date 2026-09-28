@@ -7,6 +7,7 @@
  *        [&finish=1][&lum=1][&p.<id>=v]
  *   audio=proto  the Cosmic Peanut prototype's demo signal instead of the synth
  *   audio=drums  a separable kick / snare / hat pattern (synth.js createDrums)
+ *   audio=music  drone + pad chords + melody + drums with a real-looking spectrum (createMusic)
  *   finish=1  gl.finish() inside the timed region, so the number includes GPU work
  *   lum=1     record mean frame luminance (for the flash-limiter check)
  *   bg=light  a bright, busy backdrop behind the transparent canvas (default black, like the shell)
@@ -14,7 +15,7 @@
  *   silent=1  the synth outputs silence (all-zero frames, silent: true)
  *   still=N   deterministic: seeded Math.random, fixed 1/60 s steps, stop after N frames
  */
-import { createDrums, createProtoDemo, createSynth } from "./synth.js";
+import { createDrums, createMusic, createProtoDemo, createSynth } from "./synth.js";
 
 const q = new URLSearchParams(location.search);
 const repo = q.get("repo") ?? "builtin";
@@ -143,7 +144,7 @@ async function main() {
   };
 
   const audioMode = q.get("audio");
-  const synth = audioMode === "proto" ? createProtoDemo() : audioMode === "drums" ? createDrums() : createSynth({ strobe: q.get("strobe") === "1", silent: q.get("silent") === "1" });
+  const synth = audioMode === "proto" ? createProtoDemo() : audioMode === "drums" ? createDrums() : audioMode === "music" ? createMusic() : createSynth({ strobe: q.get("strobe") === "1", silent: q.get("silent") === "1" });
 
   // Drags on the canvas go to the plugin's pointer hook (one reused event object).
   const pe = { kind: /** @type {"down" | "move" | "up"} */ ("move"), x: 0, y: 0, dx: 0, dy: 0 };

@@ -126,7 +126,7 @@
     {
       "id": "radar",
       "name": "Radar",
-      "description": "A radar scope painted by the music: the sweep writes the spectrum around the dial, transients leave glowing contacts.",
+      "description": "A radar scope whose sweep draws a spectrogram: tones trace glowing arcs, drum hits leave spokes.",
       "author": "Tidalviz",
       "entry": "src/radar.js",
       "renderer": "webgl2",
@@ -134,11 +134,12 @@
       "params": [
         { "id": "sync", "type": "select", "label": "Tempo lock", "options": ["off", "beat", "bar"], "default": "bar" },
         { "id": "speed", "type": "number", "label": "Speed (rotations/s)", "min": 0.02, "max": 2, "step": 0.01, "default": 0.25 },
-        { "id": "persistence", "type": "number", "label": "Afterglow (rotations)", "min": 0.1, "max": 2, "step": 0.05, "default": 0.6 },
+        { "id": "persistence", "type": "number", "label": "Afterglow (rotations)", "min": 0.1, "max": 2, "step": 0.05, "default": 1 },
         { "id": "gain", "type": "number", "label": "Gain", "min": 0, "max": 3, "step": 0.05, "default": 1 },
         { "id": "palette", "type": "select", "label": "Phosphor", "options": ["green", "amber", "blue", "white"], "default": "green" },
         { "id": "graticule", "type": "number", "label": "Graticule", "min": 0, "max": 1, "step": 0.05, "default": 0.6 },
-        { "id": "contacts", "type": "boolean", "label": "Contacts", "default": true }
+        { "id": "floor", "type": "number", "label": "Floor (dB)", "min": -80, "max": -30, "step": 1, "default": -60 },
+        { "id": "maxFreq", "type": "select", "label": "Top frequency", "options": ["4k", "8k", "16k"], "default": "16k" }
       ]
     }
   ]
