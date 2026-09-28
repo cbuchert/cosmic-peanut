@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createAutoGain, createDrive, createEnvelope, createStepper, resampleSeed } from "./fire.js";
+import { createAutoGain, createDrive, createEnvelope, createStepper, resampleSeed, simSize } from "./fire.js";
 
 const DT = 1 / 60;
 
@@ -188,6 +188,21 @@ describe("createStepper", () => {
     const counts = new Set();
     for (let i = 0; i < 600; i++) counts.add(st.step(1 / 60));
     expect([...counts]).toEqual([2]);
+  });
+});
+
+describe("simSize", () => {
+  it("is the canvas scaled by detail in each dimension", () => {
+    expect(simSize(2560, 1440, 0.3)).toEqual({ width: 768, height: 432 });
+    expect(simSize(1280, 720, 0.25)).toEqual({ width: 320, height: 180 });
+  });
+
+  it("clamps detail to 0.15–0.5 (NaN → 0.3) and keeps the grid between 16 px and 1,024 px wide", () => {
+    expect(simSize(1000, 500, 5)).toEqual({ width: 500, height: 250 });
+    expect(simSize(1000, 500, 0)).toEqual({ width: 150, height: 75 });
+    expect(simSize(1000, 500, NaN)).toEqual({ width: 300, height: 150 });
+    expect(simSize(40, 20, 0.3)).toEqual({ width: 16, height: 16 });
+    expect(simSize(6000, 3000, 0.5)).toEqual({ width: 1024, height: 512 });
   });
 });
 

@@ -157,3 +157,25 @@ export function createStepper(rate, maxSteps) {
     },
   };
 }
+
+const SIM_MIN = 16;
+const SIM_MAX = 1024;
+
+/**
+ * Simulation grid size: the canvas scaled by `detail` (0.15–0.5) in each dimension, at most
+ * SIM_MAX wide (aspect kept) and at least SIM_MIN in each dimension. Called on resize and on a
+ * Detail change only (it allocates the returned object).
+ * @param {number} width canvas drawing-buffer pixels
+ * @param {number} height
+ * @param {number} detail fraction of the canvas per dimension
+ */
+export function simSize(width, height, detail) {
+  const d = Number.isFinite(detail) ? Math.min(0.5, Math.max(0.15, detail)) : 0.3;
+  let w = width * d;
+  let h = height * d;
+  if (w > SIM_MAX) {
+    h *= SIM_MAX / w;
+    w = SIM_MAX;
+  }
+  return { width: Math.max(SIM_MIN, Math.round(w)), height: Math.max(SIM_MIN, Math.round(h)) };
+}
