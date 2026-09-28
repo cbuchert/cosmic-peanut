@@ -18,7 +18,8 @@
         { "id": "bright", "type": "number", "label": "Brightness", "min": 0.2, "max": 2, "step": 0.05, "default": 1 },
         { "id": "density", "type": "select", "label": "Rings", "options": ["sparse", "medium", "dense"], "default": "medium" },
         { "id": "palette", "type": "select", "label": "Palette", "options": ["nebula", "ember", "phosphor"], "default": "nebula" },
-        { "id": "lines", "type": "select", "label": "Lines", "options": ["soft", "fine"], "default": "soft" }
+        { "id": "lines", "type": "select", "label": "Lines", "options": ["soft", "fine"], "default": "soft" },
+        { "id": "antialias", "type": "boolean", "label": "Antialias soft lines", "default": true }
       ]
     }
   ]

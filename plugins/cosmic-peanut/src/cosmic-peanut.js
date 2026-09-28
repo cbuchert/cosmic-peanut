@@ -13,7 +13,7 @@ import { buildGrid } from "./lib/geometry.js";
 import { createProgram } from "./lib/gl.js";
 import { createHistory } from "./lib/history.js";
 import { GENTLE, gentle } from "./lib/motion.js";
-import { densityRings, paletteIndex, ringGain } from "./lib/params.js";
+import { densityRings, paletteIndex, renderPath, ringGain } from "./lib/params.js";
 import { createPulse } from "./lib/pulse.js";
 
 /** Points per ring: high, so the waveform stays jagged. */
@@ -84,12 +84,15 @@ export default async function create(ctx) {
   const softFbo = gl.createFramebuffer();
   let softW = 0;
   let softH = 0;
+  let msaaOn = false;
   function resizeSoft() {
     const w = Math.max(1, Math.min(ctx.size.width, Math.round(ctx.size.cssWidth)));
     const h = Math.max(1, Math.min(ctx.size.height, Math.round(ctx.size.cssHeight)));
-    if (w === softW && h === softH) return;
+    const wantMsaa = renderPath(ctx.params.lines, ctx.params.antialias) === "msaa";
+    if (w === softW && h === softH && wantMsaa === msaaOn) return;
     softW = w;
     softH = h;
+    msaaOn = wantMsaa;
     gl.bindTexture(gl.TEXTURE_2D, softTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -99,7 +102,8 @@ export default async function create(ctx) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, softFbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, softTex, 0);
     gl.bindRenderbuffer(gl.RENDERBUFFER, msaaRb);
-    gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, gl.RGBA8, w, h);
+    // Antialias off (or fine lines): keep only a 1×1 placeholder so the MSAA memory is freed.
+    gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, gl.RGBA8, msaaOn ? w : 1, msaaOn ? h : 1);
     gl.bindFramebuffer(gl.FRAMEBUFFER, msaaFbo);
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, msaaRb);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -113,7 +117,8 @@ export default async function create(ctx) {
       const orbit = gentle(Number(p.orbit), orbitDefault, ctx.reduceMotion, GENTLE.orbit);
       const strength = gentle(Number(p.pulse), pulseDefault, ctx.reduceMotion, GENTLE.pulse);
       const amp = Number(p.amp);
-      const fine = p.lines === "fine";
+      const path = renderPath(p.lines, p.antialias);
+      const fine = path === "canvas";
 
       // Push the rings that are due (fixed rate), one texSubImage2D row each.
       gl.bindTexture(gl.TEXTURE_2D, hist);
@@ -130,7 +135,7 @@ export default async function create(ctx) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.viewport(0, 0, width, height);
       } else {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, msaaFbo);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, path === "msaa" ? msaaFbo : softFbo);
         gl.viewport(0, 0, softW, softH);
       }
       gl.clearColor(0, 0, 0, 0); // transparent canvas: the shell supplies black or the desktop
@@ -158,9 +163,11 @@ export default async function create(ctx) {
       gl.disable(gl.BLEND);
 
       if (!fine) {
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, msaaFbo);
-        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, softFbo);
-        gl.blitFramebuffer(0, 0, softW, softH, 0, 0, softW, softH, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+        if (path === "msaa") {
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, msaaFbo);
+          gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, softFbo);
+          gl.blitFramebuffer(0, 0, softW, softH, 0, 0, softW, softH, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+        }
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.viewport(0, 0, width, height);
         gl.useProgram(blit.program);
@@ -177,6 +184,7 @@ export default async function create(ctx) {
     },
 
     params(changed) {
+      if ("antialias" in changed || "lines" in changed) resizeSoft();
       if ("density" in changed && history.setDensity(densityRings(changed.density))) allocate();
     },
 

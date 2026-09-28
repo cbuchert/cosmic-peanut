@@ -138,6 +138,9 @@ def test_cosmic_peanut_manifest_matches_prd():
         "density": ("select", "Rings", "medium", None, None, ["sparse", "medium", "dense"]),
         "palette": ("select", "Palette", "nebula", None, None, ["nebula", "ember", "phosphor"]),
         "lines": ("select", "Lines", "soft", None, None, ["soft", "fine"]),
+        # Added after the PRD at the user's request: 2× MSAA for soft lines costs ~7.5 MB of GPU
+        # memory at 1440p, so it can be switched off.
+        "antialias": ("boolean", "Antialias soft lines", True, None, None, None),
     }
     assert [p["id"] for p in v["params"]] == list(got)
     assert {p["id"]: p.get("step") for p in v["params"]}["travel"] == 0.5
