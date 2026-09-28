@@ -39,6 +39,7 @@ def test_builtin_renderers():
         "pulsar": ("2d", []),
         "stargate": ("webgl2", []),
         "blaze": ("webgl2", []),
+        "cascade": ("webgl2", []),
     }
 
 
@@ -180,3 +181,28 @@ def test_blaze_manifest():
     assert params["palette"]["options"] == ["natural", "blue gas", "green chemical", "ember mono"]
     assert params["palette"]["default"] == "natural"
     assert (params["detail"]["min"], params["detail"]["max"]) == (0.15, 0.5)
+
+
+def test_cascade_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "cascade"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Cascade",
+        "src/cascade.js",
+        "webgl2",
+        "thumbs/cascade.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "flow",
+        "density",
+        "width",
+        "height",
+        "gravity",
+        "spray",
+        "mist",
+        "turbulence",
+        "palette",
+    ]
+    assert params["density"]["options"] == ["16k", "32k", "64k"]
+    assert params["palette"]["options"] == ["glacier", "tropical", "moonlit", "mono"]
+    assert params["palette"]["default"] == "glacier"

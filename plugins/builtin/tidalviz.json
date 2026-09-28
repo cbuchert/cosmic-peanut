@@ -100,6 +100,26 @@
         { "id": "palette", "type": "select", "label": "Palette", "options": ["natural", "blue gas", "green chemical", "ember mono"], "default": "natural" },
         { "id": "detail", "type": "number", "label": "Detail", "min": 0.15, "max": 0.5, "step": 0.05, "default": 0.3 }
       ]
+    },
+    {
+      "id": "cascade",
+      "name": "Cascade",
+      "description": "A waterfall seeded by the waveform: loud, jagged passages pour heavy ropes of water, bass surges the flow.",
+      "author": "Tidalviz",
+      "entry": "src/cascade.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/cascade.jpg",
+      "params": [
+        { "id": "flow", "type": "number", "label": "Flow", "min": 0.2, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "density", "type": "select", "label": "Density", "options": ["16k", "32k", "64k"], "default": "32k" },
+        { "id": "width", "type": "number", "label": "Lip width", "min": 0.2, "max": 1, "step": 0.01, "default": 0.7 },
+        { "id": "height", "type": "number", "label": "Lip height", "min": 0.4, "max": 0.95, "step": 0.01, "default": 0.84 },
+        { "id": "gravity", "type": "number", "label": "Gravity", "min": 0.4, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "spray", "type": "number", "label": "Spray", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "mist", "type": "number", "label": "Mist", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "turbulence", "type": "number", "label": "Turbulence", "min": 0, "max": 1, "step": 0.01, "default": 0.4 },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["glacier", "tropical", "moonlit", "mono"], "default": "glacier" }
+      ]
     }
   ]
 }
