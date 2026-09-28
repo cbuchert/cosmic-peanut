@@ -85,7 +85,7 @@
     {
       "id": "blaze",
       "name": "Blaze",
-      "description": "A fire simulation fed by the spectrum: bass is the central column, highs lick at the edges, and every kick, snare and hat blasts its own jet of flame.",
+      "description": "A fire simulation fed by a live spectrogram: every frequency burns in its own column and rises as fast as it is loud, bass at the centre, highs at the edges, with jets of flame on every hit.",
       "author": "Tidalviz",
       "entry": "src/blaze.js",
       "renderer": "webgl2",
@@ -99,7 +99,8 @@
         { "id": "speed", "type": "number", "label": "Speed", "min": 0.2, "max": 2, "step": 0.01, "default": 1 },
         { "id": "glow", "type": "number", "label": "Glow", "min": 0, "max": 2, "step": 0.01, "default": 1 },
         { "id": "palette", "type": "select", "label": "Palette", "options": ["natural", "blue gas", "green chemical", "ember mono"], "default": "natural" },
-        { "id": "feed", "type": "select", "label": "Feed", "options": ["spectrum", "waveform"], "default": "spectrum" },
+        { "id": "feed", "type": "select", "label": "Feed", "options": ["spectrogram", "waveform"], "default": "spectrogram" },
+        { "id": "layout", "type": "select", "label": "Layout", "options": ["mirrored", "linear"], "default": "mirrored" },
         { "id": "detail", "type": "number", "label": "Detail", "min": 0.15, "max": 0.5, "step": 0.05, "default": 0.3 }
       ]
     },
@@ -126,7 +127,7 @@
     {
       "id": "radar",
       "name": "Radar",
-      "description": "A radar scope painted by the music: the sweep writes the spectrum around the dial, transients leave glowing contacts.",
+      "description": "A radar scope whose sweep draws a spectrogram: tones trace glowing arcs, drum hits leave spokes.",
       "author": "Tidalviz",
       "entry": "src/radar.js",
       "renderer": "webgl2",
@@ -134,11 +135,12 @@
       "params": [
         { "id": "sync", "type": "select", "label": "Tempo lock", "options": ["off", "beat", "bar"], "default": "bar" },
         { "id": "speed", "type": "number", "label": "Speed (rotations/s)", "min": 0.02, "max": 2, "step": 0.01, "default": 0.25 },
-        { "id": "persistence", "type": "number", "label": "Afterglow (rotations)", "min": 0.1, "max": 2, "step": 0.05, "default": 0.6 },
+        { "id": "persistence", "type": "number", "label": "Afterglow (rotations)", "min": 0.1, "max": 2, "step": 0.05, "default": 1 },
         { "id": "gain", "type": "number", "label": "Gain", "min": 0, "max": 3, "step": 0.05, "default": 1 },
         { "id": "palette", "type": "select", "label": "Phosphor", "options": ["green", "amber", "blue", "white"], "default": "green" },
         { "id": "graticule", "type": "number", "label": "Graticule", "min": 0, "max": 1, "step": 0.05, "default": 0.6 },
-        { "id": "contacts", "type": "boolean", "label": "Contacts", "default": true }
+        { "id": "floor", "type": "number", "label": "Floor (dB)", "min": -80, "max": -30, "step": 1, "default": -60 },
+        { "id": "maxFreq", "type": "select", "label": "Top frequency", "options": ["4k", "8k", "16k"], "default": "16k" }
       ]
     }
   ]

@@ -7,6 +7,16 @@
  */
 const SR = 48000;
 
+/** Fractional host band (0–63, log 30 Hz – 16 kHz) of each of the 1,024 spectrum bins. */
+function logBandOfBin() {
+  const out = new Float32Array(1024);
+  for (let k = 0; k < 1024; k++) {
+    const hz = Math.max(1, (k * SR) / 2048);
+    out[k] = Math.min(63, Math.max(0, (Math.log(hz / 30) / Math.log(16000 / 30)) * 63));
+  }
+  return out;
+}
+
 /** @param {{ strobe?: boolean, silent?: boolean }} [opts] */
 export function createSynth(opts = {}) {
   const bands = new Float32Array(64);
@@ -15,11 +25,7 @@ export function createSynth(opts = {}) {
   const waveform = new Float32Array(WAVE);
   const left = new Float32Array(WAVE);
   const right = new Float32Array(WAVE);
-  const specBand = new Float32Array(1024);
-  for (let k = 0; k < 1024; k++) {
-    const hz = Math.max(1, (k * SR) / 2048);
-    specBand[k] = Math.min(63, Math.max(0, (Math.log(hz / 30) / Math.log(16000 / 30)) * 63));
-  }
+  const specBand = logBandOfBin();
   let bassAtt = 1;
   let midAtt = 1;
   let trebAtt = 1;
@@ -76,7 +82,8 @@ export function createSynth(opts = {}) {
       const f = specBand[k];
       const i0 = Math.floor(f);
       const i1 = Math.min(63, i0 + 1);
-      spectrum[k] = bands[i0] + (bands[i1] - bands[i0]) * (f - i0);
+      const b = bands[i0] + (bands[i1] - bands[i0]) * (f - i0);
+      spectrum[k] = 10 ** ((-70 + 60 * b) / 20); // display scale (≈ −70…−10 dB) → linear magnitude
     }
     let sum = 0;
     let peak = 0;
@@ -166,6 +173,7 @@ export function createProtoDemo() {
  */
 export function createDrums() {
   const bands = new Float32Array(64);
+  const specBand = logBandOfBin();
   const spectrum = new Float32Array(1024);
   const WAVE = 2048;
   const waveform = new Float32Array(WAVE);
@@ -207,7 +215,14 @@ export function createDrums() {
       if (x > 0.8) v += 0.6 * hat * ((x - 0.8) / 0.2);
       bands[i] = Math.min(1, Math.max(0, v + (rnd() - 0.5) * 0.02));
     }
-    for (let k = 0; k < 1024; k++) spectrum[k] = bands[Math.min(63, k >> 4)];
+    for (let k = 0; k < 1024; k++) {
+      const f = specBand[k];
+      const i0 = Math.floor(f);
+      const i1 = Math.min(63, i0 + 1);
+      // bands are a 0–1 display scale (≈ −70…−10 dB); back to a linear magnitude for the spectrum
+      const b = bands[i0] + (bands[i1] - bands[i0]) * (f - i0);
+      spectrum[k] = 10 ** ((-70 + 60 * b) / 20);
+    }
     sampleClock += Math.round(dt * SR);
     let sum = 0;
     let peak = 0;
@@ -238,6 +253,257 @@ export function createDrums() {
     frame.onsetStrength = onsetStrength;
     frame.beatPhase = (t * 2) % 1;
     frame.frameIndex = frameIndex++;
+    return /** @type {import('../../web/sdk/tidalviz').AudioFrame} */ (frame);
+  }
+  return { update };
+}
+
+/**
+ * Music-like audio with a real-looking spectrum (`audio=music`), for checking spectrogram views: a
+ * sustained drone (A1 + A2) and pad chord (changing every 2 bars) with harmonics, an eighth-note
+ * pentatonic melody (440–1,320 Hz, decaying notes, harmonics), and 120 BPM drums — kick on 1 and 3
+ * (40–150 Hz + a click), snare on 2 and 4 (broad 200 Hz–8 kHz), hats on every eighth (6–16 kHz).
+ * The spectrum is built analytically (each partial as a Hann main lobe, linear magnitude with a
+ * full-scale sine at 1.0), so it is deterministic and noise-free. Bands follow the spectrum.
+ */
+export function createMusic() {
+  const N = 1024;
+  const binHz = SR / 2048;
+  const bands = new Float32Array(64);
+  const spectrum = new Float32Array(N);
+  const WAVE = 2048;
+  const waveform = new Float32Array(WAVE);
+  const DRONE = [55, 110];
+  const CHORDS = [[220, 277.2, 329.6], [196, 246.9, 293.7], [174.6, 220, 261.6], [164.8, 207.7, 246.9]];
+  const MELODY = [440, 523.3, 587.3, 659.3, 784, 880, 1046.5, 1174.7, 1318.5, 1046.5, 880, 784, 659.3, 587.3, 523.3, 587.3];
+  const bandOf = new Uint8Array(N);
+  for (let k = 0; k < N; k++) {
+    const hz = Math.max(1, k * binHz);
+    bandOf[k] = Math.min(63, Math.max(0, Math.round((Math.log(hz / 30) / Math.log(16000 / 30)) * 63)));
+  }
+  let lastEighth = -1;
+  let onsetStrength = 0;
+  let bassAtt = 1;
+  let frameIndex = 0;
+  let sampleClock = 0;
+  /** @type {any} */
+  const frame = {
+    bands, spectrum, waveform, left: null, right: null,
+    rms: 0, peak: 0, bass: 1, mid: 1, treb: 1, bassAtt: 1, midAtt: 1, trebAtt: 1,
+    onsetStrength: 0, onset: false, onsetAge: 10, bpm: 120, beatPhase: 0, centroid: 0.3, flux: 0,
+    silent: false, frameIndex: 0, sampleRate: SR,
+  };
+  /** Add a partial of frequency `hz`, magnitude `a` as a Hann main lobe (±2 bins). */
+  const partial = (/** @type {number} */ hz, /** @type {number} */ a) => {
+    const c = hz / binHz;
+    for (let k = Math.max(0, Math.ceil(c - 2)); k <= Math.min(N - 1, Math.floor(c + 2)); k++) {
+      const d = Math.abs(k - c);
+      const w = d < 1e-6 ? 1 : Math.abs(d - 1) < 1e-6 ? 0.5 : Math.abs(Math.sin(Math.PI * d) / (Math.PI * d * (1 - d * d)));
+      spectrum[k] = Math.max(spectrum[k], a * w);
+    }
+  };
+  /** Add a smooth broadband bump between lo and hi Hz (log-shaped), magnitude `a`. */
+  const broad = (/** @type {number} */ lo, /** @type {number} */ hi, /** @type {number} */ a) => {
+    const mid = Math.sqrt(lo * hi);
+    const w = Math.log(hi / lo) / 2;
+    for (let k = 1; k < N; k++) {
+      const x = Math.log((k * binHz) / mid) / w;
+      if (Math.abs(x) < 1.6) spectrum[k] += a * Math.exp(-x * x * 1.5);
+    }
+  };
+  /** Envelopes at time s: [kick, snare, hat, noteEnv, noteHz, chord index]. @param {number} s */
+  const env = (s) => {
+    const beat = s * 2;
+    const b = Math.floor(beat) % 4;
+    const ph = beat % 1;
+    const eighth = Math.floor(s * 4);
+    return [
+      b % 2 === 0 ? Math.exp(-ph * 20) : 0,
+      b % 2 === 1 ? Math.exp(-ph * 24) : 0,
+      Math.exp(-((beat * 2) % 1) * 40),
+      Math.exp(-((s * 4) % 1) * 2.5),
+      MELODY[eighth % MELODY.length],
+      Math.floor(s / 4) % CHORDS.length,
+    ];
+  };
+  /** @param {number} t @param {number} dt */
+  function update(t, dt) {
+    const [kick, snare, hat, note, noteHz, ci] = env(t);
+    spectrum.fill(0);
+    for (const f of DRONE) for (let h = 1; h <= 4; h++) partial(f * h, 0.3 / h);
+    for (const f of CHORDS[ci]) for (let h = 1; h <= 5; h++) partial(f * h, 0.09 / h);
+    for (let h = 1; h <= 4; h++) partial(noteHz * h, (0.22 * note) / h);
+    if (kick > 0.01) {
+      broad(40, 150, 0.6 * kick);
+      broad(150, 2500, 0.05 * kick * kick);
+    }
+    if (snare > 0.01) broad(200, 8000, 0.12 * snare);
+    if (hat > 0.01) broad(6000, 16000, 0.08 * hat);
+    bands.fill(0);
+    for (let k = 1; k < N; k++) bands[bandOf[k]] = Math.max(bands[bandOf[k]], Math.min(1, spectrum[k] * 2));
+    for (let k = 0; k < N; k++) spectrum[k] = Math.min(1, spectrum[k]);
+
+    sampleClock += Math.round(dt * SR);
+    let sum = 0;
+    let peak = 0;
+    const chord = CHORDS[ci];
+    for (let n = 0; n < WAVE; n++) {
+      const s = (sampleClock - WAVE + n) / SR;
+      let v = 0.3 * Math.sin(2 * Math.PI * 55 * s) + 0.15 * Math.sin(2 * Math.PI * 110 * s);
+      for (const f of chord) v += 0.09 * Math.sin(2 * Math.PI * f * s);
+      v += 0.22 * note * Math.sin(2 * Math.PI * noteHz * s);
+      v += 0.5 * kick * Math.sin(2 * Math.PI * (50 + 60 * kick) * s);
+      v = Math.max(-1, Math.min(1, v));
+      waveform[n] = v;
+      if (n >= WAVE - 512) {
+        sum += v * v;
+        peak = Math.max(peak, Math.abs(v));
+      }
+    }
+    const eighth = Math.floor(t * 4);
+    const onset = eighth !== lastEighth;
+    lastEighth = eighth;
+    const bass = 0.5 + 1.5 * kick;
+    bassAtt += (bass - bassAtt) * (1 - Math.exp(-dt * 5));
+    onsetStrength = onset ? (eighth % 2 === 0 ? 0.9 : 0.4) : onsetStrength * Math.exp(-dt * 12);
+    frame.rms = Math.sqrt(sum / 512);
+    frame.peak = peak;
+    frame.bass = bass;
+    frame.mid = 0.7 + 1.3 * snare;
+    frame.treb = 0.7 + 0.9 * hat;
+    frame.bassAtt = bassAtt;
+    frame.onset = onset;
+    frame.onsetStrength = onsetStrength;
+    frame.beatPhase = (t * 2) % 1;
+    frame.frameIndex = frameIndex++;
+    return /** @type {import('../../web/sdk/tidalviz').AudioFrame} */ (frame);
+  }
+  return { update };
+}
+
+/**
+ * Add one sinusoidal partial to a 1,024-bin linear-magnitude spectrum the way a Hann-windowed FFT
+ * shows it: the peak bin at `amp`, the main lobe's neighbours at half.
+ * @param {Float32Array} spec @param {number} hz @param {number} amp
+ */
+function addPartial(spec, hz, amp) {
+  const x = (hz * 2048) / SR;
+  const k = Math.round(x);
+  const lobe = [0.03, 0.5, 1, 0.5, 0.03];
+  for (let j = -2; j <= 2; j++) {
+    const i = k + j;
+    if (i >= 0 && i < spec.length) spec[i] = Math.max(spec[i], amp * lobe[j + 2]);
+  }
+}
+
+/**
+ * A frame shell with the given arrays; stats are filled per update.
+ * @param {Float32Array} spectrum @param {Float32Array} waveform
+ */
+function shell(spectrum, waveform) {
+  return {
+    bands: new Float32Array(64), spectrum, waveform, left: null, right: null,
+    rms: 0, peak: 0, bass: 1, mid: 1, treb: 1, bassAtt: 1, midAtt: 1, trebAtt: 1,
+    onsetStrength: 0, onset: false, onsetAge: 10, bpm: 0, beatPhase: 0, centroid: 0.3, flux: 0,
+    silent: false, frameIndex: 0, sampleRate: SR, hostTime: 0,
+  };
+}
+
+/** Sustained tones for `audio=tones`: [Hz, linear magnitude] — two loud/quiet pairs an octave apart. */
+export const TONES = [
+  [400, 0.2], // loud (−14 dBFS peak bin)
+  [800, 0.02], // 20 dB quieter
+  [3200, 0.08], // loud-ish (−22)
+  [6400, 0.008], // 20 dB quieter
+];
+/** Tones start at this time (s): with `still`, frame 60. */
+export const TONES_ON = 1;
+
+/**
+ * Sustained sine tones at distinct frequencies and loudness (TONES), all switching on at TONES_ON
+ * over a −90 dB noise floor, for checking that louder frequencies rise faster (`audio=tones`).
+ */
+export function createTones() {
+  const spectrum = new Float32Array(1024);
+  const waveform = new Float32Array(2048);
+  /** @type {any} */
+  const frame = shell(spectrum, waveform);
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  let clock = 0;
+  /** @param {number} t @param {number} dt */
+  function update(t, dt) {
+    const on = t >= TONES_ON;
+    for (let k = 0; k < 1024; k++) spectrum[k] = 3e-5 * (0.5 + rnd());
+    if (on) for (const [hz, a] of TONES) addPartial(spectrum, hz, a);
+    clock += Math.round(dt * SR);
+    let sum = 0;
+    for (let n = 0; n < 2048; n++) {
+      const s = (clock - 2048 + n) / SR;
+      let v = 0;
+      if (on) for (const [hz, a] of TONES) v += a * Math.sin(2 * Math.PI * hz * s);
+      waveform[n] = v;
+      if (n >= 1536) sum += v * v;
+    }
+    frame.rms = Math.sqrt(sum / 512);
+    frame.peak = on ? 0.3 : 0;
+    frame.onset = on && t - dt < TONES_ON;
+    frame.frameIndex++;
+    return /** @type {import('../../web/sdk/tidalviz').AudioFrame} */ (frame);
+  }
+  return { update };
+}
+
+/**
+ * A melody for `audio=melody`: a sustained bass note per bar (A2 / F2 / C3 / G2) and a plucked lead
+ * arpeggio in eighths over two octaves, each note with a few harmonics, 120 BPM, no drums.
+ */
+export function createMelody() {
+  const spectrum = new Float32Array(1024);
+  const waveform = new Float32Array(2048);
+  /** @type {any} */
+  const frame = shell(spectrum, waveform);
+  const ROOTS = [110, 87.31, 130.81, 98];
+  const STEPS = [1, 1.25, 1.5, 2, 2.5, 3, 4, 3, 2.5, 2, 1.5, 1.25, 1, 1.5, 2, 3];
+  const HARM = [1, 0.45, 0.25, 0.12];
+  /** @param {number} s */
+  const voices = (s) => {
+    const bar = Math.floor(s / 2);
+    const root = ROOTS[bar % 4];
+    const eighth = Math.floor(s * 4);
+    const ph = s * 4 - eighth;
+    const lead = root * 4 * STEPS[eighth % 16];
+    return { root, lead, env: Math.exp(-ph * 3), eighth };
+  };
+  let clock = 0;
+  let lastEighth = -1;
+  /** @param {number} t @param {number} dt */
+  function update(t, dt) {
+    const v = voices(t);
+    for (let k = 0; k < 1024; k++) spectrum[k] = 3e-5;
+    for (let h = 0; h < HARM.length; h++) {
+      addPartial(spectrum, v.root * (h + 1), 0.15 * HARM[h]);
+      addPartial(spectrum, v.lead * (h + 1), 0.12 * v.env * HARM[h]);
+    }
+    clock += Math.round(dt * SR);
+    let sum = 0;
+    for (let n = 0; n < 2048; n++) {
+      const s = (clock - 2048 + n) / SR;
+      const w = voices(s);
+      let x = 0;
+      for (let h = 0; h < HARM.length; h++) {
+        x += 0.15 * HARM[h] * Math.sin(2 * Math.PI * w.root * (h + 1) * s);
+        x += 0.12 * w.env * HARM[h] * Math.sin(2 * Math.PI * w.lead * (h + 1) * s);
+      }
+      waveform[n] = x;
+      if (n >= 1536) sum += x * x;
+    }
+    frame.rms = Math.sqrt(sum / 512);
+    frame.peak = 0.4;
+    frame.onset = v.eighth !== lastEighth;
+    frame.onsetStrength = frame.onset ? 0.5 : frame.onsetStrength * Math.exp(-dt * 12);
+    lastEighth = v.eighth;
+    frame.frameIndex++;
     return /** @type {import('../../web/sdk/tidalviz').AudioFrame} */ (frame);
   }
   return { update };

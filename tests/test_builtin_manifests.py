@@ -179,12 +179,18 @@ def test_blaze_manifest():
         "glow",
         "palette",
         "feed",
+        "layout",
         "detail",
     ]
     r = params["reactivity"]
     assert (r["type"], r["min"], r["max"], r["default"]) == ("number", 0, 2, 1)
-    assert params["feed"]["options"] == ["spectrum", "waveform"]
-    assert params["feed"]["default"] == "spectrum"
+    # The 64-band "spectrum" feed is retired: a saved "spectrum" isn't an option any more, so the
+    # host (and the plugin's resolveFeed) fall back to the default, the spectrogram.
+    assert params["feed"]["options"] == ["spectrogram", "waveform"]
+    assert params["feed"]["default"] == "spectrogram"
+    assert params["layout"]["type"] == "select"
+    assert params["layout"]["options"] == ["mirrored", "linear"]
+    assert params["layout"]["default"] == "mirrored"
     assert params["palette"]["options"] == ["natural", "blue gas", "green chemical", "ember mono"]
     assert params["palette"]["default"] == "natural"
     assert (params["detail"]["min"], params["detail"]["max"]) == (0.15, 0.5)
@@ -236,7 +242,8 @@ def test_radar_manifest():
         "gain",
         "palette",
         "graticule",
-        "contacts",
+        "floor",
+        "maxFreq",
     ]
     assert params["sync"]["options"] == ["off", "beat", "bar"]
     assert params["sync"]["default"] == "bar"
@@ -244,11 +251,15 @@ def test_radar_manifest():
     assert params["speed"]["default"] == 0.25
     assert params["palette"]["options"] == ["green", "amber", "blue", "white"]
     assert params["palette"]["default"] == "green"
-    assert params["contacts"] == {
-        "id": "contacts",
-        "type": "boolean",
-        "label": "Contacts",
-        "default": True,
-    }
+    # The spectrogram's dB floor (below the auto-gain reference) and top frequency (radar.js maxHzOf).
+    floor = params["floor"]
+    assert (floor["type"], floor["min"], floor["max"], floor["default"]) == (
+        "number",
+        -80,
+        -30,
+        -60,
+    )
+    assert params["maxFreq"]["options"] == ["4k", "8k", "16k"]
+    assert "contacts" not in params
     for f in ("fullscreen.vert", "paint.frag", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/radar" / f).is_file(), f

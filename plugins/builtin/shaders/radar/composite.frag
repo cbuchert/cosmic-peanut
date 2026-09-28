@@ -1,6 +1,7 @@
 #version 300 es
-// The scope: polar phosphor (+ a gentle glow), contacts, sweep arm and its beam fan, and a static
-// graticule (range rings, crosshair, bearing ticks, bezel), all analytic per pixel.
+// The scope: the polar phosphor spectrogram (+ a gentle glow), sweep arm and its beam fan, and a
+// static graticule (range rings, crosshair, bearing ticks, bezel), all analytic per pixel. Nothing
+// here is stochastic: an empty phosphor is exactly black.
 // The canvas is transparent and premultiplied: colour is "light on black" and alpha is its
 // brightest channel, so the face is dark but see-through and only the light floats over the desktop.
 precision highp float;
@@ -13,8 +14,6 @@ uniform vec3 u_col;         // phosphor glow
 uniform vec3 u_hot;         // hot core
 uniform float u_grat;       // graticule brightness 0–1
 uniform float u_gain;       // global brightness (flash-limited)
-uniform vec4 u_contacts[32];// bearing (turns), radius (0–1), brightness, strength
-uniform int u_count;
 
 const float TAU = 6.28318530718;
 const float BEZEL = 0.035;
@@ -30,7 +29,7 @@ float phos(vec2 p) {
 }
 
 // Phosphor response: quiet returns sink toward black, loud ones bloom (CRT-like gamma).
-float respond(float v) { return pow(max(v, 0.0), 1.8); }
+float respond(float v) { return pow(max(v, 0.0), 1.6); }
 
 void main() {
   vec2 p = (gl_FragCoord.xy - u_center) / u_radius;   // scope units, north = +y
@@ -43,7 +42,7 @@ void main() {
   // Phosphor returns, plus a soft glow from a ring of wider taps (cheap bloom).
   float ph = respond(r <= 1.0 ? texture(u_phos, vec2(bearing, r)).r : 0.0);
   float g = 0.0;
-  float k = 0.014;
+  float k = 0.008;
   g += phos(p + vec2(k, 0.0)) + phos(p - vec2(k, 0.0)) + phos(p + vec2(0.0, k)) + phos(p - vec2(0.0, k));
   g += phos(p + vec2(k, k) * 1.6) + phos(p - vec2(k, k) * 1.6) + phos(p + vec2(k, -k) * 1.6) + phos(p - vec2(k, -k) * 1.6);
   g = respond(g * 0.125);
@@ -57,18 +56,6 @@ void main() {
   float arm = along > 0.0 ? line(across, 0.9 * s) + 0.5 * exp(-across / (5.0 * s)) : 0.0;
   arm *= inside * (0.55 + 0.45 * smoothstep(0.0, 0.3, r));
   float fan = inside * exp(-behind / 0.035) * 0.16 * smoothstep(0.0, 0.2, r);
-
-  // Contacts: a hot core with a halo.
-  float blips = 0.0;
-  for (int i = 0; i < 32; i++) {
-    if (i >= u_count) break;
-    vec4 c = u_contacts[i];
-    float a = c.x * TAU;
-    vec2 q = c.y * vec2(sin(a), cos(a));
-    float d = length(p - q) * u_radius;
-    float size = (5.0 + 7.0 * c.w) * s;
-    blips += c.z * (exp(-(d * d) / (size * size)) + 0.22 * exp(-d / (3.5 * size)));
-  }
 
   // Graticule: range rings, crosshair, bearing ticks (5° / 10° / 30°), bezel.
   float gr = 0.0;
@@ -91,8 +78,8 @@ void main() {
   }
   gr = min(gr, 1.2) * u_grat * 0.28;
 
-  vec3 c = u_col * (1.15 * ph + 0.55 * g + fan + gr + bz * max(u_grat, 0.3))
-         + u_hot * (0.35 * ph * ph + 0.9 * arm + 1.2 * blips);
+  vec3 c = u_col * (1.15 * ph + 0.35 * g + fan + gr + bz * max(u_grat, 0.3))
+         + u_hot * (0.35 * ph * ph + 0.9 * arm);
   c *= u_gain;
   c = 1.0 - exp(-1.3 * c);                            // soft shoulder, never clips hard
   o = vec4(c, max(c.r, max(c.g, c.b)));
