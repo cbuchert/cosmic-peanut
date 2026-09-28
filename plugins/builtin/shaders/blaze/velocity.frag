@@ -1,12 +1,14 @@
 #version 300 es
 // Velocity step: self-advection (semi-Lagrangian), buoyancy from temperature, animated curl-noise
-// turbulence, vorticity confinement, damping. Velocity is in screen heights per second, y up.
+// turbulence, vorticity confinement, music jets, damping. Velocity is in screen heights per second,
+// y up.
 precision highp float;
 in vec2 v_uv;
 out vec4 o;
 uniform sampler2D u_vel;
 uniform sampler2D u_scal;
 uniform sampler2D u_curl;
+uniform sampler2D u_seed;   // g = jet strength (0–2) along x
 uniform vec2 u_venc;
 uniform float u_aspect;   // sim width / height
 uniform float u_dt;       // sim seconds this step
@@ -16,6 +18,7 @@ uniform float u_turb;
 uniform float u_vort;     // 0 disables confinement (and u_curl is unused)
 uniform float u_damp;
 uniform float u_texelH;   // one texel in height units
+uniform float u_jetVel;   // upward speed a full-strength jet drives its column to
 // #include noise
 
 vec2 dec(vec4 t) { return (t.xy - u_venc.y) / u_venc.x; }
@@ -59,6 +62,14 @@ void main() {
     vec2 n = g / (length(g) + 1e-5);
     va += u_dt * u_vort * u_texelH * vec2(n.y, -n.x) * w;
   }
+
+  // Jets: a transient in a band drives the gas above that band's x upward, strongest at the base,
+  // so a kick blasts a column up the centre and a hat flicks a lick at the edges.
+  float jet = texture(u_seed, vec2(v_uv.x, 0.5)).g;
+  float reach = 1.0 - smoothstep(0.0, 0.75, v_uv.y);
+  // Split into drifting tongues so a wide jet shoots up as spikes, not a flat-topped slab.
+  float tongue = 0.25 + 1.6 * max(0.0, gnoise(vec3(v_uv.x * u_aspect * 11.0, u_time * 1.3, 11.0)) + 0.25);
+  va.y += max(0.0, u_jetVel * jet * tongue - va.y) * reach * (1.0 - exp(-30.0 * u_dt));
 
   va *= exp(-u_damp * u_dt);
   va = clamp(va, -4.0, 4.0);

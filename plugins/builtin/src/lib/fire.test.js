@@ -150,6 +150,24 @@ describe("createDrive", () => {
     }
   });
 
+  it("reactivity scales the stoke: 0 leaves the fuel line alone, 2 roughly doubles it, bounded at 2", () => {
+    /** @param {number} r */
+    const peakBoost = (r) => {
+      const d = createDrive();
+      let peak = 0;
+      for (let i = 0; i < 120; i++) {
+        d.step(au(2.5, i % 30 === 0, 1), DT, false, r);
+        peak = Math.max(peak, d.boost);
+      }
+      return peak;
+    };
+    const one = peakBoost(1);
+    expect(one).toBeGreaterThan(0.8);
+    expect(peakBoost(0)).toBe(0);
+    expect(peakBoost(2)).toBeCloseTo(2 * one, 5);
+    expect(peakBoost(5)).toBeLessThanOrEqual(2 * 1.5);
+  });
+
   it("behaves the same at 60 and 120 Hz", () => {
     /** @param {number} hz */
     const sample = (hz) => {
@@ -269,25 +287,26 @@ describe("fillRampLut", () => {
 });
 
 describe("motion", () => {
-  it("with reduceMotion, calms turbulence and speed that are at their defaults", () => {
-    const out = { turbulence: 0, speed: 0 };
-    motion({ turbulence: 1, speed: 1 }, false, out);
-    expect(out).toEqual({ turbulence: 1, speed: 1 });
-    motion({ turbulence: 1, speed: 1 }, true, out);
-    expect(out.turbulence).toBeLessThan(1);
-    expect(out.speed).toBeLessThan(1);
-    expect(out.turbulence).toBeGreaterThan(0);
-    expect(out.speed).toBeGreaterThan(0);
+  it("with reduceMotion, calms turbulence, speed and reactivity that are at their defaults", () => {
+    const out = { turbulence: 0, speed: 0, reactivity: 0 };
+    motion({ turbulence: 1, speed: 1, reactivity: 1 }, false, out);
+    expect(out).toEqual({ turbulence: 1, speed: 1, reactivity: 1 });
+    motion({ turbulence: 1, speed: 1, reactivity: 1 }, true, out);
+    for (const k of /** @type {const} */ (["turbulence", "speed", "reactivity"])) {
+      expect(out[k]).toBeLessThan(1);
+      expect(out[k]).toBeGreaterThan(0);
+    }
   });
 
   it("respects values the user chose, and the defaults match the manifest", () => {
-    const out = { turbulence: 0, speed: 0 };
-    motion({ turbulence: 1.5, speed: 0.8 }, true, out);
-    expect(out).toEqual({ turbulence: 1.5, speed: 0.8 });
+    const out = { turbulence: 0, speed: 0, reactivity: 0 };
+    motion({ turbulence: 1.5, speed: 0.8, reactivity: 1.6 }, true, out);
+    expect(out).toEqual({ turbulence: 1.5, speed: 0.8, reactivity: 1.6 });
     const blaze = manifest.visualizers.find((/** @type {{ id: string }} */ v) => v.id === "blaze");
     const defaults = Object.fromEntries((blaze?.params ?? []).map((p) => [p.id, p.default]));
     expect(defaults.turbulence).toBe(MOTION_DEFAULTS.turbulence);
     expect(defaults.speed).toBe(MOTION_DEFAULTS.speed);
+    expect(defaults.reactivity).toBe(MOTION_DEFAULTS.reactivity);
   });
 });
 
