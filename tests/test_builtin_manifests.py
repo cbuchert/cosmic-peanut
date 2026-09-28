@@ -38,6 +38,7 @@ def test_builtin_renderers():
         "orbit": ("three", ["three"]),
         "pulsar": ("2d", []),
         "stargate": ("webgl2", []),
+        "blaze": ("webgl2", []),
     }
 
 
@@ -161,3 +162,21 @@ def test_stargate_manifest():
     assert params["palette"]["options"] == ["film", "ember", "ice", "mono"]
     assert params["palette"]["default"] == "film"
     assert (REPOS["builtin"] / "shaders/stargate/stargate.frag").is_file()
+
+
+def test_blaze_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "blaze"]
+    assert (v["name"], v["entry"], v["renderer"]) == ("Blaze", "src/blaze.js", "webgl2")
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "intensity",
+        "height",
+        "turbulence",
+        "speed",
+        "glow",
+        "palette",
+        "detail",
+    ]
+    assert params["palette"]["options"] == ["natural", "blue gas", "green chemical", "ember mono"]
+    assert params["palette"]["default"] == "natural"
+    assert (params["detail"]["min"], params["detail"]["max"]) == (0.15, 0.5)

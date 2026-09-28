@@ -19,6 +19,7 @@ VIZ = {
     "orbit": "builtin",
     "pulsar": "builtin",
     "stargate": "builtin",
+    "blaze": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }
