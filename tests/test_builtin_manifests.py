@@ -179,12 +179,18 @@ def test_blaze_manifest():
         "glow",
         "palette",
         "feed",
+        "layout",
         "detail",
     ]
     r = params["reactivity"]
     assert (r["type"], r["min"], r["max"], r["default"]) == ("number", 0, 2, 1)
-    assert params["feed"]["options"] == ["spectrum", "waveform"]
-    assert params["feed"]["default"] == "spectrum"
+    # The 64-band "spectrum" feed is retired: a saved "spectrum" isn't an option any more, so the
+    # host (and the plugin's resolveFeed) fall back to the default, the spectrogram.
+    assert params["feed"]["options"] == ["spectrogram", "waveform"]
+    assert params["feed"]["default"] == "spectrogram"
+    assert params["layout"]["type"] == "select"
+    assert params["layout"]["options"] == ["mirrored", "linear"]
+    assert params["layout"]["default"] == "mirrored"
     assert params["palette"]["options"] == ["natural", "blue gas", "green chemical", "ember mono"]
     assert params["palette"]["default"] == "natural"
     assert (params["detail"]["min"], params["detail"]["max"]) == (0.15, 0.5)

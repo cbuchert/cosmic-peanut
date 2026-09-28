@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createSpectroGain, logColumns, resampleSpectrum } from "./spectro.js";
+import { RISE_MAX, RISE_MIN, createSpectroGain, logColumns, resampleSpectrum, riseSpeed } from "./spectro.js";
 
 const DT = 1 / 60;
 
@@ -166,5 +166,32 @@ describe("createSpectroGain", () => {
     const out = settleGain(g, new Float32Array(3).fill(0.01), 0.5);
     expect(out[0]).toBeLessThan(out[1]);
     expect(out[1]).toBeLessThan(out[2]);
+  });
+});
+
+describe("riseSpeed", () => {
+  it("is monotonic in level, bounded, and near zero at silence", () => {
+    expect(riseSpeed(0, 1)).toBe(RISE_MIN);
+    expect(RISE_MIN).toBeLessThan(0.1);
+    expect(riseSpeed(1, 1)).toBeCloseTo(RISE_MAX, 6);
+    expect(RISE_MAX).toBeGreaterThan(10 * RISE_MIN);
+    let prev = 0;
+    for (let l = 0; l <= 1.0001; l += 0.02) {
+      const v = riseSpeed(l, 1);
+      expect(v).toBeGreaterThanOrEqual(prev);
+      prev = v;
+    }
+    expect(riseSpeed(3, 1)).toBeCloseTo(RISE_MAX, 6); // clamped
+    expect(riseSpeed(-1, 1)).toBe(RISE_MIN);
+    expect(riseSpeed(Number.NaN, 1)).toBe(RISE_MIN);
+  });
+
+  it("reactivity sets the contrast: 0 is linear in level, 2 holds quiet columns back harder", () => {
+    for (const l of [0.25, 0.5, 0.75]) {
+      expect(riseSpeed(l, 0)).toBeCloseTo(RISE_MIN + (RISE_MAX - RISE_MIN) * l, 6);
+      expect(riseSpeed(l, 2)).toBeLessThan(riseSpeed(l, 1));
+      expect(riseSpeed(l, 1)).toBeLessThan(riseSpeed(l, 0));
+    }
+    expect(riseSpeed(1, 2)).toBeCloseTo(RISE_MAX, 6);
   });
 });

@@ -85,7 +85,7 @@
     {
       "id": "blaze",
       "name": "Blaze",
-      "description": "A fire simulation fed by the spectrum: bass is the central column, highs lick at the edges, and every kick, snare and hat blasts its own jet of flame.",
+      "description": "A fire simulation fed by a live spectrogram: every frequency burns in its own column and rises as fast as it is loud, bass at the centre, highs at the edges, with jets of flame on every hit.",
       "author": "Tidalviz",
       "entry": "src/blaze.js",
       "renderer": "webgl2",
@@ -99,7 +99,8 @@
         { "id": "speed", "type": "number", "label": "Speed", "min": 0.2, "max": 2, "step": 0.01, "default": 1 },
         { "id": "glow", "type": "number", "label": "Glow", "min": 0, "max": 2, "step": 0.01, "default": 1 },
         { "id": "palette", "type": "select", "label": "Palette", "options": ["natural", "blue gas", "green chemical", "ember mono"], "default": "natural" },
-        { "id": "feed", "type": "select", "label": "Feed", "options": ["spectrum", "waveform"], "default": "spectrum" },
+        { "id": "feed", "type": "select", "label": "Feed", "options": ["spectrogram", "waveform"], "default": "spectrogram" },
+        { "id": "layout", "type": "select", "label": "Layout", "options": ["mirrored", "linear"], "default": "mirrored" },
         { "id": "detail", "type": "number", "label": "Detail", "min": 0.15, "max": 0.5, "step": 0.05, "default": 0.3 }
       ]
     },

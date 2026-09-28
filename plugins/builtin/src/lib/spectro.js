@@ -81,7 +81,7 @@ export function resampleSpectrum(spec, sampleRate, lo, hi, out) {
  * @param {number} count columns
  * @param {{ floorDb?: number, rangeDb?: number, own?: number, releaseDb?: number }} [opts]
  */
-export function createSpectroGain(count, { floorDb = -66, rangeDb = 30, own = 0.35, releaseDb = 3 } = {}) {
+export function createSpectroGain(count, { floorDb = -66, rangeDb = 24, own = 0.35, releaseDb = 3 } = {}) {
   const env = new Float32Array(count).fill(floorDb);
   const db = new Float32Array(count);
   const tilt = new Float32Array(count);
@@ -128,4 +128,27 @@ export function createSpectroGain(count, { floorDb = -66, rangeDb = 30, own = 0.
       env.fill(floorDb);
     },
   };
+}
+
+/** Upward speed (screen heights per sim second) a silent column's gas is held to: a smoulder. */
+export const RISE_MIN = 0.04;
+/** … and a full-level column's: it races to the top in well under a second. */
+export const RISE_MAX = 2.4;
+/** Extra expansion exponent per unit of reactivity. */
+const RISE_EXPAND = 1;
+
+/**
+ * Flame speed as a function of a column's level: the upward speed the sim drives that column's gas
+ * toward, in screen heights per sim second (the Speed param scales sim time, so on screen it's
+ * this × Speed):
+ *   speed = RISE_MIN + (RISE_MAX − RISE_MIN) · level^γ,  γ = 1 + reactivity
+ * Reactivity (0–2, clamped) is the contrast: 0 is linear in level; higher holds quiet columns back
+ * harder while a full-level column still reaches RISE_MAX.
+ * @param {number} level 0–1 (clamped)
+ * @param {number} reactivity 0–2
+ */
+export function riseSpeed(level, reactivity) {
+  const l = level > 0 ? (level < 1 ? level : 1) : 0; // NaN → 0
+  const r = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
+  return RISE_MIN + (RISE_MAX - RISE_MIN) * l ** (1 + RISE_EXPAND * r);
 }

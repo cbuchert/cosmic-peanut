@@ -7,7 +7,7 @@ in vec2 v_uv;
 out vec4 o;
 uniform sampler2D u_scal;
 uniform sampler2D u_vel;
-uniform sampler2D u_seed;  // r = fuel, g = jet strength (0–2), along x
+uniform sampler2D u_seed;  // r = fuel, g = jet strength (0–2), b = rise speed (heights/s), along x
 uniform vec2 u_venc;
 uniform vec2 u_texel;      // 1 / sim size
 uniform float u_aspect;
@@ -18,6 +18,7 @@ uniform float u_ember;     // steady heat along the bed so silence still glows f
 uniform float u_flare;     // extra heat everywhere along the base (onsets, flash-limited)
 uniform float u_jetHeat;   // heat a full-strength jet adds at its root
 uniform float u_jetVel;    // upward speed of a full-strength jet, heights/s
+uniform float u_rise;      // 1 = heat rides its column's rise speed (spectrogram feed), 0 = off
 uniform float u_cool;      // cooling rate, 1/s
 uniform float u_burn;      // fuel → heat rate, 1/s
 // #include noise
@@ -30,6 +31,9 @@ void main() {
   // sideways), so a blast reaches height within ~0.2 s instead of welling up.
   vec4 seed = texture(u_seed, vec2(v_uv.x, 0.5));
   float tongue = 0.25 + 1.6 * max(0.0, gnoise(vec3(v_uv.x * u_aspect * 11.0, u_time * 1.3, 11.0)) + 0.25);
+  // Spectrogram: the heat also rides its column's rise speed directly, so the projection (which
+  // spreads a column's push to its neighbours) can't blur loud and quiet columns together.
+  v.y = mix(v.y, seed.b, u_rise * 0.6 * (1.0 - 0.5 * smoothstep(0.0, 0.95, v_uv.y)));
   v.y += u_jetVel * seed.g * tongue * (1.0 - smoothstep(0.0, 0.85, v_uv.y));
   vec2 back = v_uv - u_dt * v * vec2(1.0 / u_aspect, 1.0);
   vec4 s = texture(u_scal, back);
