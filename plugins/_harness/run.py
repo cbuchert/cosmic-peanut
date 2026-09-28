@@ -18,6 +18,7 @@ VIZ = {
     "undertow": "builtin",
     "orbit": "builtin",
     "pulsar": "builtin",
+    "cascade": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }

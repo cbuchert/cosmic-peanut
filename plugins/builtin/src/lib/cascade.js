@@ -87,7 +87,9 @@ export function createSeed(texels) {
       let sum = 0;
       for (let i = 0; i < texels; i++) {
         const tr = trickle(i / (texels - 1), clock);
-        values[i] = tr + (1 - tr) * Math.min(1, smooth[i] * gain) * surge;
+        // Squared: the peaks of |w| pour ropes, the troughs between them run thin.
+        const g = Math.min(1, smooth[i] * gain);
+        values[i] = tr + (1 - tr) * g * g * surge;
         sum += values[i];
       }
       this.mean = sum / texels;
@@ -267,7 +269,7 @@ export const DEFAULTS = { spray: 0.6, turbulence: 0.4 };
 /**
  * Effective spray and turbulence. With macOS Reduce motion, params still at their defaults get
  * calmer values (less bouncing spray, a steadier curtain); anything the user set is respected.
- * @param {{spray: unknown, turbulence: unknown}} params
+ * @param {Readonly<Record<string, unknown>>} params
  * @param {boolean} reduceMotion
  * @param {{spray: number, turbulence: number}} out
  */

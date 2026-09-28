@@ -164,8 +164,8 @@ describe("createSeed rope persistence", () => {
     for (const v of s.values) mean += v / 256;
     let varc = 0;
     for (const v of s.values) varc += (v - mean) ** 2 / 256;
-    // |sin| resampled: std/mean ≈ 0.48 if pinned; phase-smeared it collapses toward flat.
-    expect(Math.sqrt(varc) / mean).toBeGreaterThan(0.35);
+    // Pinned and contrast-shaped (|sin|² has std/mean ≈ 0.71); phase-smeared it goes flat.
+    expect(Math.sqrt(varc) / mean).toBeGreaterThan(0.6);
   });
 });
 
