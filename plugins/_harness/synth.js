@@ -156,3 +156,89 @@ export function createProtoDemo() {
   }
   return { update };
 }
+
+/**
+ * A separable drum pattern for checking frequency-localised response (`audio=drums`): 120 BPM,
+ * kick on beats 1 and 3 (bands below ~120 Hz), snare on 2 and 4 (a broad mid bump, ~250 Hz–
+ * 3 kHz), closed hats on every eighth (bands above ~8 kHz), over a quiet pad. A beat is 0.5 s, so
+ * with `still` (fixed 60 Hz steps) kicks land on frames 0, 60, 120 … and snares on 30, 90, 150 ….
+ * Bands, waveform and the bass/onset stats all follow the same events.
+ */
+export function createDrums() {
+  const bands = new Float32Array(64);
+  const spectrum = new Float32Array(1024);
+  const WAVE = 2048;
+  const waveform = new Float32Array(WAVE);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  let lastEighth = -1;
+  let bassAtt = 1;
+  let onsetStrength = 0;
+  let sampleClock = 0;
+  let frameIndex = 0;
+  /** @type {any} */
+  const frame = {
+    bands, spectrum, waveform, left: null, right: null,
+    rms: 0, peak: 0, bass: 1, mid: 1, treb: 1, bassAtt: 1, midAtt: 1, trebAtt: 1,
+    onsetStrength: 0, onset: false, onsetAge: 10, bpm: 120, beatPhase: 0, centroid: 0.3, flux: 0,
+    silent: false, frameIndex: 0, sampleRate: SR,
+  };
+  /** Envelopes at time s: [kick, snare, hat]. @param {number} s */
+  const env = (s) => {
+    const beat = s * 2;
+    const b = Math.floor(beat) % 4;
+    const ph = beat % 1;
+    const kick = b % 2 === 0 ? Math.exp(-ph * 6) : 0;
+    const snare = b % 2 === 1 ? Math.exp(-ph * 9) : 0;
+    const hat = Math.exp(-((beat * 2) % 1) * 20);
+    return [kick, snare, hat];
+  };
+  /** @param {number} t @param {number} dt */
+  function update(t, dt) {
+    const [kick, snare, hat] = env(t);
+    const eighth = Math.floor(t * 4);
+    const onset = eighth !== lastEighth;
+    lastEighth = eighth;
+    for (let i = 0; i < 64; i++) {
+      const x = i / 63;
+      let v = 0.1 + 0.08 * Math.exp(-(((x - 0.45) / 0.15) ** 2)); // quiet pad
+      if (x < 0.2) v += 0.85 * kick * (1 - x / 0.2);
+      v += 0.75 * snare * Math.exp(-(((x - 0.5) / 0.12) ** 2));
+      if (x > 0.8) v += 0.6 * hat * ((x - 0.8) / 0.2);
+      bands[i] = Math.min(1, Math.max(0, v + (rnd() - 0.5) * 0.02));
+    }
+    for (let k = 0; k < 1024; k++) spectrum[k] = bands[Math.min(63, k >> 4)];
+    sampleClock += Math.round(dt * SR);
+    let sum = 0;
+    let peak = 0;
+    for (let n = 0; n < WAVE; n++) {
+      const s = (sampleClock - WAVE + n) / SR;
+      const [k, sn, h] = env(s);
+      let v = 0.6 * k * Math.sin(2 * Math.PI * (50 + 70 * k) * s);
+      v += 0.35 * sn * (rnd() * 2 - 1) + 0.2 * sn * Math.sin(2 * Math.PI * 190 * s);
+      v += 0.12 * h * (rnd() * 2 - 1);
+      v += 0.05 * Math.sin(2 * Math.PI * 220 * s);
+      v = Math.max(-1, Math.min(1, v));
+      waveform[n] = v;
+      if (n >= WAVE - 512) {
+        sum += v * v;
+        peak = Math.max(peak, Math.abs(v));
+      }
+    }
+    const bass = 0.5 + 1.5 * kick;
+    bassAtt += (bass - bassAtt) * (1 - Math.exp(-dt * 5));
+    onsetStrength = onset ? (eighth % 2 === 0 ? 0.9 : 0.4) : onsetStrength * Math.exp(-dt * 12);
+    frame.rms = Math.sqrt(sum / 512);
+    frame.peak = peak;
+    frame.bass = bass;
+    frame.mid = 0.7 + 1.3 * snare;
+    frame.treb = 0.7 + 0.9 * hat;
+    frame.bassAtt = bassAtt;
+    frame.onset = onset;
+    frame.onsetStrength = onsetStrength;
+    frame.beatPhase = (t * 2) % 1;
+    frame.frameIndex = frameIndex++;
+    return /** @type {import('../../web/sdk/tidalviz').AudioFrame} */ (frame);
+  }
+  return { update };
+}

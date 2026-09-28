@@ -170,6 +170,8 @@ export function createAttacks(count) {
 
 /** Waveform flicker on the spectrum feed: ± this fraction of the fuel. */
 const TEXTURE = 0.2;
+/** Release of the shaped band levels (s): roots rise at once and fall over ~150 ms. */
+const ROOT_RELEASE = 0.15;
 /** The overall loudness reference for jet detection: slow attack and release (s), and a floor. */
 const DETECT_ATTACK = 0.8;
 const DETECT_RELEASE = 4;
@@ -181,7 +183,7 @@ const DETECT_FLOOR = 0.1;
  * - "waveform": the original Blaze feed, the newest waveform resampled across the line (|w|) times
  *   a loudness auto-gain; no jets.
  * - "spectrum": the bands, auto-gained per band (createBandGain), gated and expanded
- *   (shapeLevel), mapped mirrored across the line (bass at the centre), times a ±TEXTURE flicker
+ *   (shapeLevel), held with a ~150 ms release so roots don't flicker frame to frame, mapped mirrored across the line (bass at the centre), times a ±TEXTURE flicker
  *   from the waveform under each texel. Jets come from createAttacks on the bands scaled by a
  *   slow overall loudness reference (so a kick after a quiet bar is a big rise, while the height
  *   normalisation reacts at once), mapped the same way.
@@ -199,6 +201,7 @@ export function createFeed(size, count) {
   const norm = new Float32Array(count);
   const det = new Float32Array(count);
   const jets = new Float32Array(count);
+  const held = new Float32Array(count);
   let ref = 0;
   return {
     fuel,
@@ -223,17 +226,20 @@ export function createFeed(size, count) {
       const bands = audio.bands;
       const r = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
       bandGain.step(bands, dt, norm);
+      const keep = Math.exp(-dt / ROOT_RELEASE);
       let top = 0;
       for (let i = 0; i < count; i++) {
         const v = audio.silent ? 0 : bands[i];
         if (v > top) top = v;
-        norm[i] = audio.silent ? 0 : shapeLevel(norm[i], r);
+        const shaped = audio.silent ? 0 : shapeLevel(norm[i], r);
+        const fallen = held[i] * keep;
+        held[i] = shaped > fallen ? shaped : fallen;
       }
       ref += (top - ref) * (1 - Math.exp(-dt / (top > ref ? DETECT_ATTACK : DETECT_RELEASE)));
       const inv = 1 / (ref > DETECT_FLOOR ? ref : DETECT_FLOOR);
       for (let i = 0; i < count; i++) det[i] = audio.silent ? 0 : bands[i] * inv;
       attacks.step(det, dt, r, reduceFlashing, jets);
-      mapMirrored(norm, fuel);
+      mapMirrored(held, fuel);
       mapMirrored(jets, jet);
       for (let i = 0; i < size; i++) {
         const w = mag[i] * g;

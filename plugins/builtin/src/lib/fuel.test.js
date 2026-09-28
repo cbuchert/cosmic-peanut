@@ -45,7 +45,7 @@ describe("shapeLevel", () => {
 });
 
 /** Run a band gain on a fixed spectrum for `seconds`; returns its last output. */
-function settle(/** @type {ReturnType<typeof createBandGain>} */ g, /** @type {Float32Array} */ bands, seconds, dt = DT) {
+function settle(/** @type {ReturnType<typeof createBandGain>} */ g, /** @type {Float32Array} */ bands, /** @type {number} */ seconds, dt = DT) {
   const out = new Float32Array(bands.length);
   for (let t = 0; t < seconds; t += dt) g.step(bands, dt, out);
   return out;
@@ -220,5 +220,21 @@ describe("createFeed", () => {
     expect(f.jet[0]).toBeGreaterThan(0.5);
     expect(f.jet[255]).toBeGreaterThan(0.5);
     expect(f.jet[127]).toBeLessThan(0.01);
+  });
+
+  it("spectrum feed: flame roots rise at once and fall smoothly (~150 ms), not frame to frame", () => {
+    const f = createFeed(256, 64);
+    const bands = new Float32Array(64).fill(0.1);
+    const wave = new Float32Array(2048);
+    for (let k = 0; k < 60; k++) f.step(frame(bands, wave), DT, "spectrum", 1, false);
+    bands.fill(0.9, 0, 8);
+    f.step(frame(bands, wave), DT, "spectrum", 1, false);
+    const hit = f.fuel[127];
+    expect(hit).toBeGreaterThan(0.6);
+    bands.fill(0.1, 0, 8); // the band drops at once
+    for (let k = 0; k < 6; k++) f.step(frame(bands, wave), DT, "spectrum", 1, false);
+    expect(f.fuel[127]).toBeGreaterThan(0.35 * hit); // 100 ms on
+    for (let k = 0; k < 30; k++) f.step(frame(bands, wave), DT, "spectrum", 1, false);
+    expect(f.fuel[127]).toBeLessThan(0.05 * hit); // 600 ms on
   });
 });
