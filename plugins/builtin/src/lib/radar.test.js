@@ -5,6 +5,9 @@ import {
   CLUTTER_MAX,
   CLUTTER_R,
   clutterProfile,
+  ATTACK_MIN,
+  CONTACT_LIFE,
+  createContacts,
   createDecay,
   createSweep,
   DEFAULT_SPEED,
@@ -221,5 +224,84 @@ describe("createDecay", () => {
   it("holds longer with more persistence and still fades when the sweep stops", () => {
     expect(run(60, 2, 0.5, 1.5)).toBeGreaterThan(run(60, 2, 0.5, 0.6));
     expect(run(60, 60, 0, 0.6)).toBeLessThan(0.1);
+  });
+});
+
+describe("createContacts", () => {
+  const quiet = new Float32Array(64).fill(0.1);
+  /** Bands with one band raised. @param {number} i @param {number} v */
+  const hit = (i, v) => {
+    const b = quiet.slice();
+    b[i] = v;
+    return b;
+  };
+  const packed = new Float32Array(4 * 32);
+
+  it("spawns a bright contact on an onset at the sweep bearing and the firing band's radius", () => {
+    const c = createContacts();
+    c.step(0, 0.1, false, 0, quiet);
+    c.step(0.1, 1.3, true, 0.8, hit(40, 0.6)); // band 40 jumped: it fired
+    expect(c.pack(packed, 1.3)).toBe(1);
+    expect(packed[0]).toBeCloseTo(0.3, 5); // bearing = the sweep, wrapped
+    expect(packed[1]).toBeCloseTo(radiusOfBand(40), 5);
+    expect(packed[2]).toBeGreaterThan(0.5); // flaring: the sweep is on it
+  });
+
+  it("spawns on a strong per-band attack without an onset, but not for steady loud bands", () => {
+    const c = createContacts();
+    const loud = new Float32Array(64).fill(0.9);
+    for (let f = 0; f < 30; f++) c.step(f * 0.01, (f + 1) * 0.01, false, 0, loud);
+    expect(c.pack(packed, 0.3)).toBe(0);
+    c.step(0.3, 0.31, false, 0, quiet);
+    c.step(0.31, 0.32, false, 0, hit(12, 0.1 + ATTACK_MIN * 1.5));
+    expect(c.pack(packed, 0.32)).toBe(1);
+    expect(packed[1]).toBeCloseTo(radiusOfBand(12), 5);
+    c.step(0.32, 0.33, false, 0, hit(12, 0.1 + ATTACK_MIN * 1.5)); // held: no new attack
+    expect(c.pack(packed, 0.33)).toBe(1);
+  });
+
+  it("caps the pool (preallocated), replacing the oldest contact when full", () => {
+    const c = createContacts(32);
+    const arrays = [c.bearing, c.radius, c.strength, c.born, c.swept];
+    c.step(0, 0.001, false, 0, quiet);
+    for (let k = 1; k <= 40; k++) c.step(k * 0.001, (k + 1) * 0.001, true, 0.5, hit(k % 64, 0.9));
+    expect(c.pack(packed, 0.041)).toBe(32);
+    expect([c.bearing, c.radius, c.strength, c.born, c.swept]).toEqual(arrays);
+    expect(arrays.every((a, i) => a === [c.bearing, c.radius, c.strength, c.born, c.swept][i])).toBe(true);
+    const bornMin = Math.min(...c.born);
+    expect(bornMin).toBeCloseTo(0.01, 6); // the first 8 (born 0.002–0.009) were replaced
+  });
+
+  /** Step the sweep from `a` to `b` turns in 1/60-turn frames with quiet bands. */
+  const sweep = (/** @type {ReturnType<typeof createContacts>} */ c, /** @type {number} */ a, /** @type {number} */ b) => {
+    for (let t = a; t < b - 1e-9; t += 1 / 60) c.step(t, Math.min(b, t + 1 / 60), false, 0, quiet);
+  };
+
+  it("fades over CONTACT_LIFE rotations, then frees its slot", () => {
+    const c = createContacts();
+    c.step(0, 0.5, false, 0, quiet);
+    c.step(0.5, 0.5, true, 1, hit(30, 0.9));
+    const seen = [];
+    for (let k = 1; k < CONTACT_LIFE; k++) {
+      sweep(c, 0.5 + k - 1, 0.5 + k); // the sweep is back on it
+      c.pack(packed, 0.5 + k);
+      seen.push(packed[2]);
+    }
+    for (let k = 1; k < seen.length; k++) expect(seen[k]).toBeLessThan(seen[k - 1]);
+    sweep(c, 0.5 + CONTACT_LIFE - 1, 0.5 + CONTACT_LIFE + 0.05);
+    expect(c.pack(packed, 0.5 + CONTACT_LIFE + 0.05)).toBe(0);
+    expect(Math.max(...c.strength)).toBe(0);
+  });
+
+  it("flares when the sweep passes over it and dims between passes", () => {
+    const c = createContacts();
+    c.step(0, 0.5, false, 0, quiet);
+    c.step(0.5, 0.5, true, 1, hit(30, 0.9));
+    sweep(c, 0.5, 1.45);
+    c.pack(packed, 1.45);
+    const before = packed[2];
+    sweep(c, 1.45, 1.52);
+    c.pack(packed, 1.52);
+    expect(packed[2]).toBeGreaterThan(2 * before);
   });
 });

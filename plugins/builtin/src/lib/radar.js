@@ -188,3 +188,112 @@ export function createDecay() {
   };
   return d;
 }
+
+/** Contacts live this many rotations, fading linearly. */
+export const CONTACT_LIFE = 3;
+/** Between passes a contact glows at FLARE_BASE; a pass flares it to full, fading over FLARE_TURNS. */
+const FLARE_BASE = 0.3;
+const FLARE_TURNS = 0.2;
+/** A band whose level jumps by this much in one frame spawns a contact even without an onset. */
+export const ATTACK_MIN = 0.3;
+
+/**
+ * Radar contacts ("blips") from transients, in a preallocated pool of `cap`. Each lives at the
+ * bearing where the sweep was and the radius of the band that fired, flares when the sweep passes
+ * over it and fades over CONTACT_LIFE rotations. Nothing allocates after creation.
+ * @param {number} [cap=32]
+ */
+export function createContacts(cap = 32) {
+  const c = {
+    cap,
+    bearing: new Float32Array(cap),
+    radius: new Float32Array(cap),
+    strength: new Float32Array(cap),
+    /** Sweep angle (unwrapped turns) at spawn. */
+    born: new Float64Array(cap),
+    /** Sweep angle (unwrapped turns) when the arm last passed over it. */
+    swept: new Float64Array(cap),
+    /** Previous frame's band levels, for per-band attacks. */
+    prevBands: new Float32Array(64),
+    /** False until the first step has filled prevBands (starting mid-song is not an attack). */
+    primed: false,
+    /**
+     * @param {number} prevTurns sweep angle last frame
+     * @param {number} turns sweep angle now
+     * @param {boolean} onset `audio.onset`
+     * @param {number} onsetStrength `audio.onsetStrength`
+     * @param {ArrayLike<number>} bands `audio.bands`
+     */
+    step(prevTurns, turns, onset, onsetStrength, bands) {
+      let best = -1;
+      let bestAttack = -Infinity;
+      for (let b = 0; b < 64; b++) {
+        const a = bands[b] - c.prevBands[b];
+        if (a > bestAttack) {
+          bestAttack = a;
+          best = b;
+        }
+        c.prevBands[b] = bands[b];
+      }
+      const start = prevTurns - Math.floor(prevTurns);
+      const span = Math.min(1, Math.max(0, turns - prevTurns));
+      for (let i = 0; i < cap; i++) {
+        if (c.strength[i] <= 0) continue;
+        if (turns - c.born[i] >= CONTACT_LIFE) c.strength[i] = 0;
+        else if (inWedge(c.bearing[i], start, span)) c.swept[i] = turns;
+      }
+      if (!c.primed) {
+        c.primed = true;
+        return;
+      }
+      if (onset) c.spawn(turns, best, Math.min(1, 0.5 + onsetStrength));
+      else if (bestAttack >= ATTACK_MIN) c.spawn(turns, best, Math.min(1, 0.3 + bestAttack));
+    },
+    /**
+     * Put a contact at the sweep bearing and band `band`'s radius.
+     * @param {number} turns @param {number} band @param {number} strength
+     */
+    spawn(turns, band, strength) {
+      let slot = 0; // a free slot, else the oldest contact
+      for (let i = 0; i < cap; i++) {
+        if (c.strength[i] <= 0) {
+          slot = i;
+          break;
+        }
+        if (c.born[i] < c.born[slot]) slot = i;
+      }
+      c.bearing[slot] = turns - Math.floor(turns);
+      c.radius[slot] = radiusOfBand(band);
+      c.strength[slot] = strength;
+      c.born[slot] = turns;
+      c.swept[slot] = turns;
+    },
+    /** Current brightness of contact `i` (0 = dead). @param {number} i @param {number} turns */
+    brightness(i, turns) {
+      const life = 1 - (turns - c.born[i]) / CONTACT_LIFE;
+      if (life <= 0) return 0;
+      const flare = Math.exp(-(turns - c.swept[i]) / FLARE_TURNS);
+      return c.strength[i] * life * (FLARE_BASE + (1 - FLARE_BASE) * flare);
+    },
+    /**
+     * Pack live contacts as (bearing, radius, brightness, strength) quads for a vec4 uniform array.
+     * @param {Float32Array} out length ≥ 4 × cap
+     * @param {number} turns sweep angle now
+     * @returns {number} how many were written
+     */
+    pack(out, turns) {
+      let n = 0;
+      for (let i = 0; i < cap; i++) {
+        const b = c.brightness(i, turns);
+        if (b <= 0) continue;
+        out[4 * n] = c.bearing[i];
+        out[4 * n + 1] = c.radius[i];
+        out[4 * n + 2] = b;
+        out[4 * n + 3] = c.strength[i];
+        n++;
+      }
+      return n;
+    },
+  };
+  return c;
+}
