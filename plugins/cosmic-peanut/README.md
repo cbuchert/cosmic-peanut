@@ -20,6 +20,7 @@ slightly and brightens a touch. Built-in `webgl2` visualizer; spec in
 | `density` | Rings | medium | sparse 120 / medium 240 / dense 400 | Rings alive at once (reallocates the history) |
 | `palette` | Palette | nebula | nebula / ember / phosphor | Color ramp by age |
 | `lines` | Lines | soft | soft / fine | Soft: 1× multisampled buffer upscaled (slight glow). Fine: native resolution, gain × 1.35 |
+| `antialias` | Antialias soft lines | on | on / off | 2× MSAA for soft lines, matching the prototype's smoothness. Off saves ~7.5 MB of GPU memory at 1440p (total ~6 MB vs ~13.5 MB) |
 
 Drag to orbit (0.006 rad/px); letting go resumes the self-orbit from there. With macOS Reduce
 motion on, Orbit speed and Bass pulse act as 0 and 0.1 until you move them off their defaults.

@@ -59,3 +59,36 @@ def test_wait_for_wakes_when_a_writer_reaches_the_target():
     assert ring.wait_for(8, timeout=2.0)
     t.join()
     assert not ring.wait_for(100, timeout=0.001)
+
+
+def test_view_is_the_newest_frames_planar_across_wraparound():
+    ring = RingBuffer(capacity=16, channels=2)
+    for start in range(0, 100, 7):
+        ring.write(ramp(start, 7), t_last=0.0)
+        n = min(ring.written, 12)
+        v = ring.view(n)
+        assert v.shape == (2, n) and v[0].flags.c_contiguous
+        np.testing.assert_array_equal(v.T, ramp(ring.written - n, n))
+
+
+def test_view_of_a_block_larger_than_capacity_keeps_its_newest_frames():
+    ring = RingBuffer(capacity=8, channels=2)
+    ring.write(ramp(0, 3), t_last=0.0)
+    ring.write(ramp(3, 20), t_last=0.0)
+    np.testing.assert_array_equal(ring.view(8).T, ramp(15, 8))
+
+
+def test_view_stays_valid_while_fewer_than_capacity_minus_n_frames_are_written():
+    ring = RingBuffer(capacity=64, channels=2)
+    ring.write(ramp(0, 50), t_last=0.0)
+    v = ring.view(16)
+    expected = v.copy()
+    for start in range(50, 50 + 64 - 16, 8):  # capacity − n more frames, across the wrap
+        ring.write(ramp(start, 8), t_last=0.0)
+    np.testing.assert_array_equal(v, expected)
+
+
+def test_view_zero_fills_before_enough_samples_arrive():
+    ring = RingBuffer(capacity=16, channels=1)
+    ring.write(ramp(1, 3, channels=1), t_last=0.0)
+    np.testing.assert_array_equal(ring.view(5)[0], [0, 0, 1, 2, 3])

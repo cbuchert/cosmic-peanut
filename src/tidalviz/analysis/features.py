@@ -4,7 +4,14 @@ import math
 
 import numpy as np
 
-from tidalviz.analysis.analyzer import AnalysisContext, FeatureExtractor
+from tidalviz.analysis.analyzer import (
+    BASS_MID_TREB_HZ,
+    SUM_BASS,
+    SUM_FREQ,
+    SUM_MAG,
+    AnalysisContext,
+    FeatureExtractor,
+)
 from tidalviz.frame import F32, N_SPECTRUM, N_WAVEFORM, SCALAR_INDEX, AudioFrame
 
 SILENCE_RMS = 10 ** (-70 / 20)  # −70 dBFS: macOS delivers exact zeros without permission
@@ -27,8 +34,10 @@ class Level:
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
         hop = ctx.mono[-ctx.hop :]
         ctx.hop_ms = float(np.dot(hop, hop)) / ctx.hop  # mean square, shared with AutoGain
-        pcm = ctx.pcm[-ctx.hop :]
-        peak = max(float(pcm.max()), -float(pcm.min()))
+        pcm = ctx.pcm[:, -ctx.hop :]
+        peak = max(
+            float(np.maximum.reduce(pcm, axis=None)), -float(np.minimum.reduce(pcm, axis=None))
+        )
         rms = math.sqrt(ctx.hop_ms)
         out.scalars[self._i_rms] = rms
         out.scalars[self._i_peak] = peak
@@ -69,7 +78,10 @@ class AutoGain:
 
 
 class Waveform:
-    """Newest N_WAVEFORM (2048) samples: mono mix, plus left/right planes when stereo."""
+    """Newest N_WAVEFORM (2048) samples: mono mix, plus left/right planes when stereo.
+
+    The planes are views of this hop's window (no copy), valid until the next hop.
+    """
 
     fields: tuple[str, ...] = ("waveform", "left", "right")
 
@@ -77,10 +89,10 @@ class Waveform:
         pass
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
-        np.copyto(out.waveform, ctx.mono[-N_WAVEFORM:])
+        out.waveform = ctx.mono[-N_WAVEFORM:]
         if out.left is not None and out.right is not None and ctx.channels >= 2:
-            np.copyto(out.left, ctx.pcm[-N_WAVEFORM:, 0])
-            np.copyto(out.right, ctx.pcm[-N_WAVEFORM:, 1])
+            out.left = ctx.pcm[0, -N_WAVEFORM:]
+            out.right = ctx.pcm[1, -N_WAVEFORM:]
 
 
 class Spectrum:
@@ -90,15 +102,14 @@ class Spectrum:
 
     def __init__(self, ctx: AnalysisContext) -> None:
         self._fold = (ctx.n_bins - 1) // N_SPECTRUM  # 1 for FFT 2048, 2 for 4096
+        self._folded: F32 = np.zeros(N_SPECTRUM, dtype=np.float32)
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
         body = ctx.mag[: N_SPECTRUM * self._fold]
-        if self._fold == 1:
-            np.multiply(body, ctx.gain, out=out.spectrum)
-        else:
-            np.max(body.reshape(N_SPECTRUM, self._fold), axis=1, out=out.spectrum)
-            np.multiply(out.spectrum, ctx.gain, out=out.spectrum)
-        np.clip(out.spectrum, 0.0, 1.0, out=out.spectrum)
+        if self._fold != 1:
+            body = np.maximum.reduce(body.reshape(N_SPECTRUM, self._fold), axis=1, out=self._folded)
+        np.multiply(body, ctx.gain, out=out.spectrum)
+        np.minimum(out.spectrum, 1.0, out=out.spectrum)  # magnitudes are never negative
 
 
 class Bands:
@@ -116,36 +127,60 @@ class Bands:
 
     def __init__(self, ctx: AnalysisContext) -> None:
         s = ctx.settings
+        nb = ctx.n_bins
         self.edges = np.geomspace(s.band_low_hz, s.band_high_hz, s.n_bands + 1)
-        self.weights = _band_weights(self.edges, ctx.n_bins, ctx.bin_hz)
+        weights = _band_weights(self.edges, nb, ctx.bin_hz)
         centers = np.sqrt(self.edges[:-1] * self.edges[1:])
         tilt_db = self.TILT_DB_PER_OCTAVE * np.log2(centers / 1000.0)
         db_range = self.DB_CEIL - self.DB_FLOOR
-        # level = (10·log10(power) + tilt − floor) / range, as a scale and a per-band offset
-        self._scale = 10.0 / db_range
-        self._offset = (tilt_db - self.DB_FLOOR) / db_range
-        self._level_floor = -10.0 / db_range  # Onset sees levels down to floor − 10 dB
-        self._power = np.zeros(ctx.n_bins, dtype=np.float64)
-        self._level = np.zeros(s.n_bands, dtype=np.float64)
-        self._state = np.zeros(s.n_bands, dtype=np.float64)
-        self._decay = math.exp(-ctx.dt / self.RELEASE_S)
-        self.level = ctx.band_level  # tilted, unclipped 0–1 scale levels: Onset's input
+        # level = (10·log10(g²·W·power + 1e-12) + tilt − floor) / range
+        #       = scale · log10(c · (g²·W·power + 1e-12)),  c = 10^((tilt − floor) / 10)
+        # so the per-band offset folds into the weights. The weights are sparse (each band
+        # covers a few bins): one take + multiply + reduceat instead of a 64 × 1025 product.
+        # A constant 1.0 after the last bin carries the 1e-12 floor into each band's sum.
+        self._scale = np.float32(10.0 / db_range)
+        c = 10.0 ** ((tilt_db - self.DB_FLOOR) / 10.0)
+        idx: list[np.ndarray] = []
+        wts: list[np.ndarray] = []
+        starts = np.zeros(s.n_bands, dtype=np.intp)
+        pos = 0
+        for b in range(s.n_bands):
+            (bins,) = np.nonzero(weights[b])
+            starts[b] = pos
+            idx += [bins, np.array([nb])]
+            wts += [weights[b, bins] * c[b], np.array([1e-12 * c[b]])]
+            pos += bins.size + 1
+        self._idx = np.concatenate(idx).astype(np.intp)
+        self._wts: F32 = np.concatenate(wts).astype(np.float32)
+        self._starts = starts
+        self._vals: F32 = np.zeros(self._idx.size, dtype=np.float32)
+        self._power: F32 = np.ones(nb + 1, dtype=np.float32)  # [nb] stays 1.0
+        self._x: F32 = np.zeros(s.n_bands, dtype=np.float32)
+        self._lv: F32 = np.zeros(s.n_bands, dtype=np.float32)
+        self._level_floor = np.float32(-10.0 / db_range)  # Onset sees down to floor − 10 dB
+        self._decay = np.float32(math.exp(-ctx.dt / self.RELEASE_S))
+        # Two level buffers alternate so Onset can compare against the previous hop, no copy.
+        self._levels: F32 = np.zeros((2, s.n_bands), dtype=np.float32)
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
-        lv = self._level
-        np.square(ctx.mag, out=self._power)
-        np.dot(self.weights, self._power, out=lv)
-        np.multiply(lv, ctx.gain * ctx.gain, out=lv)
-        np.add(lv, 1e-12, out=lv)
-        np.log10(lv, out=lv)
-        np.multiply(lv, self._scale, out=lv)
-        np.add(lv, self._offset, out=lv)
-        np.maximum(lv, self._level_floor, out=self.level)
-        np.clip(lv, 0.0, 1.0, out=lv)
-        # Instant attack, exponential release: state = max(level, state · decay)
-        np.multiply(self._state, self._decay, out=self._state)
-        np.maximum(self._state, lv, out=self._state)
-        np.copyto(out.bands, self._state)
+        power, x, lv = self._power[:-1], self._x, self._lv
+        cur = ctx.index & 1
+        level = ctx.band_level = self._levels[cur]
+        ctx.prev_band_level = self._levels[cur ^ 1]
+        np.multiply(ctx.mag, ctx.gain, out=power)
+        np.square(power, out=power)
+        np.take(self._power, self._idx, out=self._vals)
+        np.multiply(self._vals, self._wts, out=self._vals)
+        np.add.reduceat(self._vals, self._starts, out=x)
+        np.log10(x, out=x)
+        np.multiply(x, self._scale, out=x)
+        np.maximum(x, self._level_floor, out=level)  # tilted, unclipped: Onset's input
+        np.minimum(x, 1.0, out=lv)
+        # Instant attack, exponential release, on the frame's own array (never above 1, and
+        # never below 0 because it starts at 0): bands = max(min(level, 1), bands · decay).
+        bands = out.bands
+        np.multiply(bands, self._decay, out=bands)
+        np.maximum(bands, lv, out=bands)
 
 
 class BassMidTreb:
@@ -158,16 +193,12 @@ class BassMidTreb:
     """
 
     fields: tuple[str, ...] = ("bass", "mid", "treb", "bassAtt", "midAtt", "trebAtt")
-    RANGES_HZ = ((20.0, 250.0), (250.0, 4000.0), (4000.0, 16000.0))
+    RANGES_HZ = BASS_MID_TREB_HZ  # summed by AnalysisContext.load (SUM_BASS …)
     AVERAGE_S = 4.0
     ATT_S = 0.15  # symmetric, so *Att also averages 1.0
     MAX_VALUE = 10.0  # safety cap only; sharp hats legitimately read 4–6
 
     def __init__(self, ctx: AnalysisContext) -> None:
-        self._slices = [
-            slice(math.ceil(lo / ctx.bin_hz), min(math.ceil(hi / ctx.bin_hz), ctx.n_bins))
-            for lo, hi in self.RANGES_HZ
-        ]
         self._idx = [SCALAR_INDEX[n] for n in self.fields]
         self._long = [0.0, 0.0, 0.0]
         self._att = [0.0, 0.0, 0.0]
@@ -185,8 +216,9 @@ class BassMidTreb:
         self._frames += 1
         # A running mean until it would move slower than the EMA: no start-up bias.
         k_long = max(1.0 / self._frames, self._k_long)
-        for r, sl in enumerate(self._slices):
-            imm = float(np.sum(ctx.mag[sl]))
+        sums = ctx.sums
+        for r in range(3):
+            imm = float(sums[SUM_BASS + r])
             long = self._long[r] + (imm - self._long[r]) * k_long
             att = self._att[r] + (imm - self._att[r]) * self._k_att
             self._long[r], self._att[r] = long, att
@@ -201,12 +233,11 @@ class Centroid:
     fields: tuple[str, ...] = ("centroid",)
 
     def __init__(self, ctx: AnalysisContext) -> None:
-        self._freqs_norm: F32 = (ctx.freqs / (ctx.sample_rate / 2)).astype(np.float32)
         self._i = SCALAR_INDEX["centroid"]
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
-        total = ctx.mag_sum = float(ctx.mag.sum())  # shared with Flux
-        c = float(np.dot(self._freqs_norm, ctx.mag)) / total if total > 1e-9 else 0.0
+        total = float(ctx.sums[SUM_MAG])
+        c = float(ctx.sums[SUM_FREQ]) / total if total > 1e-9 else 0.0
         out.scalars[self._i] = 0.0 if ctx.silent else c
 
 
@@ -216,19 +247,13 @@ class Flux:
     fields: tuple[str, ...] = ("flux",)
 
     def __init__(self, ctx: AnalysisContext) -> None:
-        self._prev: F32 = np.zeros(ctx.n_bins, dtype=np.float32)
-        self._diff: F32 = np.zeros(ctx.n_bins, dtype=np.float32)
-        self._prev_sum = 0.0
         self._i = SCALAR_INDEX["flux"]
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
-        total = ctx.mag_sum
-        np.subtract(ctx.mag, self._prev, out=self._diff)
-        np.abs(self._diff, out=self._diff)
-        denom = total + self._prev_sum
-        out.scalars[self._i] = float(np.sum(self._diff)) / denom if denom > 1e-9 else 0.0
-        np.copyto(self._prev, ctx.mag)
-        self._prev_sum = total
+        # Σ|a − b| = Σa + Σb − 2·Σmin(a, b): all three sums come from AnalysisContext.load.
+        denom = float(ctx.sums[SUM_MAG]) + float(ctx.prev_sums[SUM_MAG])
+        diff = max(denom - 2.0 * ctx.sum_min, 0.0)
+        out.scalars[self._i] = diff / denom if denom > 1e-9 else 0.0
 
 
 def _band_weights(edges: np.ndarray, n_bins: int, bin_hz: float) -> np.ndarray:
