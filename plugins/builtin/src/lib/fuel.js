@@ -44,3 +44,41 @@ export function shapeLevel(n, reactivity) {
   const x = ((n < 1 ? n : 1) - gate) / (1 - gate);
   return x > 0 ? x ** (1 + EXPAND * r) : 0;
 }
+
+/**
+ * Per-band slow auto-gain. Each band tracks its own peak (instant attack, slow release) and is
+ * normalised against the geometric mean of that peak and the loudest band's, clamped to 0–1: a
+ * quiet mix still reaches full height, a naturally quiet band (hats) gets some lift without being
+ * flattened to the level of the bass, and the song's spectral shape survives. A floor keeps
+ * silence and hiss out.
+ * @param {number} count bands
+ * @param {{ release?: number, floor?: number }} [opts] release in seconds
+ */
+export function createBandGain(count, { release = 4, floor = 0.05 } = {}) {
+  const env = new Float32Array(count);
+  return {
+    /**
+     * @param {ArrayLike<number>} bands
+     * @param {number} dt seconds
+     * @param {Float32Array} out normalised levels, 0–1
+     */
+    step(bands, dt, out) {
+      const k = Math.exp(-dt / release);
+      let top = 0;
+      for (let i = 0; i < count; i++) {
+        const v = bands[i];
+        const e = env[i] * k;
+        env[i] = v > e ? v : e;
+        if (env[i] > top) top = env[i];
+      }
+      for (let i = 0; i < count; i++) {
+        const ref = Math.sqrt(env[i] * top);
+        const n = bands[i] / (ref > floor ? ref : floor);
+        out[i] = n < 1 ? n : 1;
+      }
+    },
+    reset() {
+      env.fill(0);
+    },
+  };
+}
