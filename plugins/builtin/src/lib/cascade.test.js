@@ -9,6 +9,10 @@ import {
   DEFAULT_DENSITY,
   DEFAULTS,
   DENSITIES,
+  GAIN_MAX,
+  GAIN_MIN,
+  layout,
+  lipX,
   motionParams,
   resampleAbs,
   PALETTES,
@@ -418,5 +422,88 @@ describe("manifest agreement", () => {
     expect(param("palette").default).toBe(PALETTES[0]);
     expect(param("density").options).toEqual(Object.keys(DENSITIES));
     expect(param("density").default).toBe(DEFAULT_DENSITY);
+  });
+});
+
+describe("layout (fills the window)", () => {
+  // Canvas sizes: landscape 1440p, portrait, a small window, an ultrawide strip.
+  const sizes = [
+    [2560, 1440],
+    [900, 1600],
+    [640, 360],
+    [3440, 600],
+  ];
+  const full = { width: 1, height: 1 };
+
+  it("spans the lip across the whole width at (or just above) the top edge by default", () => {
+    for (const [w, h] of sizes) {
+      const l = layout(w, h, full, {});
+      const halfW = w / h / 2; // half the canvas width in height units
+      expect(l.halfW).toBeCloseTo(halfW, 6);
+      expect(l.lipHalf).toBeGreaterThanOrEqual(halfW);
+      expect(l.lipHalf).toBeLessThan(halfW * 1.1);
+      expect(l.lipY).toBeGreaterThanOrEqual(1);
+      expect(l.lipY).toBeLessThan(1.05);
+    }
+  });
+
+  it("puts the plunge pool on the bottom edge, so the water falls the full height", () => {
+    for (const [w, h] of sizes) {
+      const l = layout(w, h, full, {});
+      expect(l.poolY).toBeGreaterThanOrEqual(0);
+      expect(l.poolY).toBeLessThanOrEqual(0.05);
+      // Water that doesn't splash keeps falling until it leaves through the bottom edge.
+      expect(l.floorY).toBeLessThan(0);
+    }
+  });
+
+  it("narrows the lip and shortens the drop in proportion to the width and height params", () => {
+    for (const [w, h] of sizes) {
+      const f = layout(w, h, full, {});
+      const l = layout(w, h, { width: 0.5, height: 0.6 }, {});
+      expect(l.lipHalf).toBeCloseTo(f.lipHalf * 0.5, 6);
+      expect(l.lipY - l.poolY).toBeCloseTo((f.lipY - f.poolY) * 0.6, 6);
+      expect(l.poolY).toBe(f.poolY); // the pool stays on the bottom edge
+    }
+  });
+
+  it("respawns across the whole lip: no empty margins at the sides, edge particles live", () => {
+    const seed = new Float32Array(256).fill(0.5);
+    const inv = buildInverseCdf(seed, new Float32Array(512));
+    for (const [w, h] of sizes) {
+      const l = layout(w, h, full, {});
+      const bins = new Array(20).fill(0);
+      const n = 20000;
+      for (let i = 0; i < n; i++) {
+        const x = lipX(sampleInverse(inv, (i + 0.5) / n), l.lipHalf);
+        // Every draw lands on (or just past) the canvas; spawn inside the kill boundary.
+        expect(Math.abs(x)).toBeLessThan(l.killX);
+        const b = Math.floor(((x + l.halfW) / (2 * l.halfW)) * 20);
+        if (b >= 0 && b < 20) bins[b]++;
+      }
+      // Uniform flow gives every twentieth of the canvas width (edges included) its share.
+      for (const c of bins) expect(c).toBeGreaterThan((n / 20) * 0.9);
+    }
+  });
+
+  it("scales streaks, line width, mist blobs and brightness with the canvas, not in fixed pixels", () => {
+    const ref = layout(2560, 1440, full, {});
+    expect(ref.lineWidth).toBeCloseTo(1.1, 6);
+    expect(ref.gain).toBeCloseTo(1, 6);
+    for (const [w, h] of [...sizes, [3840, 2160], [1920, 1080], [7680, 4320]]) {
+      const l = layout(w, h, full, {});
+      // Streaks span a fixed time of motion in height units: the same fraction of the canvas.
+      expect(l.streak).toBe(ref.streak);
+      // Lines grow with the canvas area past 1440p and never go below a pixel.
+      expect(l.lineWidth).toBeCloseTo(Math.max(1.1, 1.1 * Math.sqrt((w * h) / (2560 * 1440))), 6);
+      // Mist lives in a quarter-res buffer; its blobs are a fixed fraction of that buffer.
+      expect(l.mistW).toBe(Math.max(1, Math.round(w / 4)));
+      expect(l.mistH).toBe(Math.max(1, Math.round(h / 4)));
+      expect(l.mistSize / Math.sqrt(l.mistW * l.mistH)).toBeCloseTo(ref.mistSize / Math.sqrt(ref.mistW * ref.mistH), 6);
+      // Additive brightness per unit of canvas ∝ gain · line width / canvas width: held level
+      // across sizes (within a bounded gain), so small or portrait windows don't blow out.
+      const want = (ref.lineWidth / 2560) * (w / l.lineWidth);
+      expect(l.gain).toBeCloseTo(Math.min(GAIN_MAX, Math.max(GAIN_MIN, want)), 6);
+    }
   });
 });
