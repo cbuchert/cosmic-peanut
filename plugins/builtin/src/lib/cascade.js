@@ -2,6 +2,7 @@
 /**
  * Cascade — pure logic behind the waterfall (tested in cascade.test.js; the shaders mirror it).
  */
+import { createFlashLimiter } from "./flash.js";
 
 /**
  * |wave| resampled to `out.length` texels by point sampling with linear interpolation between the
@@ -135,4 +136,141 @@ export function sampleInverse(inv, u) {
   const j = Math.floor(p);
   const k = j + 1 < inv.length ? j + 1 : j;
   return inv[j] + (inv[k] - inv[j]) * (p - j);
+}
+
+/** Onset pulse decay time constant (s). */
+export const PULSE_TAU = 0.15;
+
+/** Bass surge range: the whole flow scales between these. */
+export const SURGE_MIN = 0.4;
+export const SURGE_MAX = 1.5;
+
+/**
+ * Per-frame audio envelopes that drive the whole fall: `surge` (bass swells the flow, bounded to
+ * [SURGE_MIN, SURGE_MAX]) and `pulse` (an onset pushes a burst of water over the lip, 0–1).
+ */
+export function createEnvelopes() {
+  let surge = 1;
+  let kick = 0;
+  const flash = createFlashLimiter();
+  return {
+    surge: 1,
+    pulse: 0,
+    /**
+     * @param {{bassAtt: number, onset: boolean, onsetStrength: number}} audio
+     * @param {number} dt seconds
+     * @param {boolean} reduceFlashing
+     */
+    step(audio, dt, reduceFlashing) {
+      const b = audio.bassAtt > 0 ? audio.bassAtt : 0;
+      const target = Math.min(SURGE_MAX, Math.max(SURGE_MIN, 0.3 + 0.6 * b));
+      const tau = target > surge ? 0.06 : 0.35;
+      surge += (target - surge) * (1 - Math.exp(-dt / tau));
+      this.surge = surge;
+      const k = audio.onset ? Math.min(1, 0.3 + 0.7 * Math.max(0, audio.onsetStrength)) : 0;
+      kick = Math.max(k, kick * Math.exp(-dt / PULSE_TAU));
+      // The pulse brightens and thickens the whole fall: a full-frame change, so it goes through
+      // the photosensitivity limiter (≤ 3 new rises per second when reduceFlashing is on).
+      this.pulse = flash.step(kick, dt, reduceFlashing);
+    },
+  };
+}
+
+/**
+ * Fixed-timestep clock for the particle update (dt accumulator, as in Cosmic Peanut's push
+ * scheduler): the sim advances in steps of exactly 1/hz seconds, so the fall looks identical at 60
+ * and 120 Hz. After a stall, at most `maxSteps` run and the backlog is dropped (no spiral).
+ * @param {number} hz steps per second
+ * @param {number} maxSteps cap per frame
+ */
+export function createStepper(hz, maxSteps) {
+  let acc = 0;
+  return {
+    /** @param {number} dt seconds since the previous frame @returns {number} steps to run now */
+    step(dt) {
+      acc += dt * hz;
+      let n = Math.floor(acc + 1e-6);
+      acc = Math.max(0, acc - n);
+      if (n > maxSteps) {
+        n = maxSteps;
+        acc = 0;
+      }
+      return n;
+    },
+    reset() {
+      acc = 0;
+    },
+  };
+}
+
+/** Density options (particle counts) and the default, sized for 60 fps at 1440p on an M1 Air. */
+export const DENSITIES = { "16k": 16384, "32k": 32768, "64k": 65536 };
+export const DEFAULT_DENSITY = "32k";
+
+/**
+ * Particle count and state-texture size for a density option: power-of-two width, just enough
+ * rows. Called when the param changes (it allocates), never per frame.
+ * @param {unknown} density
+ */
+export function stateSize(density) {
+  const key = typeof density === "string" && density in DENSITIES ? density : DEFAULT_DENSITY;
+  const count = DENSITIES[/** @type {keyof typeof DENSITIES} */ (key)];
+  const width = 2 ** Math.ceil(Math.log2(Math.sqrt(count)));
+  return { count, width, height: Math.ceil(count / width) };
+}
+
+/** Palette names in manifest order; the first is the default. */
+export const PALETTES = ["glacier", "tropical", "moonlit", "mono"];
+
+/** Four RGB stops per palette at t = 0, 1/3, 2/3, 1: deep/dim water → white highlight. */
+const STOPS = {
+  glacier: [0.05, 0.12, 0.25, 0.2, 0.45, 0.75, 0.6, 0.82, 1.0, 0.92, 0.97, 1.0],
+  tropical: [0.02, 0.18, 0.18, 0.1, 0.55, 0.55, 0.5, 0.92, 0.85, 0.9, 1.0, 0.97],
+  moonlit: [0.08, 0.07, 0.2, 0.3, 0.3, 0.6, 0.7, 0.72, 0.92, 0.95, 0.95, 1.0],
+  mono: [0.15, 0.15, 0.15, 0.45, 0.45, 0.45, 0.75, 0.75, 0.75, 0.97, 0.97, 0.97],
+};
+
+/**
+ * Copy a palette's four stops into `out` (12 floats, for a vec3[4] uniform). Unknown → glacier.
+ * @param {unknown} name
+ * @param {Float32Array} out
+ */
+export function paletteStops(name, out) {
+  const key = typeof name === "string" && name in STOPS ? name : "glacier";
+  const src = STOPS[/** @type {keyof typeof STOPS} */ (key)];
+  for (let i = 0; i < 12; i++) out[i] = src[i];
+  return out;
+}
+
+/**
+ * Colour at t (0 = slow/old/dim water, 1 = fast fresh highlight): piecewise-linear through the
+ * stops. Mirrors `ramp()` in the water shader.
+ * @param {Float32Array} stops from paletteStops
+ * @param {number} t
+ * @param {Float32Array} out length ≥ 3
+ */
+export function paletteRamp(stops, t, out) {
+  const p = Math.min(1, Math.max(0, t)) * 3;
+  const k = Math.min(2, Math.floor(p));
+  const f = p - k;
+  for (let c = 0; c < 3; c++) out[c] = stops[k * 3 + c] + (stops[k * 3 + 3 + c] - stops[k * 3 + c]) * f;
+  return out;
+}
+
+/** Manifest defaults of the motion params (a test keeps them in sync with tidalviz.json). */
+export const DEFAULTS = { spray: 0.6, turbulence: 0.4 };
+
+/**
+ * Effective spray and turbulence. With macOS Reduce motion, params still at their defaults get
+ * calmer values (less bouncing spray, a steadier curtain); anything the user set is respected.
+ * @param {{spray: unknown, turbulence: unknown}} params
+ * @param {boolean} reduceMotion
+ * @param {{spray: number, turbulence: number}} out
+ */
+export function motionParams(params, reduceMotion, out) {
+  const spray = Number(params.spray);
+  const turb = Number(params.turbulence);
+  out.spray = reduceMotion && spray === DEFAULTS.spray ? spray * 0.4 : spray;
+  out.turbulence = reduceMotion && turb === DEFAULTS.turbulence ? turb * 0.3 : turb;
+  return out;
 }

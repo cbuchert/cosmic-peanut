@@ -1,6 +1,19 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { buildInverseCdf, createSeed, resampleAbs, sampleInverse } from "./cascade.js";
+import {
+  buildInverseCdf,
+  createEnvelopes,
+  createSeed,
+  createStepper,
+  DEFAULTS,
+  motionParams,
+  resampleAbs,
+  PALETTES,
+  paletteRamp,
+  paletteStops,
+  sampleInverse,
+  stateSize,
+} from "./cascade.js";
 
 describe("resampleAbs", () => {
   it("point-samples |w| with linear interpolation at every output texel (no averaging)", () => {
@@ -86,6 +99,17 @@ describe("createSeed auto-gain", () => {
   });
 });
 
+describe("createSeed bass scaling", () => {
+  it("scales the whole seed by the bass surge", () => {
+    const lo = createSeed(256);
+    const hi = createSeed(256);
+    run(lo, jagged(0.5), 1, 0.5);
+    run(hi, jagged(0.5), 1, 1.5);
+    expect(hi.mean / lo.mean).toBeGreaterThan(2.5);
+    expect(hi.mean / lo.mean).toBeLessThan(3.1);
+  });
+});
+
 describe("createSeed quiet and silence", () => {
   it("thins to a trickle right after a loud passage turns quiet", () => {
     const s = createSeed(256);
@@ -158,5 +182,167 @@ describe("lip distribution (inverse CDF)", () => {
   it("falls back to uniform for an all-zero seed", () => {
     const hist = spawnHistogram(new Float32Array(32));
     for (let i = 0; i < 32; i++) expect(hist[i]).toBeCloseTo(1 / 32, 2);
+  });
+});
+
+/** @param {Partial<{bassAtt: number, onset: boolean, onsetStrength: number}>} a */
+const frameOf = (a) => ({ bassAtt: 1, onset: false, onsetStrength: 0, ...a });
+
+describe("createEnvelopes", () => {
+  it("surges the flow with bass, bounded for any input", () => {
+    const quiet = createEnvelopes();
+    const heavy = createEnvelopes();
+    const wild = createEnvelopes();
+    for (let t = 0; t < 1; t += 1 / 60) {
+      quiet.step(frameOf({ bassAtt: 0.2 }), 1 / 60, true);
+      heavy.step(frameOf({ bassAtt: 1.8 }), 1 / 60, true);
+      wild.step(frameOf({ bassAtt: 50 }), 1 / 60, true);
+    }
+    expect(heavy.surge).toBeGreaterThan(quiet.surge * 1.8);
+    expect(quiet.surge).toBeGreaterThanOrEqual(0.4);
+    expect(wild.surge).toBeLessThanOrEqual(1.5);
+  });
+  it("pushes a bounded pulse on an onset that dies away within about half a second", () => {
+    const e = createEnvelopes();
+    e.step(frameOf({ onset: true, onsetStrength: 9 }), 1 / 60, false);
+    expect(e.pulse).toBeGreaterThan(0.9);
+    expect(e.pulse).toBeLessThanOrEqual(1);
+    const weak = createEnvelopes();
+    weak.step(frameOf({ onset: true, onsetStrength: 0.1 }), 1 / 60, false);
+    expect(weak.pulse).toBeGreaterThan(0.2);
+    expect(weak.pulse).toBeLessThan(e.pulse);
+    for (let t = 0; t < 0.6; t += 1 / 60) e.step(frameOf({}), 1 / 60, false);
+    expect(e.pulse).toBeLessThan(0.05);
+    expect(e.pulse).toBeGreaterThanOrEqual(0);
+  });
+  it("with reduceFlashing, a 10 Hz onset strobe makes at most 3 pulse rises per second", () => {
+    /** @param {boolean} reduce */
+    const risesPerSecond = (reduce) => {
+      const e = createEnvelopes();
+      /** @type {number[]} */
+      const starts = [];
+      let lo = 0;
+      let rising = false;
+      let hi = 0;
+      for (let f = 0; f < 240; f++) {
+        e.step(frameOf({ onset: f % 6 === 0, onsetStrength: 1 }), 1 / 60, reduce);
+        const v = e.pulse;
+        if (!rising) {
+          lo = Math.min(lo, v);
+          if (v - lo >= 0.1) {
+            starts.push(f / 60);
+            rising = true;
+            hi = v;
+          }
+        } else {
+          hi = Math.max(hi, v);
+          if (hi - v >= 0.1) {
+            rising = false;
+            lo = v;
+          }
+        }
+      }
+      let best = 0;
+      for (const s0 of starts) best = Math.max(best, starts.filter((t) => t >= s0 && t - s0 < 1).length);
+      return best;
+    };
+    expect(risesPerSecond(false)).toBeGreaterThanOrEqual(9);
+    expect(risesPerSecond(true)).toBeLessThanOrEqual(3);
+  });
+});
+
+describe("createStepper (fixed timestep)", () => {
+  it("runs the same number of sim steps per second at 60 Hz and 120 Hz display rates", () => {
+    const a = createStepper(120, 4);
+    const b = createStepper(120, 4);
+    let na = 0;
+    let nb = 0;
+    for (let f = 0; f < 60 * 3; f++) na += a.step(1 / 60);
+    for (let f = 0; f < 120 * 3; f++) nb += b.step(1 / 120);
+    expect(na).toBe(360);
+    expect(nb).toBe(360);
+    // Uneven frame times still add up.
+    const c = createStepper(120, 4);
+    let nc = 0;
+    for (let f = 0; f < 100; f++) nc += c.step(f % 2 ? 0.011 : 0.022);
+    expect(nc).toBe(Math.floor(((0.011 + 0.022) * 50 * 120) + 1e-9));
+  });
+
+  it("caps substeps after a long frame and drops the backlog instead of spiralling", () => {
+    const s = createStepper(120, 4);
+    expect(s.step(0.1)).toBe(4);
+    expect(s.step(1 / 120)).toBe(1);
+    expect(s.step(0)).toBe(0);
+  });
+});
+
+describe("stateSize", () => {
+  it("maps the density option to a particle count and a power-of-two-wide state texture", () => {
+    expect(stateSize("16k")).toEqual({ count: 16384, width: 128, height: 128 });
+    expect(stateSize("32k")).toEqual({ count: 32768, width: 256, height: 128 });
+    expect(stateSize("64k")).toEqual({ count: 65536, width: 256, height: 256 });
+  });
+
+  it("falls back to the default for anything else", () => {
+    expect(stateSize("lots")).toEqual(stateSize("32k"));
+    expect(stateSize(undefined)).toEqual(stateSize("32k"));
+  });
+});
+
+describe("palettes", () => {
+  const lum = (/** @type {Float32Array} */ c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+
+  it("offers glacier (default), tropical, moonlit and mono", () => {
+    expect(PALETTES).toEqual(["glacier", "tropical", "moonlit", "mono"]);
+    const unknown = paletteStops("neon", new Float32Array(12));
+    expect([...unknown]).toEqual([...paletteStops("glacier", new Float32Array(12))]);
+  });
+
+  it("ramps from dim water to a near-white highlight, brightening monotonically", () => {
+    const stops = new Float32Array(12);
+    const c = new Float32Array(3);
+    for (const name of PALETTES) {
+      paletteStops(name, stops);
+      let prev = -1;
+      for (let t = 0; t <= 1.0001; t += 0.05) {
+        const l = lum(paletteRamp(stops, t, c));
+        expect(l, `${name} @ ${t}`).toBeGreaterThanOrEqual(prev - 1e-6);
+        prev = l;
+      }
+      expect(lum(paletteRamp(stops, 0, c)), name).toBeLessThan(0.3);
+      paletteRamp(stops, 1, c);
+      expect(Math.min(c[0], c[1], c[2]), name).toBeGreaterThan(0.8);
+    }
+  });
+
+  it("keeps glacier white-blue and mono grey", () => {
+    const stops = new Float32Array(12);
+    const c = new Float32Array(3);
+    paletteRamp(paletteStops("glacier", stops), 0.5, c);
+    expect(c[2]).toBeGreaterThan(c[0]);
+    paletteRamp(paletteStops("mono", stops), 0.4, c);
+    expect(c[0]).toBeCloseTo(c[1], 6);
+    expect(c[1]).toBeCloseTo(c[2], 6);
+  });
+});
+
+describe("motionParams (reduceMotion)", () => {
+  const out = { spray: 0, turbulence: 0 };
+
+  it("passes spray and turbulence through when reduceMotion is off", () => {
+    motionParams({ spray: DEFAULTS.spray, turbulence: DEFAULTS.turbulence }, false, out);
+    expect(out).toEqual({ spray: DEFAULTS.spray, turbulence: DEFAULTS.turbulence });
+  });
+
+  it("calms spray and turbulence left at their defaults when reduceMotion is on", () => {
+    motionParams({ spray: DEFAULTS.spray, turbulence: DEFAULTS.turbulence }, true, out);
+    expect(out.spray).toBeLessThan(DEFAULTS.spray * 0.6);
+    expect(out.spray).toBeGreaterThan(0);
+    expect(out.turbulence).toBeLessThan(DEFAULTS.turbulence * 0.5);
+  });
+
+  it("respects values the user chose, even with reduceMotion", () => {
+    motionParams({ spray: 0.9, turbulence: 0.8 }, true, out);
+    expect(out).toEqual({ spray: 0.9, turbulence: 0.8 });
   });
 });
