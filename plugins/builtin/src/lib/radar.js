@@ -95,6 +95,111 @@ export function inWedge(bearing, start, span) {
 /** Radius (fraction of the scope) of band 0 and band 63; beyond these the spectrum fades out. */
 export const R_INNER = 0.06;
 export const R_OUTER = 0.95;
+/** Lowest frequency drawn (Hz), at R_INNER; the top one (the `maxFreq` param) sits at R_OUTER. */
+export const F_MIN = 40;
+
+/**
+ * Radius (0–1 of the scope) of frequency `hz` on a log scale: F_MIN at R_INNER, `maxHz` at
+ * R_OUTER, every octave the same width.
+ * @param {number} hz
+ * @param {number} maxHz
+ */
+export function radiusOfFreq(hz, maxHz) {
+  return R_INNER + ((R_OUTER - R_INNER) * Math.log(hz / F_MIN)) / Math.log(maxHz / F_MIN);
+}
+
+/** Inverse of radiusOfFreq. @param {number} r @param {number} maxHz */
+export function freqAtRadius(r, maxHz) {
+  return F_MIN * Math.pow(maxHz / F_MIN, (r - R_INNER) / (R_OUTER - R_INNER));
+}
+
+/** Magnitude at fractional bin position `x` (linear between bins; 0 outside the spectrum). */
+function lerpBin(/** @type {ArrayLike<number>} */ s, /** @type {number} */ x) {
+  const len = s.length;
+  if (x < 0 || x > len - 1) return 0;
+  const i = Math.min(len - 2, Math.floor(x));
+  const f = x - i;
+  return s[i] + (s[i + 1] - s[i]) * f;
+}
+
+/**
+ * Resample a linear magnitude spectrum onto the phosphor's radial texels on the log-frequency scale
+ * (radiusOfFreq). Texel k covers radii [k/n, (k+1)/n], i.e. a band of fractional bins [b0, b1]:
+ * it takes the max of the bins inside it and of the spectrum interpolated at both edges, so a
+ * narrow partial keeps its full strength however many bins a texel spans, and texels narrower than
+ * a bin interpolate smoothly. Radii below F_MIN or above `maxHz` are black. Allocation-free.
+ * @param {ArrayLike<number>} spectrum `audio.spectrum` (any length; bin i ≈ i · (sampleRate/2) / length Hz)
+ * @param {number} sampleRate
+ * @param {number} maxHz frequency at R_OUTER
+ * @param {Float32Array} out one value per radial texel
+ */
+export function spectrumColumn(spectrum, sampleRate, maxHz, out) {
+  const n = out.length;
+  const len = spectrum.length;
+  const binsPerHz = (2 * len) / sampleRate;
+  for (let k = 0; k < n; k++) {
+    const r0 = Math.max(R_INNER, k / n);
+    const r1 = Math.min(R_OUTER, (k + 1) / n);
+    if (r1 <= r0 || len < 2) {
+      out[k] = 0;
+      continue;
+    }
+    const b0 = freqAtRadius(r0, maxHz) * binsPerHz;
+    const b1 = freqAtRadius(r1, maxHz) * binsPerHz;
+    let v = Math.max(lerpBin(spectrum, b0), lerpBin(spectrum, b1));
+    const hi = Math.min(len - 1, Math.floor(b1));
+    for (let i = Math.max(0, Math.ceil(b0)); i <= hi; i++) if (spectrum[i] > v) v = spectrum[i];
+    out[k] = v;
+  }
+  return out;
+}
+
+/** Auto-gain: the reference level never drops below REF_MIN dB (at most this much boost). */
+export const REF_MIN = -40;
+/** Auto-gain time constants (s): rising to a louder passage, and relaxing after it. */
+const AGC_ATTACK = 1;
+const AGC_RELEASE = 6;
+
+/**
+ * Magnitude → phosphor brightness in dB: `floorDb` (negative) below the reference level is black,
+ * the reference is full brightness, linear in dB between. The reference is a slow auto-gain on the
+ * column's peak (between REF_MIN and 0 dB), so quiet tracks still show and loud ones don't
+ * saturate. Deterministic and allocation-free.
+ */
+export function createLevel() {
+  const l = {
+    /** Reference level, dB: follows the loudest texel, slowly (AGC_ATTACK / AGC_RELEASE). */
+    ref: 0,
+    /**
+     * @param {Float32Array} column linear magnitudes (spectrumColumn)
+     * @param {number} dt seconds
+     * @param {number} floorDb e.g. −60
+     * @param {number} gain brightness multiplier
+     * @param {Float32Array} out brightness per texel
+     */
+    step(column, dt, floorDb, gain, out) {
+      const range = Math.max(1, -floorDb);
+      let peak = 0;
+      for (let k = 0; k < column.length; k++) if (column[k] > peak) peak = column[k];
+      const peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+      // Hold through silence (nothing above the floor), so a pause doesn't blow the gain up.
+      if (peakDb > l.ref - range) {
+        const target = Math.min(0, Math.max(REF_MIN, peakDb));
+        const tau = target > l.ref ? AGC_ATTACK : AGC_RELEASE;
+        l.ref += (target - l.ref) * (1 - Math.exp(-dt / tau));
+      }
+      const lo = l.ref - range;
+      for (let k = 0; k < column.length; k++) {
+        const m = column[k];
+        const db = m > 0 ? 20 * Math.log10(m) : -Infinity;
+        out[k] = Math.min(1, Math.max(0, (db - lo) / range)) * gain;
+      }
+      return out;
+    },
+  };
+  return l;
+}
+
 /** Band levels below this are silence (the analyzer's noise floor), so a quiet scope is dark. */
 export const GATE = 0.06;
 

@@ -22,6 +22,11 @@ import {
   radiusOfBand,
   REDUCED_SPEED,
   sweptWedge,
+  F_MIN,
+  radiusOfFreq,
+  freqAtRadius,
+  spectrumColumn,
+  createLevel,
 } from "./radar.js";
 
 /** @param {Partial<import('./radar.js').SweepInput>} o */
@@ -140,6 +145,147 @@ describe("sweptWedge", () => {
     expect(w[1]).toBeCloseTo(0.3, 6);
     expect(inWedge(0.02, w[0], w[1])).toBe(true);
     expect(inWedge(0.06, w[0], w[1])).toBe(false);
+  });
+});
+
+describe("radiusOfFreq", () => {
+  it("maps frequency on a log scale: lowest at the inner radius, maxFreq at the rim, monotonic", () => {
+    for (const max of [4000, 8000, 16000]) {
+      expect(radiusOfFreq(F_MIN, max)).toBeCloseTo(R_INNER, 6);
+      expect(radiusOfFreq(max, max)).toBeCloseTo(R_OUTER, 6);
+      // Every octave takes the same radial distance.
+      const oct = radiusOfFreq(2 * F_MIN, max) - radiusOfFreq(F_MIN, max);
+      expect(radiusOfFreq(1000, max) - radiusOfFreq(500, max)).toBeCloseTo(oct, 6);
+      let prev = -Infinity;
+      for (let f = F_MIN; f <= max; f *= 1.05) {
+        const r = radiusOfFreq(f, max);
+        expect(r).toBeGreaterThan(prev);
+        expect(freqAtRadius(r, max)).toBeCloseTo(f, 3);
+        prev = r;
+      }
+    }
+  });
+});
+
+describe("spectrumColumn", () => {
+  const SR = 48000;
+  const N = 512;
+
+  it("puts a single strong bin at its frequency's radius at full strength, for any spectrum length", () => {
+    for (const len of [1024, 512, 2048]) {
+      const binHz = SR / 2 / len;
+      const spec = new Float32Array(len);
+      const out = new Float32Array(N);
+      // Low bins (wider than a texel) to high ones (many bins per texel).
+      for (const hz of [60, 110, 440, 1000, 3100, 9000, 14000]) {
+        const i = Math.round(hz / binHz);
+        spec.fill(0);
+        spec[i] = 0.8;
+        spectrumColumn(spec, SR, 16000, out);
+        const k = Math.floor(radiusOfFreq(i * binHz, 16000) * N);
+        expect(Math.max(out[k - 1], out[k], out[k + 1]), `${len} ${hz} Hz`).toBeCloseTo(0.8, 6);
+        const peak = out.indexOf(Math.max(...out));
+        expect(Math.abs(peak - k), `${len} ${hz} Hz`).toBeLessThanOrEqual(1);
+        // Far from the partial the column is dark.
+        for (let j = 0; j < N; j++) {
+          const f = freqAtRadius((j + 0.5) / N, 16000);
+          if (Math.abs(f - i * binHz) > 3 * binHz + f * 0.05) expect(out[j], `${len} ${hz} Hz texel ${j}`).toBe(0);
+        }
+      }
+    }
+  });
+
+  it("interpolates smoothly where a texel is narrower than a bin", () => {
+    const spec = new Float32Array(1024);
+    spec[3] = 0.2;
+    spec[4] = 0.6;
+    const out = spectrumColumn(spec, SR, 16000, new Float32Array(N));
+    const binHz = SR / 2048;
+    const k = Math.floor(radiusOfFreq(3.5 * binHz, 16000) * N);
+    expect(out[k]).toBeGreaterThan(0.3);
+    expect(out[k]).toBeLessThan(0.5);
+  });
+
+  it("is black inside the lowest frequency and past maxFreq", () => {
+    const out = spectrumColumn(new Float32Array(1024).fill(0.5), SR, 4000, new Float32Array(N).fill(9));
+    for (let k = 0; k < N; k++) {
+      const r = (k + 1) / N;
+      const r0 = k / N;
+      if (r <= R_INNER || r0 >= R_OUTER) expect(out[k], `texel ${k}`).toBe(0);
+      else expect(out[k], `texel ${k}`).toBeCloseTo(0.5, 6);
+    }
+  });
+});
+
+describe("createLevel", () => {
+  const N = 64;
+  /** Run `seconds` of a steady column at `hz`; return the last output. */
+  const settle = (/** @type {Float32Array} */ col, floor = -60, seconds = 10, hz = 60, lvl = createLevel()) => {
+    const out = new Float32Array(col.length);
+    for (let f = 0; f < seconds * hz; f++) lvl.step(col, 1 / hz, floor, 1, out);
+    return out;
+  };
+
+  it("maps magnitude to brightness in dB: silence → 0, full scale → ~1, monotonic in between", () => {
+    const lvl = createLevel();
+    const out = new Float32Array(N);
+    const col = new Float32Array(N);
+    for (let f = 0; f < 600; f++) lvl.step(col, 1 / 60, -60, 1, out);
+    expect(Math.max(...out)).toBe(0);
+    // A ramp from −90 dB to 0 dB.
+    for (let k = 0; k < N; k++) col[k] = Math.pow(10, (-90 + (90 * k) / (N - 1)) / 20);
+    const v = settle(col);
+    expect(v[N - 1]).toBeGreaterThan(0.95);
+    expect(v[0]).toBe(0);
+    for (let k = 1; k < N; k++) expect(v[k]).toBeGreaterThanOrEqual(v[k - 1]);
+    // Linear in dB above the floor: −30 dB is about halfway with a −60 dB floor.
+    const at30 = v[Math.round(((90 - 30) / 90) * (N - 1))];
+    expect(at30).toBeGreaterThan(0.4);
+    expect(at30).toBeLessThan(0.6);
+  });
+
+  it("auto-gains slowly: a quiet track still shows, a loud one doesn't saturate, silence holds", () => {
+    const col = new Float32Array(N);
+    const db = (/** @type {number} */ d) => Math.pow(10, d / 20);
+    // Quiet track: peak at −45 dB, a partial at −60 dB. Adapted, the peak is near full brightness
+    // and the partial is still visible.
+    col[10] = db(-45);
+    col[20] = db(-60);
+    const quiet = settle(col, -60, 30);
+    expect(quiet[10]).toBeGreaterThan(0.9);
+    expect(quiet[20]).toBeGreaterThan(0.5);
+    // Loud track: its peak is full and a −20 dB partial is clearly below it.
+    col[10] = 1;
+    col[20] = db(-20);
+    const loud = settle(col);
+    expect(loud[10]).toBeGreaterThan(0.95);
+    expect(loud[20]).toBeLessThan(0.8);
+    // The gain moves slowly: one frame of a loud hit after the quiet track barely changes it.
+    const lvl = createLevel();
+    col[10] = db(-45);
+    col[20] = 0;
+    settle(col, -60, 10, 60, lvl);
+    const ref = lvl.ref;
+    col[10] = 1;
+    lvl.step(col, 1 / 60, -60, 1, new Float32Array(N));
+    expect(Math.abs(lvl.ref - ref)).toBeLessThan(3);
+    // A pause doesn't blow the gain up: after a loud passage and 10 s of silence, a −70 dB hiss
+    // stays black.
+    col[10] = 1;
+    settle(col, -60, 10, 60, lvl);
+    col.fill(0);
+    settle(col, -60, 10, 60, lvl);
+    col[5] = db(-70);
+    lvl.step(col, 1 / 60, -60, 1, (quiet.fill(0), quiet));
+    expect(quiet[5]).toBe(0);
+    // Frame-rate independent.
+    col.fill(0);
+    col[10] = db(-30);
+    const a = createLevel();
+    const b = createLevel();
+    settle(col, -60, 3, 60, a);
+    settle(col, -60, 3, 120, b);
+    expect(a.ref).toBeCloseTo(b.ref, 3);
   });
 });
 
