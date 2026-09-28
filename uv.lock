@@ -786,7 +786,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.14.3" },
-    { name = "catap", specifier = ">=0.6.0" },
+    { name = "catap", specifier = "~=0.6.0" },
     { name = "dulwich", specifier = ">=1.2.15" },
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "numpy", specifier = ">=2.5.3" },

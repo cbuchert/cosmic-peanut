@@ -3,6 +3,32 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Host CPU (2026-09-27)
+
+Measured with `uv run python -m tools.cpu_budget` (headless host, WebSocket client in a separate
+process so its CPU isn't counted) and an in-process sampler for the app with its window.
+
+| Setup | Host process CPU |
+| --- | --- |
+| Headless, live TIDAL, before this work | ~7–8.6% (the earlier "~15%" probe counted its in-process client) |
+| Headless, live TIDAL, after | **6.6%** — analysis 2.8, main/asyncio 1.5, catap drain 1.3, catap worker 0.8 |
+| App with window, live TIDAL, after | 13.8% |
+| App with window, live TIDAL, before (old code) | 23.3% |
+
+- **Our code meets the < 10% budget.** The remaining ~7 points in the app are WKWebView's UI
+  process, which lives in the host process and handles WebKit's per-frame layer commits and IPC
+  at 60 fps. Getting the combined number under 10% would mean running the host in a separate
+  process from the window — not done; it would meet the budget's letter, not its intent.
+- **catap drain pacing** (`capture/catap_drain.py`): catap 0.6 polls its native ring every 1 ms
+  (~1,000 wakeups/s for ~94 chunks). A wrapper around the private
+  `AudioRecorder._drain_native_recorder` sleeps until just before the next chunk is due. It's
+  guarded (no method ⇒ warning, catap untouched) and catap is pinned `~=0.6.0` so an upgrade is a
+  deliberate step. This was most of the window-app improvement.
+- Analysis: fewer, fused numpy calls per hop; planar mirrored ring with a zero-copy view of the
+  newest frames; float32 spectrum after the float64 FFT. Golden-value tests pinned the outputs
+  first. Analysis p50 ≈ 0.20–0.23 ms live.
+- Tried and dropped: a lock-as-doorbell instead of the ring's Condition — no measurable gain.
+
 ## Integration — app, bench, e2e (2026-09-26)
 
 - **Plugins were stuck at 20 fps in the app.** The shell's iframes ignore the pointer (so the
