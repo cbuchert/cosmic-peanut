@@ -347,8 +347,10 @@ describe("stateSize", () => {
   });
 
   it("falls back to the default for anything else", () => {
-    expect(stateSize("lots")).toEqual(stateSize("32k"));
-    expect(stateSize(undefined)).toEqual(stateSize("32k"));
+    // 64k since the fall fills the window (was 32k for the centred block): the larger curtain
+    // reads as rain rather than water at 32k (measured cost at 1440p on an M1: ~2.0 vs ~1.25 ms GPU).
+    expect(stateSize("lots")).toEqual(stateSize("64k"));
+    expect(stateSize(undefined)).toEqual(stateSize("64k"));
   });
 });
 

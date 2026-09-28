@@ -15,6 +15,11 @@
  *  4. Spray also splats into a quarter-res mist buffer that drifts, decays and is blurred.
  *  5. Composite: water over mist, tone-mapped, premultiplied with alpha = max(r, g, b).
  *
+ * Layout (lib/cascade.js `layout`, unit-tested): by default the lip spans the whole window just
+ * above the top edge (a little past each side, so no gap opens at the edges) and the pool sits on
+ * the bottom edge, for any aspect; the width/height params narrow and shorten it as fractions.
+ * Line width, mist blob size and a brightness compensation follow the canvas size.
+ *
  * State textures are RGBA32F when EXT_color_buffer_float is available (every WebGL2 GPU on macOS);
  * the fallback is RGBA16F via EXT_color_buffer_half_float (positions then quantise to ~1/2048 of
  * the screen height, still sub-pixel near the top); without either, create() throws a clear error.
@@ -25,6 +30,7 @@ import {
   createEnvelopes,
   createSeed,
   createStepper,
+  layout,
   motionParams,
   paletteStops,
   stateSize,
@@ -35,8 +41,6 @@ const SEED_N = 256;
 const INV_N = 512;
 const SIM_HZ = 120;
 const MAX_STEPS = 4;
-const MIST_DIV = 4;
-const POOL_Y = 0.1;
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
@@ -149,8 +153,7 @@ export default async function create(ctx) {
   function resize() {
     const { width: w, height: h } = ctx.size;
     waterTarget.resize(w, h);
-    const mw = Math.max(1, Math.round(w / MIST_DIV));
-    const mh = Math.max(1, Math.round(h / MIST_DIV));
+    const { mistW: mw, mistH: mh } = layout(w, h, ctx.params, L);
     mistCur.resize(mw, mh);
     mistTmp.resize(mw, mh);
     mistOut.resize(mw, mh);
@@ -170,6 +173,8 @@ export default async function create(ctx) {
   const stops = new Float32Array(12);
   const mistColor = new Float32Array(3);
   const motion = { spray: 0, turbulence: 0 };
+  /** @type {Partial<import('./lib/cascade.js').Layout>} */
+  const L = {};
   let simStep = 0;
   let simTime = 0;
   let clock = 0;
@@ -214,8 +219,8 @@ export default async function create(ctx) {
       const rate = flow * (14 * seed.mean + 5 * env.pulse * (0.3 + seed.mean));
       // Every particle starts dead; ramp the first 1.5 s so the lip doesn't dump them all at once.
       const spawn = (1 - Math.exp(-rate * stepDt)) * Math.min(1, clock / 1.5);
-      const halfW = aspect / 2;
-      const lipHalf = Number(p.width) * Math.min(halfW, 1.1) * 0.85;
+      // Full-window layout in height units (lib/cascade.js): lip across the top, pool on the bottom.
+      const lay = layout(w, h, p, L);
       const steps = stepper.step(dt);
       if (steps > 0) {
         gl.useProgram(update.program);
@@ -232,10 +237,11 @@ export default async function create(ctx) {
         gl.uniform1f(u.u_turb, motion.turbulence);
         gl.uniform1f(u.u_spray, motion.spray);
         gl.uniform1f(u.u_pulse, env.pulse);
-        gl.uniform1f(u.u_lipY, Number(p.height));
-        gl.uniform1f(u.u_lipHalf, lipHalf);
-        gl.uniform1f(u.u_poolY, POOL_Y);
-        gl.uniform1f(u.u_halfW, halfW);
+        gl.uniform1f(u.u_lipY, lay.lipY);
+        gl.uniform1f(u.u_lipHalf, lay.lipHalf);
+        gl.uniform1f(u.u_poolY, lay.poolY);
+        gl.uniform1f(u.u_floorY, lay.floorY);
+        gl.uniform1f(u.u_killX, lay.killX);
         gl.activeTexture(gl.TEXTURE2);
         gl.bindTexture(gl.TEXTURE_2D, seedTex);
         gl.activeTexture(gl.TEXTURE3);
@@ -274,11 +280,11 @@ export default async function create(ctx) {
       gl.uniform1i(water.u.u_count, count);
       gl.uniform1f(water.u.u_aspect, aspect);
       gl.uniform2f(water.u.u_px, 1 / h, 1 / h);
-      gl.uniform1f(water.u.u_streak, 0.1);
-      gl.uniform1f(water.u.u_width, Math.max(1, h / 1440) * 1.1);
+      gl.uniform1f(water.u.u_streak, lay.streak);
+      gl.uniform1f(water.u.u_width, lay.lineWidth);
       gl.uniform3fv(water.u.u_stops, stops);
       // Denser settings draw more streaks: keep total brightness roughly constant across them.
-      gl.uniform1f(water.u.u_gain, 0.45 * Math.sqrt(32768 / count) * (1 + 0.35 * env.pulse));
+      gl.uniform1f(water.u.u_gain, 0.7 * lay.gain * Math.sqrt(32768 / count) * (1 + 0.35 * env.pulse));
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
 
       // 4. Mist: advect last frame's mist, splat spray into it, blur twice.
@@ -301,8 +307,8 @@ export default async function create(ctx) {
       gl.uniform1i(mist.u.u_s1, 1);
       gl.uniform1i(mist.u.u_count, count);
       gl.uniform1f(mist.u.u_aspect, aspect);
-      gl.uniform1f(mist.u.u_poolY, POOL_Y);
-      gl.uniform1f(mist.u.u_size, Math.max(4, mistCur.height / 16));
+      gl.uniform1f(mist.u.u_poolY, lay.poolY);
+      gl.uniform1f(mist.u.u_size, Math.max(3, lay.mistSize));
       gl.uniform1f(mist.u.u_gain, 0.02 * k * Math.sqrt(32768 / count));
       gl.drawArrays(gl.POINTS, 0, count);
       gl.disable(gl.BLEND);

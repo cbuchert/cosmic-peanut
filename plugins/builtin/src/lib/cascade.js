@@ -209,9 +209,9 @@ export function createStepper(hz, maxSteps) {
   };
 }
 
-/** Density options (particle counts) and the default, sized for 60 fps at 1440p on an M1 Air. */
+/** Density options (particle counts) and the default, sized for 60 fps at 1440p on an M1 Air (64k: ~2 ms GPU filling the window). */
 export const DENSITIES = { "16k": 16384, "32k": 32768, "64k": 65536 };
-export const DEFAULT_DENSITY = "32k";
+export const DEFAULT_DENSITY = "64k";
 
 /**
  * Particle count and state-texture size for a density option: power-of-two width, just enough
@@ -307,7 +307,7 @@ export function triggerIndex(wave, search) {
 }
 
 /** Where the lip sits: just above the top edge, so the pour enters from outside the window. */
-export const LIP_TOP = 1.02;
+export const LIP_TOP = 1.005;
 /** How far the full-width lip reaches past each side (fraction of the half-width), so turbulence
  * and fan-out carry water in from off-screen instead of opening a gap at the edges. */
 export const OVERSCAN = 0.04;
@@ -352,7 +352,7 @@ export const GAIN_MAX = 2;
  * and `height` shortens the drop, both as fractions. Writes into `out` (allocates nothing).
  * @param {number} w canvas width (px)
  * @param {number} h canvas height (px)
- * @param {{width: unknown, height: unknown}} params
+ * @param {Readonly<Record<string, unknown>>} params `width` and `height`, 0–1
  * @param {Partial<Layout>} out
  * @returns {Layout}
  */
