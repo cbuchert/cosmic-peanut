@@ -247,7 +247,12 @@ def test_radar_manifest():
     assert params["palette"]["default"] == "green"
     # The spectrogram's dB floor (below the auto-gain reference) and top frequency (radar.js maxHzOf).
     floor = params["floor"]
-    assert (floor["type"], floor["min"], floor["max"], floor["default"]) == ("number", -80, -30, -60)
+    assert (floor["type"], floor["min"], floor["max"], floor["default"]) == (
+        "number",
+        -80,
+        -30,
+        -60,
+    )
     assert params["maxFreq"]["options"] == ["4k", "8k", "16k"]
     assert "contacts" not in params
     for f in ("fullscreen.vert", "paint.frag", "composite.frag"):
