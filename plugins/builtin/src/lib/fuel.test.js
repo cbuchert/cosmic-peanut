@@ -1,6 +1,7 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createAttacks, createBandGain, mapMirrored, shapeLevel } from "./fuel.js";
+import { createAutoGain, resampleSeed } from "./fire.js";
+import { createAttacks, createBandGain, createFeed, mapMirrored, shapeLevel } from "./fuel.js";
 
 const DT = 1 / 60;
 
@@ -155,5 +156,69 @@ describe("createAttacks", () => {
     const b = sample(120);
     expect(Math.max(...a)).toBeGreaterThan(0.5);
     for (let i = 0; i < a.length; i++) expect(Math.abs(a[i] - b[i])).toBeLessThan(0.15);
+  });
+});
+
+/** A minimal audio frame for the feed. */
+function frame(/** @type {Float32Array} */ bands, /** @type {Float32Array} */ waveform, silent = false) {
+  return { bands, waveform, silent };
+}
+
+describe("createFeed", () => {
+  it("waveform feed is the old behaviour: resampled |w| × the loudness auto-gain, no jets", () => {
+    const f = createFeed(256, 64);
+    const ref = createAutoGain();
+    const mag = new Float32Array(256);
+    const signed = new Float32Array(256);
+    const bands = new Float32Array(64).fill(0.9);
+    const wave = new Float32Array(2048);
+    for (let k = 0; k < 30; k++) {
+      for (let i = 0; i < 2048; i++) wave[i] = 0.4 * Math.sin((i + k * 800) * 0.05);
+      f.step(frame(bands, wave), DT, "waveform", 1, false);
+      resampleSeed(wave, mag, signed);
+      const g = ref.step(Math.max(...mag), DT);
+      for (let i = 0; i < 256; i += 17) expect(f.fuel[i]).toBeCloseTo(mag[i] * g, 5);
+      for (const j of f.jet) expect(j).toBe(0);
+    }
+  });
+
+  it("spectrum feed: the EQ is the height profile (bass centre, highs edges); the waveform only textures it", () => {
+    const f = createFeed(256, 64);
+    const bands = new Float32Array(64).map((_, i) => (i < 10 ? 0.9 : 0.05));
+    const wave = new Float32Array(2048);
+    const lo = new Float32Array(256).fill(Infinity);
+    const hi = new Float32Array(256);
+    for (let k = 0; k < 180; k++) {
+      for (let i = 0; i < 2048; i++) wave[i] = 0.5 * Math.sin((i + k * 700) * 0.03);
+      f.step(frame(bands, wave), DT, "spectrum", 1, false);
+      if (k < 120) continue;
+      for (let i = 0; i < 256; i++) {
+        lo[i] = Math.min(lo[i], f.fuel[i]);
+        hi[i] = Math.max(hi[i], f.fuel[i]);
+      }
+    }
+    for (const i of [120, 127, 128, 135]) expect(lo[i]).toBeGreaterThan(0.6); // the bass column
+    for (const i of [0, 40, 215, 255]) expect(hi[i]).toBeLessThan(0.05); // quiet highs smoulder
+    for (let i = 0; i < 256; i++) if (hi[i] > 0.1) expect(lo[i] / hi[i]).toBeGreaterThan(0.6); // texture, bounded
+    for (const j of f.jet) expect(j).toBeLessThan(0.01); // steady: no jets
+  });
+
+  it("spectrum feed: a kick jets the centre, a hat jets the edges", () => {
+    const f = createFeed(256, 64);
+    const bands = new Float32Array(64).fill(0.2);
+    const wave = new Float32Array(2048);
+    for (let k = 0; k < 120; k++) f.step(frame(bands, wave), DT, "spectrum", 1, false);
+    for (let i = 0; i < 8; i++) bands[i] = 1; // kick
+    f.step(frame(bands, wave), DT, "spectrum", 1, false);
+    f.step(frame(bands, wave), DT, "spectrum", 1, false);
+    expect(f.jet[127]).toBeGreaterThan(0.5);
+    expect(f.jet[0]).toBeLessThan(0.01);
+    for (let k = 0; k < 60; k++) f.step(frame(bands, wave), DT, "spectrum", 1, false);
+    for (let i = 56; i < 64; i++) bands[i] = 1; // hat
+    f.step(frame(bands, wave), DT, "spectrum", 1, false);
+    f.step(frame(bands, wave), DT, "spectrum", 1, false);
+    expect(f.jet[0]).toBeGreaterThan(0.5);
+    expect(f.jet[255]).toBeGreaterThan(0.5);
+    expect(f.jet[127]).toBeLessThan(0.01);
   });
 });

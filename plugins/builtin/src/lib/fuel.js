@@ -4,6 +4,7 @@
  * the fire's fuel line (mirrored, bass at the centre), transient jets and a gated, expanded height
  * profile. GPU side: shaders/blaze/.
  */
+import { createAutoGain, resampleSeed } from "./fire.js";
 
 /**
  * Spread the bands across the fuel line, mirrored: band 0 (the lowest) at the centre, the highest
@@ -163,6 +164,81 @@ export function createAttacks(count) {
       since.fill(1e9);
       active.fill(0);
       last.fill(0);
+    },
+  };
+}
+
+/** Waveform flicker on the spectrum feed: ± this fraction of the fuel. */
+const TEXTURE = 0.2;
+/** The overall loudness reference for jet detection: slow attack and release (s), and a floor. */
+const DETECT_ATTACK = 0.8;
+const DETECT_RELEASE = 4;
+const DETECT_FLOOR = 0.1;
+
+/**
+ * The fire's per-frame feed: fills `fuel` (fuel-line level per texel, ≥ 0) and `jet` (transient
+ * jet strength per texel, 0–2) from one audio frame. Everything is preallocated here.
+ * - "waveform": the original Blaze feed, the newest waveform resampled across the line (|w|) times
+ *   a loudness auto-gain; no jets.
+ * - "spectrum": the bands, auto-gained per band (createBandGain), gated and expanded
+ *   (shapeLevel), mapped mirrored across the line (bass at the centre), times a ±TEXTURE flicker
+ *   from the waveform under each texel. Jets come from createAttacks on the bands scaled by a
+ *   slow overall loudness reference (so a kick after a quiet bar is a big rise, while the height
+ *   normalisation reacts at once), mapped the same way.
+ * @param {number} size fuel-line texels
+ * @param {number} count host bands
+ */
+export function createFeed(size, count) {
+  const fuel = new Float32Array(size);
+  const jet = new Float32Array(size);
+  const mag = new Float32Array(size);
+  const signed = new Float32Array(size);
+  const waveGain = createAutoGain();
+  const bandGain = createBandGain(count);
+  const attacks = createAttacks(count);
+  const norm = new Float32Array(count);
+  const det = new Float32Array(count);
+  const jets = new Float32Array(count);
+  let ref = 0;
+  return {
+    fuel,
+    jet,
+    /**
+     * @param {{ bands: ArrayLike<number>, waveform: ArrayLike<number>, silent: boolean }} audio
+     * @param {number} dt seconds
+     * @param {string} feed "spectrum" | "waveform"
+     * @param {number} reactivity 0–2
+     * @param {boolean} reduceFlashing
+     */
+    step(audio, dt, feed, reactivity, reduceFlashing) {
+      resampleSeed(audio.waveform, mag, signed);
+      let peak = 0;
+      for (let i = 0; i < size; i++) if (mag[i] > peak) peak = mag[i];
+      const g = audio.silent ? 0 : waveGain.step(peak, dt);
+      if (feed === "waveform") {
+        for (let i = 0; i < size; i++) fuel[i] = mag[i] * g;
+        jet.fill(0);
+        return;
+      }
+      const bands = audio.bands;
+      const r = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
+      bandGain.step(bands, dt, norm);
+      let top = 0;
+      for (let i = 0; i < count; i++) {
+        const v = audio.silent ? 0 : bands[i];
+        if (v > top) top = v;
+        norm[i] = audio.silent ? 0 : shapeLevel(norm[i], r);
+      }
+      ref += (top - ref) * (1 - Math.exp(-dt / (top > ref ? DETECT_ATTACK : DETECT_RELEASE)));
+      const inv = 1 / (ref > DETECT_FLOOR ? ref : DETECT_FLOOR);
+      for (let i = 0; i < count; i++) det[i] = audio.silent ? 0 : bands[i] * inv;
+      attacks.step(det, dt, r, reduceFlashing, jets);
+      mapMirrored(norm, fuel);
+      mapMirrored(jets, jet);
+      for (let i = 0; i < size; i++) {
+        const w = mag[i] * g;
+        fuel[i] *= 1 - TEXTURE + 2 * TEXTURE * (w < 1 ? w : 1);
+      }
     },
   };
 }
