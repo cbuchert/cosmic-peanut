@@ -297,3 +297,44 @@ export function createContacts(cap = 32) {
   };
   return c;
 }
+
+/** Gap between the scope's bezel and the nearer canvas edge, as a fraction of min(width, height). */
+export const MARGIN = 0.06;
+
+/**
+ * Center and radius (drawing-buffer pixels) of the largest scope that fits the canvas with MARGIN
+ * to spare. The bezel is drawn just outside `radius`.
+ * @param {number} width
+ * @param {number} height
+ * @param {{ cx: number, cy: number, radius: number }} out
+ */
+export function fitScope(width, height, out) {
+  out.cx = width / 2;
+  out.cy = height / 2;
+  out.radius = (Math.min(width, height) / 2) * (1 - 2 * MARGIN);
+  return out;
+}
+
+/** Palette names, as in the manifest's `palette` options. */
+export const PALETTES = ["green", "amber", "blue", "white"];
+
+// Glow, then hot core, per palette: P7-like green, P3 amber, blue, and a paper-white.
+// prettier-ignore
+const PALETTE_RGB = new Float32Array([
+  0.22, 1.0, 0.35,   0.75, 1.0, 0.8,
+  1.0, 0.6, 0.12,    1.0, 0.88, 0.6,
+  0.25, 0.6, 1.0,    0.75, 0.9, 1.0,
+  0.9, 0.93, 0.96,   1.0, 1.0, 1.0,
+]);
+
+/**
+ * Phosphor colors for a palette: `out[0..2]` the glow, `out[3..5]` the hot core (sweep arm, fresh
+ * returns, contacts). Unknown names fall back to green.
+ * @param {unknown} name
+ * @param {Float32Array} out length ≥ 6
+ */
+export function phosphorPalette(name, out) {
+  const i = Math.max(0, PALETTES.indexOf(String(name)));
+  for (let k = 0; k < 6; k++) out[k] = PALETTE_RGB[6 * i + k];
+  return out;
+}

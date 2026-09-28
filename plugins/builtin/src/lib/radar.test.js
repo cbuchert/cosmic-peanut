@@ -9,6 +9,10 @@ import {
   CONTACT_LIFE,
   createContacts,
   createDecay,
+  fitScope,
+  MARGIN,
+  PALETTES,
+  phosphorPalette,
   createSweep,
   DEFAULT_SPEED,
   GATE,
@@ -303,5 +307,38 @@ describe("createContacts", () => {
     sweep(c, 1.45, 1.52);
     c.pack(packed, 1.52);
     expect(packed[2]).toBeGreaterThan(2 * before);
+  });
+});
+
+describe("fitScope", () => {
+  it("centers the largest circle that fits with a margin, for any aspect ratio", () => {
+    const out = { cx: 0, cy: 0, radius: 0 };
+    for (const [w, h] of [[2560, 1440], [1440, 2560], [1000, 1000], [3440, 1440], [300, 2000], [1, 1]]) {
+      fitScope(w, h, out);
+      const m = Math.min(w, h);
+      expect([out.cx, out.cy], `${w}x${h}`).toEqual([w / 2, h / 2]);
+      expect(out.radius, `${w}x${h}`).toBeCloseTo((m / 2) * (1 - MARGIN * 2), 6);
+      expect(out.radius).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("phosphorPalette", () => {
+  it("has classic phosphors, green by default, with a hotter core than glow", () => {
+    const p = new Float32Array(6);
+    const dominant = (/** @type {Float32Array} */ c) => [0, 1, 2].reduce((a, b) => (c[b] > c[a] ? b : a));
+    expect(PALETTES).toEqual(["green", "amber", "blue", "white"]);
+    expect(dominant(phosphorPalette("green", p))).toBe(1);
+    const green = p.slice();
+    phosphorPalette("amber", p);
+    expect(p[0] > p[1] && p[1] > p[2]).toBe(true);
+    expect(dominant(phosphorPalette("blue", p))).toBe(2);
+    phosphorPalette("white", p);
+    expect(Math.max(p[0], p[1], p[2]) - Math.min(p[0], p[1], p[2])).toBeLessThan(0.1);
+    expect(phosphorPalette("plaid", p)).toEqual(green);
+    for (const name of PALETTES) {
+      phosphorPalette(name, p);
+      for (let i = 0; i < 3; i++) expect(p[3 + i], name).toBeGreaterThanOrEqual(p[i]);
+    }
   });
 });
