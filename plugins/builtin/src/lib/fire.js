@@ -128,3 +128,32 @@ export function createDrive() {
     },
   };
 }
+
+/**
+ * Fixed-timestep clock for the simulation (a dt accumulator, like Cosmic Peanut's push
+ * scheduler): `step(dt)` returns how many sim steps of 1/rate s to run this frame, so the fire
+ * evolves identically at 60 and 120 Hz. At most `maxSteps` per frame; a longer backlog (a stall,
+ * a hidden tab) is dropped instead of being caught up in a burst.
+ * @param {number} rate sim steps per second
+ * @param {number} maxSteps cap per frame
+ */
+export function createStepper(rate, maxSteps) {
+  let acc = 0;
+  return {
+    /** @param {number} dt seconds since the previous frame */
+    step(dt) {
+      acc += dt * rate;
+      // A small epsilon so 1/60 s × 120 lands on exactly 2 despite float rounding.
+      let n = Math.floor(acc + 1e-6);
+      acc -= n;
+      if (n > maxSteps) {
+        n = maxSteps;
+        acc = 0;
+      }
+      return n;
+    },
+    reset() {
+      acc = 0;
+    },
+  };
+}

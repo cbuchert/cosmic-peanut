@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createAutoGain, createDrive, createEnvelope, resampleSeed } from "./fire.js";
+import { createAutoGain, createDrive, createEnvelope, createStepper, resampleSeed } from "./fire.js";
 
 const DT = 1 / 60;
 
@@ -164,6 +164,30 @@ describe("createDrive", () => {
     const a = sample(60);
     const b = sample(120);
     for (let i = 0; i < a.length; i++) expect(Math.abs(a[i] - b[i])).toBeLessThan(0.08);
+  });
+});
+
+describe("createStepper", () => {
+  it("runs the same number of sim steps per second at 60 and 120 Hz", () => {
+    for (const hz of [60, 120, 144, 50]) {
+      const st = createStepper(120, 4);
+      let n = 0;
+      for (let i = 0; i < hz * 10; i++) n += st.step(1 / hz);
+      expect(Math.abs(n - 1200)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("caps the steps per frame and drops the backlog after a stall", () => {
+    const st = createStepper(120, 4);
+    expect(st.step(0.1)).toBe(4);
+    expect(st.step(1 / 60)).toBe(2);
+  });
+
+  it("gives an even 2 steps every frame at exactly 60 Hz", () => {
+    const st = createStepper(120, 4);
+    const counts = new Set();
+    for (let i = 0; i < 600; i++) counts.add(st.step(1 / 60));
+    expect([...counts]).toEqual([2]);
   });
 });
 
