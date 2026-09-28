@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createAutoGain, createDrive, createEnvelope, createStepper, PALETTES, rampColor, resampleSeed, simSize } from "./fire.js";
+import { createAutoGain, createDrive, createEnvelope, createStepper, motion, MOTION_DEFAULTS, PALETTES, rampColor, resampleSeed, simSize } from "./fire.js";
 
 const DT = 1 / 60;
 
@@ -251,6 +251,31 @@ describe("rampColor", () => {
     rampColor("plaid", 0.6, d);
     rampColor("natural", 0.6, c);
     expect([...d]).toEqual([...c]);
+  });
+});
+
+describe("motion", () => {
+  it("with reduceMotion, calms turbulence and speed that are at their defaults", () => {
+    const out = { turbulence: 0, speed: 0 };
+    motion({ turbulence: 1, speed: 1 }, false, out);
+    expect(out).toEqual({ turbulence: 1, speed: 1 });
+    motion({ turbulence: 1, speed: 1 }, true, out);
+    expect(out.turbulence).toBeLessThan(1);
+    expect(out.speed).toBeLessThan(1);
+    expect(out.turbulence).toBeGreaterThan(0);
+    expect(out.speed).toBeGreaterThan(0);
+  });
+
+  it("respects values the user chose, and the defaults match the manifest", async () => {
+    const out = { turbulence: 0, speed: 0 };
+    motion({ turbulence: 1.5, speed: 0.8 }, true, out);
+    expect(out).toEqual({ turbulence: 1.5, speed: 0.8 });
+    const { readFile } = await import("node:fs/promises");
+    const manifest = JSON.parse(await readFile(new URL("../../tidalviz.json", import.meta.url), "utf8"));
+    const blaze = manifest.visualizers.find((/** @type {{ id: string }} */ v) => v.id === "blaze");
+    const defaults = Object.fromEntries(blaze.params.map((/** @type {any} */ p) => [p.id, p.default]));
+    expect(defaults.turbulence).toBe(MOTION_DEFAULTS.turbulence);
+    expect(defaults.speed).toBe(MOTION_DEFAULTS.speed);
   });
 });
 

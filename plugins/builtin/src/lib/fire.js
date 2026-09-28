@@ -242,3 +242,23 @@ export function rampColor(palette, t, out) {
   out[3] = Math.max(out[0], out[1], out[2]);
   return out;
 }
+
+/** Manifest defaults for the motion params (a test keeps tidalviz.json in step). */
+export const MOTION_DEFAULTS = { turbulence: 1, speed: 1 };
+/** What those defaults become under macOS "Reduce motion": a slower, steadier fire. */
+export const REDUCED_MOTION = { turbulence: 0.45, speed: 0.6 };
+
+/**
+ * Effective turbulence and speed. With `reduceMotion`, a param still at its manifest default is
+ * swapped for the calmer value; a value the user chose is respected.
+ * @param {Record<string, unknown>} params live ctx.params
+ * @param {boolean} reduceMotion
+ * @param {{ turbulence: number, speed: number }} out
+ */
+export function motion(params, reduceMotion, out) {
+  const t = Number(params.turbulence);
+  const s = Number(params.speed);
+  out.turbulence = reduceMotion && t === MOTION_DEFAULTS.turbulence ? REDUCED_MOTION.turbulence : t;
+  out.speed = reduceMotion && s === MOTION_DEFAULTS.speed ? REDUCED_MOTION.speed : s;
+  return out;
+}
