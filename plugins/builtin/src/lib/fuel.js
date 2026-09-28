@@ -1,87 +1,21 @@
 // @ts-check
 /**
- * Blaze's spectrum feed: pure, allocation-free per-frame helpers that turn the host's 64 bands into
- * the fire's fuel line (mirrored, bass at the centre), transient jets and a gated, expanded height
- * profile. GPU side: shaders/blaze/.
+ * Blaze's feed: pure, allocation-free per-frame logic that turns one audio frame into the fire's
+ * fuel line — fuel, transient jets and a per-column flame speed. The spectrogram maths lives in
+ * spectro.js; the GPU side in shaders/blaze/.
  */
 import { createAutoGain, resampleSeed } from "./fire.js";
+import { createSpectroGain, logColumns, resampleSpectrum, riseSpeed } from "./spectro.js";
+
+export const FEEDS = ["spectrogram", "waveform"];
 
 /**
- * Spread the bands across the fuel line, mirrored: band 0 (the lowest) at the centre, the highest
- * at both edges, linearly interpolated between bands so neighbouring bands blend into flame roots
- * rather than bars. Texel i sits at x = (i + 0.5) / out.length.
- * @param {ArrayLike<number>} bands
- * @param {Float32Array} out
+ * The feed to run for a saved/live param value: "waveform" stays, anything else — including the
+ * retired 64-band "spectrum" feed a saved preset may still hold — runs the spectrogram.
+ * @param {unknown} value
  */
-export function mapMirrored(bands, out) {
-  const S = out.length;
-  const last = bands.length - 1;
-  const inv = S > 2 ? 1 / (S - 2) : 0;
-  for (let i = 0; i < S; i++) {
-    const d = Math.abs(2 * i + 1 - S) - 1; // 0 at the two centre texels … S − 2 at the edges
-    const f = d * inv * last;
-    const b0 = Math.floor(f);
-    const b1 = b0 < last ? b0 + 1 : last;
-    const a = bands[b0];
-    out[i] = a + (bands[b1] - a) * (f - b0);
-  }
-}
-
-/** Noise gate per unit of reactivity (normalised level, 0–1). */
-const GATE = 0.12;
-/** Extra expansion exponent per unit of reactivity (1 = linear). */
-const EXPAND = 0.9;
-
-/**
- * Gate and expand one normalised level (0–1): everything under the gate is cut, the rest is
- * rescaled to 0–1 and raised to a power > 1, so quiet bands smoulder low and only real peaks reach
- * the top. Reactivity 0 is linear and ungated; 2 is the most dramatic.
- * @param {number} n normalised level (clamped to 0–1)
- * @param {number} reactivity 0–2
- */
-export function shapeLevel(n, reactivity) {
-  const r = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
-  const gate = GATE * r;
-  const x = ((n < 1 ? n : 1) - gate) / (1 - gate);
-  return x > 0 ? x ** (1 + EXPAND * r) : 0;
-}
-
-/**
- * Per-band slow auto-gain. Each band tracks its own peak (instant attack, slow release) and is
- * normalised against the geometric mean of that peak and the loudest band's, clamped to 0–1: a
- * quiet mix still reaches full height, a naturally quiet band (hats) gets some lift without being
- * flattened to the level of the bass, and the song's spectral shape survives. A floor keeps
- * silence and hiss out.
- * @param {number} count bands
- * @param {{ release?: number, floor?: number }} [opts] release in seconds
- */
-export function createBandGain(count, { release = 4, floor = 0.05 } = {}) {
-  const env = new Float32Array(count);
-  return {
-    /**
-     * @param {ArrayLike<number>} bands
-     * @param {number} dt seconds
-     * @param {Float32Array} out normalised levels, 0–1
-     */
-    step(bands, dt, out) {
-      const k = Math.exp(-dt / release);
-      let top = 0;
-      for (let i = 0; i < count; i++) {
-        const v = bands[i];
-        const e = env[i] * k;
-        env[i] = v > e ? v : e;
-        if (env[i] > top) top = env[i];
-      }
-      for (let i = 0; i < count; i++) {
-        const ref = Math.sqrt(env[i] * top);
-        const n = bands[i] / (ref > floor ? ref : floor);
-        out[i] = n < 1 ? n : 1;
-      }
-    },
-    reset() {
-      env.fill(0);
-    },
-  };
+export function resolveFeed(value) {
+  return value === "waveform" ? "waveform" : "spectrogram";
 }
 
 /** Attack detection time constants and thresholds (seconds; normalised level units). */
@@ -168,82 +102,118 @@ export function createAttacks(count) {
   };
 }
 
-/** Waveform flicker on the spectrum feed: ± this fraction of the fuel. */
-const TEXTURE = 0.2;
-/** Release of the shaped band levels (s): roots rise at once and fall over ~150 ms. */
+/** Frequency span of the spectrogram fuel line, Hz (the host bands' span). */
+export const F_MIN = 30;
+export const F_MAX = 16000;
+/** Transient-jet groups across the distinct frequency columns. */
+const GROUPS = 32;
+/** Release of the column levels (s): roots rise at once and fall over ~150 ms. */
 const ROOT_RELEASE = 0.15;
-/** The overall loudness reference for jet detection: slow attack and release (s), and a floor. */
-const DETECT_ATTACK = 0.8;
-const DETECT_RELEASE = 4;
-const DETECT_FLOOR = 0.1;
 
 /**
- * The fire's per-frame feed: fills `fuel` (fuel-line level per texel, ≥ 0) and `jet` (transient
- * jet strength per texel, 0–2) from one audio frame. Everything is preallocated here.
+ * The fire's per-frame feed. Fills, per fuel-line texel:
+ * - `fuel` (≥ 0): the bed's heat;
+ * - `jet` (0–2): transient jet strength;
+ * - `rise` (screen heights per sim second): the upward speed the sim drives that column's gas to,
+ *   0 = no level-driven lift (the waveform feed).
+ * Feeds:
+ * - "spectrogram" (default): audio.spectrum on a log-frequency axis F_MIN–F_MAX (logColumns;
+ *   "mirrored" puts the bass at the centre and the highs at both edges, "linear" runs low → high
+ *   left → right), max-resampled per column (resampleSpectrum), turned into 0–1 levels in dB with
+ *   a gate and a slow per-frequency auto-gain (createSpectroGain), held with a ~150 ms release.
+ *   fuel = level, rise = riseSpeed(level, reactivity): loud frequencies race up, quiet ones
+ *   smoulder. Jets come from createAttacks on GROUPS log-frequency groups (loudest column of
+ *   each), spread back across their columns.
  * - "waveform": the original Blaze feed, the newest waveform resampled across the line (|w|) times
- *   a loudness auto-gain; no jets.
- * - "spectrum": the bands, auto-gained per band (createBandGain), gated and expanded
- *   (shapeLevel), held with a ~150 ms release so roots don't flicker frame to frame, mapped mirrored across the line (bass at the centre), times a ±TEXTURE flicker
- *   from the waveform under each texel. Jets come from createAttacks on the bands scaled by a
- *   slow overall loudness reference (so a kick after a quiet bar is a big rise, while the height
- *   normalisation reacts at once), mapped the same way.
- * @param {number} size fuel-line texels
- * @param {number} count host bands
+ *   a loudness auto-gain; no jets, no rise.
+ * Everything is preallocated here; `step` allocates nothing.
+ * @param {number} size fuel-line texels (even)
  */
-export function createFeed(size, count) {
+export function createFeed(size) {
   const fuel = new Float32Array(size);
   const jet = new Float32Array(size);
+  const rise = new Float32Array(size);
   const mag = new Float32Array(size);
   const signed = new Float32Array(size);
   const waveGain = createAutoGain();
-  const bandGain = createBandGain(count);
-  const attacks = createAttacks(count);
-  const norm = new Float32Array(count);
-  const det = new Float32Array(count);
-  const jets = new Float32Array(count);
-  const held = new Float32Array(count);
-  let ref = 0;
+  const lo = new Float32Array(size);
+  const hi = new Float32Array(size);
+  const cols = new Float32Array(size);
+  const level = new Float32Array(size);
+  const held = new Float32Array(size);
+  const group = new Uint8Array(size); // jet group per texel
+  const gpos = new Float32Array(size); // fractional group position, for spreading jets back
+  const grp = new Float32Array(GROUPS);
+  const jets = new Float32Array(GROUPS);
+  const gain = createSpectroGain(size);
+  const attacks = createAttacks(GROUPS);
+  let layout = "";
+
+  /** @param {string} next */
+  function setLayout(next) {
+    layout = next === "linear" ? "linear" : "mirrored";
+    logColumns(layout, F_MIN, F_MAX, lo, hi);
+    const lnRange = Math.log(F_MAX / F_MIN);
+    for (let i = 0; i < size; i++) {
+      const u = Math.log(Math.sqrt(lo[i] * hi[i]) / F_MIN) / lnRange; // 0–1 up the log axis
+      const g = Math.floor(u * GROUPS);
+      group[i] = g < GROUPS - 1 ? g : GROUPS - 1;
+      gpos[i] = u * GROUPS - 0.5;
+    }
+    gain.setTilt(lo, hi);
+    gain.reset();
+    attacks.reset();
+    held.fill(0);
+  }
+
   return {
     fuel,
     jet,
+    rise,
     /**
-     * @param {{ bands: ArrayLike<number>, waveform: ArrayLike<number>, silent: boolean }} audio
+     * @param {{ spectrum: ArrayLike<number>, waveform: ArrayLike<number>, sampleRate: number, silent: boolean }} audio
      * @param {number} dt seconds
-     * @param {string} feed "spectrum" | "waveform"
+     * @param {unknown} feed param value (resolveFeed)
+     * @param {unknown} lay "mirrored" | "linear" (anything else is mirrored)
      * @param {number} reactivity 0–2
      * @param {boolean} reduceFlashing
      */
-    step(audio, dt, feed, reactivity, reduceFlashing) {
-      resampleSeed(audio.waveform, mag, signed);
-      let peak = 0;
-      for (let i = 0; i < size; i++) if (mag[i] > peak) peak = mag[i];
-      const g = audio.silent ? 0 : waveGain.step(peak, dt);
-      if (feed === "waveform") {
+    step(audio, dt, feed, lay, reactivity, reduceFlashing) {
+      if (resolveFeed(feed) === "waveform") {
+        resampleSeed(audio.waveform, mag, signed);
+        let peak = 0;
+        for (let i = 0; i < size; i++) if (mag[i] > peak) peak = mag[i];
+        const g = audio.silent ? 0 : waveGain.step(peak, dt);
         for (let i = 0; i < size; i++) fuel[i] = mag[i] * g;
         jet.fill(0);
+        rise.fill(0);
         return;
       }
-      const bands = audio.bands;
+      const want = lay === "linear" ? "linear" : "mirrored";
+      if (want !== layout) setLayout(want);
       const r = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
-      bandGain.step(bands, dt, norm);
+      if (audio.silent) cols.fill(0);
+      else resampleSpectrum(audio.spectrum, audio.sampleRate, lo, hi, cols);
+      gain.step(cols, dt, level);
       const keep = Math.exp(-dt / ROOT_RELEASE);
-      let top = 0;
-      for (let i = 0; i < count; i++) {
-        const v = audio.silent ? 0 : bands[i];
-        if (v > top) top = v;
-        const shaped = audio.silent ? 0 : shapeLevel(norm[i], r);
-        const fallen = held[i] * keep;
-        held[i] = shaped > fallen ? shaped : fallen;
-      }
-      ref += (top - ref) * (1 - Math.exp(-dt / (top > ref ? DETECT_ATTACK : DETECT_RELEASE)));
-      const inv = 1 / (ref > DETECT_FLOOR ? ref : DETECT_FLOOR);
-      for (let i = 0; i < count; i++) det[i] = audio.silent ? 0 : bands[i] * inv;
-      attacks.step(det, dt, r, reduceFlashing, jets);
-      mapMirrored(held, fuel);
-      mapMirrored(jets, jet);
+      grp.fill(0);
       for (let i = 0; i < size; i++) {
-        const w = mag[i] * g;
-        fuel[i] *= 1 - TEXTURE + 2 * TEXTURE * (w < 1 ? w : 1);
+        const v = level[i];
+        const fallen = held[i] * keep;
+        const h = v > fallen ? v : fallen;
+        held[i] = h;
+        fuel[i] = h;
+        rise[i] = riseSpeed(h, r);
+        const g = group[i];
+        if (v > grp[g]) grp[g] = v;
+      }
+      attacks.step(grp, dt, r, reduceFlashing, jets);
+      for (let i = 0; i < size; i++) {
+        const x = gpos[i];
+        const g0 = x > 0 ? Math.floor(x) : 0;
+        const g1 = g0 < GROUPS - 1 ? g0 + 1 : GROUPS - 1;
+        const f = x > g0 ? x - g0 : 0;
+        jet[i] = jets[g0] + (jets[g1] - jets[g0]) * (f < 1 ? f : 1);
       }
     },
   };

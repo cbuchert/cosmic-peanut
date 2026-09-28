@@ -13,7 +13,7 @@ uv run python plugins/_harness/run.py --port 8765 --flash   # all four, WebKit
 ```
 
 Query params: `repo`, `viz`, `audio=drums` (a separable kick / snare / hat pattern: kicks on frames 0, 60, 120 … and snares on 30, 90 … under `still`), `audio=music` (a drone, pad chords, an eighth-note melody and drums with an
-analytic, noise-free spectrum — for spectrogram views such as Radar), `reduce=0|1`, `strobe=1`, `rep=N` (run `frame` N times per rAF —
+analytic, noise-free spectrum — for spectrogram views such as Radar), `audio=tones` (sustained sines, two loud/quiet pairs 20 dB apart at 400/800 Hz and 3.2/6.4 kHz, on from 1 s = frame 60), `audio=melody` (a bass note per bar under a plucked arpeggio with harmonics), `reduce=0|1`, `strobe=1`, `rep=N` (run `frame` N times per rAF —
 WebKit clamps `performance.now()` to 1 ms, so divide a longer span; raising N until fps drops also
 bounds GPU time), `finish=1`, `lum=1` (record mean luminance), `p.<param>=value`, `bg=light` (a
 bright, busy backdrop behind the transparent canvas; default black like the shell), `nocanvas=1`,
