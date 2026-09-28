@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createAutoGain, resampleSeed } from "./fire.js";
+import { createAutoGain, createDrive, createEnvelope, resampleSeed } from "./fire.js";
 
 const DT = 1 / 60;
 
@@ -82,3 +82,119 @@ describe("createAutoGain", () => {
     expect(gain * 0.1).toBeLessThan(0.15); // one second later the quiet part is still quiet
   });
 });
+
+/** Run an envelope on `signal(t)` at `hz` for `seconds`; returns the output samples. */
+function runEnv(/** @type {ReturnType<typeof createEnvelope>} */ env, /** @type {(t: number) => number} */ signal, hz = 60, seconds = 1) {
+  const out = [];
+  for (let i = 0; i < seconds * hz; i++) out.push(env.step(signal(i / hz), 1 / hz));
+  return out;
+}
+
+describe("createEnvelope", () => {
+  it("rises and falls with bounded, separate time constants", () => {
+    const env = createEnvelope(0.05, 0.4);
+    const up = env.step(1, DT);
+    expect(up).toBeGreaterThan(0);
+    expect(up).toBeCloseTo(1 - Math.exp(-DT / 0.05), 6);
+    for (let i = 0; i < 60; i++) env.step(1, DT);
+    const down = env.step(0, DT);
+    expect(down).toBeCloseTo(env.value, 9);
+    expect(1 - down).toBeCloseTo(1 - Math.exp(-DT / 0.4), 3);
+  });
+});
+
+/** @param {number} bass @param {boolean} onset @param {number} [onsetStrength] */
+const au = (bass, onset, onsetStrength = 0.8) => ({ bass, onset, onsetStrength });
+
+describe("createDrive", () => {
+  it("an onset throws a flare with a bounded attack that dies away", () => {
+    const d = createDrive();
+    d.step(au(1, true), DT, false);
+    const first = d.flare;
+    expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThan(0.6);
+    let peak = first;
+    for (let i = 0; i < 90; i++) {
+      d.step(au(1, false), DT, false);
+      peak = Math.max(peak, d.flare);
+    }
+    expect(peak).toBeGreaterThan(0.6);
+    expect(peak).toBeLessThanOrEqual(1);
+    expect(d.flare).toBeLessThan(0.05);
+  });
+
+  it("bass stokes the fire: loud bass drives stoke toward 1, quiet bass lets it fall to 0", () => {
+    const d = createDrive();
+    d.step(au(2, false), DT, false);
+    expect(d.stoke).toBeLessThan(0.5); // bounded attack
+    for (let i = 0; i < 60; i++) d.step(au(2, false), DT, false);
+    expect(d.stoke).toBeGreaterThan(0.9);
+    expect(d.stoke).toBeLessThanOrEqual(1);
+    for (let i = 0; i < 120; i++) d.step(au(0.5, false), DT, false);
+    expect(d.stoke).toBeLessThan(0.02);
+  });
+
+  it("with reduceFlashing, a 10 Hz strobe of onsets and bass swings the boost at most 3 times a second", () => {
+    for (const reduce of [false, true]) {
+      const d = createDrive();
+      const out = [];
+      for (let i = 0; i < 240; i++) {
+        const on = i % 6 === 0;
+        d.step(au(on ? 2.5 : 0.5, on, 1), DT, reduce);
+        out.push(d.boost);
+      }
+      const n = maxFlashesPerSecond(out, 0.05);
+      if (reduce) expect(n).toBeLessThanOrEqual(3);
+      else expect(n).toBeGreaterThan(3); // the check can see flashes at all
+    }
+  });
+
+  it("behaves the same at 60 and 120 Hz", () => {
+    /** @param {number} hz */
+    const sample = (hz) => {
+      const d = createDrive();
+      const out = [];
+      for (let i = 0; i < hz * 2; i++) {
+        const t = i / hz;
+        d.step(au(1 + Math.sin(t * 5), Math.floor(t * 2) !== Math.floor((t - 1 / hz) * 2) && i > 0), 1 / hz, true);
+        if (i % (hz / 10) === hz / 20) out.push(d.boost); // between onset frames
+      }
+      return out;
+    };
+    const a = sample(60);
+    const b = sample(120);
+    for (let i = 0; i < a.length; i++) expect(Math.abs(a[i] - b[i])).toBeLessThan(0.08);
+  });
+});
+
+/** WCAG-style flash count: rises of ≥ threshold after a fall of ≥ threshold; max in any 1 s (60 Hz). */
+function maxFlashesPerSecond(/** @type {number[]} */ v, /** @type {number} */ threshold) {
+  /** @type {number[]} */
+  const starts = [];
+  let rising = false;
+  let lo = v[0];
+  let hi = v[0];
+  for (let i = 1; i < v.length; i++) {
+    if (!rising) {
+      lo = Math.min(lo, v[i]);
+      if (v[i] - lo >= threshold) {
+        starts.push(i / 60);
+        rising = true;
+        hi = v[i];
+      }
+    } else {
+      hi = Math.max(hi, v[i]);
+      if (hi - v[i] >= threshold) {
+        rising = false;
+        lo = v[i];
+      }
+    }
+  }
+  let best = 0;
+  for (let i = 0; i < starts.length; i++) {
+    let n = 0;
+    for (let j = i; j < starts.length && starts[j] - starts[i] < 1; j++) n++;
+    best = Math.max(best, n);
+  }
+  return best;
+}
