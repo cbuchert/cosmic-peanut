@@ -255,10 +255,10 @@ export function paletteOf(name, out) {
 /** Times the palette repeats around the spiral. */
 export const SPIRAL_ARMS = 2;
 /** Times the palette repeats across the unit radius in bullseye, and how far rings drift per turn. */
-export const RINGS = 2.5;
+export const RINGS = 1.8;
 const RING_DRIFT = 1;
 /** Shibori: width of one accordion fold (one pass through the palette) and stripe tilt per turn. */
-export const FOLD = 0.4;
+export const FOLD = 1.6;
 const FOLD_TILT = 0.25;
 
 /**

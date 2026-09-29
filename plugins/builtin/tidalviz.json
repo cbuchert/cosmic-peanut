@@ -142,6 +142,25 @@
         { "id": "floor", "type": "number", "label": "Floor (dB)", "min": -80, "max": -30, "step": 1, "default": -60 },
         { "id": "maxFreq", "type": "select", "label": "Top frequency", "options": ["4k", "8k", "16k"], "default": "16k" }
       ]
+    },
+    {
+      "id": "tiedye",
+      "name": "Tie-Dye",
+      "description": "Tie-dyed cotton that breathes with the music: bass winds the spiral, the mix sets each color's width, beats drop fresh dye.",
+      "author": "Tidalviz",
+      "entry": "src/tiedye.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/tiedye.jpg",
+      "params": [
+        { "id": "pattern", "type": "select", "label": "Pattern", "options": ["spiral", "bullseye", "crumple", "shibori"], "default": "spiral" },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["rainbow", "sunset", "ocean", "neon"], "default": "rainbow" },
+        { "id": "fabric", "type": "select", "label": "Fabric", "options": ["white", "none"], "default": "white" },
+        { "id": "twist", "type": "number", "label": "Twist", "min": 0, "max": 2, "step": 0.05, "default": 0.6 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 3, "step": 0.05, "default": 1 },
+        { "id": "bleed", "type": "number", "label": "Bleed", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "bloom", "type": "boolean", "label": "Dye blooms on beats", "default": true }
+      ]
     }
   ]
 }

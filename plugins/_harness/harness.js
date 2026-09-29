@@ -124,6 +124,7 @@ async function main() {
 
   const mod = await import(base + entry.entry);
   const viz = await mod.default(ctx);
+  w.__viz = viz; // for synchronous GPU benchmarks (readPixels after N frames)
 
   w.__resize = (/** @type {number} */ cw, /** @type {number} */ ch) => {
     setSize(cw, ch);
