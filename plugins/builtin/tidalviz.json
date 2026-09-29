@@ -184,6 +184,25 @@
         { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 },
         { "id": "bloom", "type": "boolean", "label": "Dye blooms on beats", "default": true }
       ]
+    },
+    {
+      "id": "skull",
+      "name": "Skull Trip",
+      "description": "A glossy candy-apple red metal skull in psychedelic op-art stripes: the jaw chomps on kicks, the head nods to the beat, the stripes breathe with the bass and ripple out on every hit.",
+      "author": "Tidalviz",
+      "entry": "src/skull.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/skull.jpg",
+      "params": [
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "density", "type": "number", "label": "Stripe density", "min": 0.5, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "warp", "type": "number", "label": "Warp", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "jaw", "type": "number", "label": "Jaw", "min": 0, "max": 1.5, "step": 0.01, "default": 1 },
+        { "id": "mode", "type": "select", "label": "Mode", "options": ["monochrome", "acid"], "default": "monochrome" },
+        { "id": "stripes", "type": "select", "label": "Stripes", "options": ["black & white", "black only"], "default": "black & white" },
+        { "id": "size", "type": "number", "label": "Skull size", "min": 0.5, "max": 1.5, "step": 0.01, "default": 1 }
+      ]
     }
   ]
 }

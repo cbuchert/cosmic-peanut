@@ -24,6 +24,7 @@ VIZ = {
     "radar": "builtin",
     "tentacube": "builtin",
     "tiedye": "builtin",
+    "skull": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }
