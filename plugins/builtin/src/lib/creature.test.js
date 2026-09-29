@@ -1,6 +1,9 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
 import {
+  cubeEdge,
+  ROOT_FLARE,
+  tubeRadius,
   createMorph,
   createRng,
   createSpring,
@@ -278,5 +281,20 @@ describe("effectiveMotion", () => {
     effectiveMotion(1.7, true, out); // the user chose a twitch: respect it
     expect(out.twitch).toBe(1.7);
     expect(out.drift).toBeLessThan(0.5);
+  });
+});
+
+describe("cube and tentacle root sizing", () => {
+  it("tube radius follows √length, clamped, like the tube shader's uRadius", () => {
+    expect(tubeRadius(1)).toBeCloseTo(0.17);
+    expect(tubeRadius(4)).toBeCloseTo(0.17 * 1.4);
+    expect(tubeRadius(0.1)).toBeCloseTo(0.17 * 0.7);
+  });
+  it("each cube face is the size of a tentacle's (flared) root", () => {
+    for (const len of [0.5, 1, 1.5, 2]) {
+      expect(cubeEdge(len)).toBeCloseTo(2 * tubeRadius(len) * ROOT_FLARE);
+    }
+    expect(ROOT_FLARE).toBeCloseTo(1.35); // tube.vert: (1.0 + 0.35 * exp(-tS * 12.0)) at tS = 0
+    expect(cubeEdge(1)).toBeLessThan(0.5);
   });
 });

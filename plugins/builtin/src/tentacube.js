@@ -45,6 +45,8 @@ import {
   quatFromRotVec,
   quatMul,
   quatRotate,
+  cubeEdge,
+  tubeRadius,
 } from "./lib/creature.js";
 import { createDrift, tiling } from "./lib/hyperbolic.js";
 import { computeFrames, createChains, createStepper } from "./lib/tentacle.js";
@@ -52,8 +54,6 @@ import { computeFrames, createChains, createStepper } from "./lib/tentacle.js";
 /** Physics step (s) and the most steps one frame may run. */
 const H = 1 / 240;
 const MAX_STEPS = 12;
-const CUBE = 1.3; // edge length
-const HALF = CUBE / 2;
 const REACH = 2.3; // tentacle length at length = 1
 const RADIAL = 18; // tube sides
 const RING_PER_NODE = 3;
@@ -200,7 +200,8 @@ export default async function create(ctx) {
   };
   tubeMat.customProgramCacheKey = () => "tentacube-tube";
 
-  const cubeGeo = new RoundedBoxGeometry(CUBE, CUBE, CUBE, 5, 0.26);
+  // Unit cube, scaled to cubeEdge(length) × pulse each frame (faces match the tentacle roots).
+  const cubeGeo = new RoundedBoxGeometry(1, 1, 1, 5, 0.2);
   const cube = new THREE.Mesh(cubeGeo, cubeMat);
   scene.add(cube);
 
@@ -313,7 +314,7 @@ export default async function create(ctx) {
       quatRotate(qc, FACES[o], FACES[o + 1], FACES[o + 2], v3, 0);
       const nx = v3[0], ny = v3[1], nz = v3[2];
       quatRotate(qc, FACES[o + 3], FACES[o + 4], FACES[o + 5], v3, 0);
-      const d = HALF * s * 0.78; // a little inside, so the open root end stays hidden
+      const d = 0.5 * cubeEdge(Number(ctx.params.length)) * s * 0.78; // a little inside, so the open root end stays hidden
       chains.anchor(i, px + nx * d, py + ny * d, pz + nz * d, nx, ny, nz, v3[0], v3[1], v3[2]);
     }
   }
@@ -337,7 +338,7 @@ export default async function create(ctx) {
     chains.segLen = (REACH * Number(ctx.params.length)) / (chains.nodes - 1);
     chains.stiffness = 130 - 105 * drag; // more drag → looser, more inertia
     chains.damping = 3.4 - 2.2 * drag;
-    tubeUniforms.uRadius.value = 0.17 * Math.min(1.4, Math.max(0.7, Math.sqrt(Number(ctx.params.length))));
+    tubeUniforms.uRadius.value = tubeRadius(Number(ctx.params.length));
   }
 
   // --- Post ---------------------------------------------------------------------------------------
@@ -458,7 +459,7 @@ export default async function create(ctx) {
       // Cube pose.
       cube.position.set(twitch.pos[0], twitch.pos[1], twitch.pos[2]);
       cube.quaternion.set(qc[0], qc[1], qc[2], qc[3]);
-      cube.scale.setScalar(pulse.x);
+      cube.scale.setScalar(pulse.x * cubeEdge(Number(ctx.params.length)));
 
       // Tentacle nodes + frames → texture.
       computeFrames(chains, frames, tangents);

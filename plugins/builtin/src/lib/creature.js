@@ -382,3 +382,23 @@ export function effectiveMotion(twitch, reduceMotion, out) {
   out.tumble = reduceMotion ? REDUCED_TUMBLE : 1;
   return out;
 }
+
+/** Tube.vert widens each tentacle by (1 + 0.35·e^(−12·t)) at the root: 1.35× at t = 0. */
+export const ROOT_FLARE = 1.35;
+
+/**
+ * Tentacle root radius (tube.vert's uRadius) for the Length param: grows with √length, clamped.
+ * @param {number} length
+ */
+export function tubeRadius(length) {
+  return 0.17 * Math.min(1.4, Math.max(0.7, Math.sqrt(length)));
+}
+
+/**
+ * Cube edge length: each face is exactly as wide as a tentacle's flared root, so the tentacles
+ * read as growing from a small core rather than sprouting from a big box.
+ * @param {number} length
+ */
+export function cubeEdge(length) {
+  return 2 * tubeRadius(length) * ROOT_FLARE;
+}
