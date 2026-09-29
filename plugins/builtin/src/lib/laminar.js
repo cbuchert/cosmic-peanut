@@ -59,11 +59,12 @@ export const RE_MAX = RE_LOUD * 4;
 
 /**
  * Music → flow: how turbulent the wake is allowed to get. Loudness (0–1) × Reactivity drives
- *   inflow U = BASE_INFLOW · speed · (1 + 0.7·e)
- *   Re = RE_QUIET · (RE_LOUD / RE_QUIET)^e · 4^(turbulence − 1)
+ *   inflow U = BASE_INFLOW · speed · (1 + 0.7·e²)
+ *   Re = RE_QUIET · (RE_LOUD / RE_QUIET)^(e²) · 4^(turbulence − 1)
  *   ν = U · D / Re   (kinematic viscosity, screen heights² / s, for the sim's viscous step)
- *   vort = turbulence · (0.1 + 0.9·e)   (vorticity confinement, 0–2)
- * with e = clamp(loudness · reactivity, 0, 1). Quiet: Re ≈ 60, a calm, gently rippling wake;
+ *   vort = turbulence · (0.1 + 0.9·e²)   (vorticity confinement, 0–2)
+ * with e = clamp(loudness · reactivity, 0, 1); squared so moderate levels stay calm and the churn
+ * arrives with real loudness. Quiet: Re ≈ 60, a calm, gently rippling wake;
  * loud: Re in the thousands, the wake sheds and churns. Allocation-free; writes `out`.
  * @param {number} loud 0–1 (createLoudness)
  * @param {number} reactivity 0–2
@@ -76,10 +77,10 @@ export function flowDrive(loud, reactivity, speed, turbulence, diameter, out) {
   const x = loud * (reactivity > 0 ? reactivity : 0);
   const e = x > 0 ? (x < 1 ? x : 1) : 0;
   const t = turbulence > 0 ? (turbulence < 2 ? turbulence : 2) : 0;
-  out.inflow = BASE_INFLOW * (speed > 0 ? speed : 0) * (1 + 0.7 * e);
-  out.re = RE_QUIET * Math.pow(RE_LOUD / RE_QUIET, e) * Math.pow(4, t - 1);
+  out.inflow = BASE_INFLOW * (speed > 0 ? speed : 0) * (1 + 0.7 * e * e);
+  out.re = RE_QUIET * Math.pow(RE_LOUD / RE_QUIET, e * e) * Math.pow(4, t - 1);
   out.nu = (out.inflow * diameter) / out.re;
-  out.vort = t * (0.1 + 0.9 * e);
+  out.vort = t * (0.1 + 0.9 * e * e);
   return out;
 }
 
@@ -119,25 +120,28 @@ export function createPulse() {
 /** Half-axes (along-stream, cross-stream) of the ellipse around home the sphere drifts in, screen heights. */
 /** @type {[number, number]} */
 export const DRIFT_REGION = [0.1, 0.18];
-const DRIFT_OMEGA = 2 * Math.PI * 0.3; // spring, rad/s
-const DRIFT_ZETA = 0.8; // damping ratio: one soft overshoot at most
-const DRIFT_KICK = 0.3; // speed a full-strength beat adds, screen heights / s
-const DRIFT_VMAX = 0.6;
+const DRIFT_OMEGA = 2 * Math.PI * 0.5; // follow spring, rad/s (critically damped)
+const DRIFT_STEP = 0.12; // how far a full-strength beat moves the anchor, screen heights
+const DRIFT_RETURN = 2.5; // s, the anchor's pull back home
+/** The sphere never moves faster than this (screen heights / s): a sudden lurch would shake the whole stream. */
+export const DRIFT_VMAX = 0.1;
 const DRIFT_SUB = 1 / 240; // integration substep, s
-const GOLDEN = 2.399963229728653; // golden angle, rad
+const TURN = 0.55; // rad/s the push direction turns: a run of beats carries the sphere along a slow curve
 
 /**
  * The sphere's drift through the stream: an offset (x along the flow, y across it, screen
- * heights) from its home, on a damped spring. Each beat kicks its velocity (strength × Reactivity)
- * in the next direction of a golden-angle sequence, stretched across the stream; the spring pulls
- * it back. It never leaves the DRIFT_REGION ellipse (projected back onto the rim, outward velocity
- * removed) and moves continuously — beats change its velocity, never its position — so the sim
- * sees a smooth obstacle track; (vx, vy) is its velocity for the solid boundary. Integrated in
- * fixed 1/240 s substeps (semi-implicit Euler), so 60 and 120 Hz agree.
+ * heights) from its home. Each beat moves an invisible anchor (strength × Reactivity, in a direction
+ * that slowly turns, stretched across the stream, so a run of beats carries it along a curve); the anchor relaxes back
+ * home over ~2.5 s and the sphere follows it on a critically damped spring, speed-limited to
+ * DRIFT_VMAX. Beats change where it's heading, never its position or velocity at once, so the sim
+ * sees a smooth obstacle track; (vx, vy) is its velocity for the solid boundary. It never leaves
+ * the DRIFT_REGION ellipse. Integrated in fixed 1/240 s substeps, so 60 and 120 Hz agree.
  */
 export function createDrift() {
   let dir = 0.9;
   let acc = 0;
+  let ax = 0;
+  let ay = 0;
   return {
     x: 0,
     y: 0,
@@ -152,23 +156,32 @@ export function createDrift() {
     step(onset, strength, dt, reactivity) {
       if (onset) {
         const s = Number.isFinite(strength) ? (strength < 0 ? 0 : strength > 1 ? 1 : strength) : 0;
-        const k = DRIFT_KICK * (0.4 + 0.6 * s) * (reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0);
-        dir += GOLDEN;
-        this.vx += 0.5 * k * Math.cos(dir);
-        this.vy += k * Math.sin(dir);
+        const k = DRIFT_STEP * (0.4 + 0.6 * s) * (reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0);
+        ax += 0.5 * k * Math.cos(dir);
+        ay += k * Math.sin(dir);
+        // Keep the anchor inside the region.
+        const e = Math.hypot(ax / DRIFT_REGION[0], ay / DRIFT_REGION[1]);
+        if (e > 0.9) {
+          ax *= 0.9 / e;
+          ay *= 0.9 / e;
+        }
+      }
+      dir += TURN * dt;
+      acc += dt;
+      const w2 = DRIFT_OMEGA * DRIFT_OMEGA;
+      const c = 2 * DRIFT_OMEGA;
+      const back = Math.exp(-DRIFT_SUB / DRIFT_RETURN);
+      while (acc >= DRIFT_SUB) {
+        acc -= DRIFT_SUB;
+        ax *= back;
+        ay *= back;
+        this.vx += (w2 * (ax - this.x) - c * this.vx) * DRIFT_SUB;
+        this.vy += (w2 * (ay - this.y) - c * this.vy) * DRIFT_SUB;
         const sp = Math.hypot(this.vx, this.vy);
         if (sp > DRIFT_VMAX) {
           this.vx *= DRIFT_VMAX / sp;
           this.vy *= DRIFT_VMAX / sp;
         }
-      }
-      acc += dt;
-      while (acc >= DRIFT_SUB) {
-        acc -= DRIFT_SUB;
-        const w2 = DRIFT_OMEGA * DRIFT_OMEGA;
-        const c = 2 * DRIFT_ZETA * DRIFT_OMEGA;
-        this.vx += (-w2 * this.x - c * this.vx) * DRIFT_SUB;
-        this.vy += (-w2 * this.y - c * this.vy) * DRIFT_SUB;
         this.x += this.vx * DRIFT_SUB;
         this.y += this.vy * DRIFT_SUB;
         const ex = this.x / DRIFT_REGION[0];
@@ -194,6 +207,7 @@ export function createDrift() {
     },
     reset() {
       this.x = this.y = this.vx = this.vy = 0;
+      ax = ay = 0;
       dir = 0.9;
       acc = 0;
     },

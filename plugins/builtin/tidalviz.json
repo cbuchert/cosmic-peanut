@@ -142,6 +142,26 @@
         { "id": "floor", "type": "number", "label": "Floor (dB)", "min": -80, "max": -30, "step": 1, "default": -60 },
         { "id": "maxFreq", "type": "select", "label": "Top frequency", "options": ["4k", "8k", "16k"], "default": "16k" }
       ]
+    },
+    {
+      "id": "laminar",
+      "name": "Laminar",
+      "description": "Liquid lines stream past a chrome sphere, after Tame Impala's Currents: a real fluid sim where loud music turns the laminar flow turbulent.",
+      "author": "Tidalviz",
+      "entry": "src/laminar.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/laminar.jpg",
+      "params": [
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "speed", "type": "number", "label": "Flow speed", "min": 0.2, "max": 3, "step": 0.05, "default": 1 },
+        { "id": "turbulence", "type": "number", "label": "Turbulence", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "density", "type": "number", "label": "Line density", "min": 30, "max": 140, "step": 1, "default": 72 },
+        { "id": "size", "type": "number", "label": "Sphere size", "min": 0.5, "max": 1.6, "step": 0.01, "default": 1 },
+        { "id": "detail", "type": "number", "label": "Detail", "min": 0.08, "max": 0.4, "step": 0.01, "default": 0.2 },
+        { "id": "trail", "type": "boolean", "label": "Trail", "default": true },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["currents", "sea glass", "sunset", "mono"], "default": "currents" },
+        { "id": "backdrop", "type": "select", "label": "Backdrop", "options": ["black", "none"], "default": "black" }
+      ]
     }
   ]
 }

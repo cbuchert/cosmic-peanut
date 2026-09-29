@@ -41,6 +41,7 @@ def test_builtin_renderers():
         "blaze": ("webgl2", []),
         "cascade": ("webgl2", []),
         "radar": ("webgl2", []),
+        "laminar": ("webgl2", []),
     }
 
 
@@ -263,3 +264,37 @@ def test_radar_manifest():
     assert "contacts" not in params
     for f in ("fullscreen.vert", "paint.frag", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/radar" / f).is_file(), f
+
+
+def test_laminar_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "laminar"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Laminar",
+        "src/laminar.js",
+        "webgl2",
+        "thumbs/laminar.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "reactivity",
+        "speed",
+        "turbulence",
+        "density",
+        "size",
+        "detail",
+        "trail",
+        "palette",
+        "backdrop",
+    ]
+    # lib/laminar.js MOTION_DEFAULTS: Reduce motion swaps these only while they're at the default.
+    for pid in ("reactivity", "speed", "turbulence"):
+        assert params[pid]["default"] == 1, pid
+    # lib/flow.js simGrid clamps Detail to 0.08-0.4.
+    assert (params["detail"]["min"], params["detail"]["max"]) == (0.08, 0.4)
+    assert params["trail"] == {"id": "trail", "type": "boolean", "label": "Trail", "default": True}
+    assert params["palette"]["options"] == ["currents", "sea glass", "sunset", "mono"]
+    assert params["palette"]["default"] == "currents"
+    assert params["backdrop"]["options"] == ["black", "none"]
+    assert params["backdrop"]["default"] == "black"
+    for f in ("common.glsl", "advect.frag", "correct.frag", "composite.frag"):
+        assert (REPOS["builtin"] / "shaders/laminar" / f).is_file()

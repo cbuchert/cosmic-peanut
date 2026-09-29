@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { BACKDROPS, MOTION_DEFAULTS, motion, REDUCED_MOTION, createGlow, GLOW_MAX, gapOpacity, PALETTES, palette, trailColor, TRAIL_OLD, createDrift, createKicks, createLoudness, createPulse, DRIFT_REGION, KICK_GAP, flowDrive, PULSE_MAX, RE_MAX, RE_MIN } from "./laminar.js";
+import { BACKDROPS, MOTION_DEFAULTS, motion, REDUCED_MOTION, createGlow, GLOW_MAX, gapOpacity, PALETTES, palette, trailColor, TRAIL_OLD, createDrift, DRIFT_VMAX, createKicks, createLoudness, createPulse, DRIFT_REGION, KICK_GAP, flowDrive, PULSE_MAX, RE_MAX, RE_MIN } from "./laminar.js";
 
 /** A minimal audio frame. @param {number} rms @param {Partial<Record<string, any>>} [more] */
 const frame = (rms, more = {}) => ({ rms, silent: rms === 0, bassAtt: 1, bass: 1, onset: false, onsetStrength: 0, ...more });
@@ -137,7 +137,7 @@ describe("createDrift", () => {
     let far = 0;
     let px = d.x;
     let py = d.y;
-    for (let f = 0; f < 60 * 8; f++) {
+    for (let f = 0; f < 60 * 16; f++) {
       d.step(false, 0, dt, 1);
       expect(inside(d)).toBe(true);
       expect(Math.hypot(d.x - px, d.y - py)).toBeLessThan(0.02); // glides: no teleporting
@@ -148,6 +148,18 @@ describe("createDrift", () => {
     expect(far).toBeGreaterThan(0.03); // the nudge is visible
     expect(Math.hypot(d.x, d.y)).toBeLessThan(1e-3); // settled
     expect(Math.hypot(d.vx, d.vy)).toBeLessThan(1e-3);
+  });
+
+  it("moves gently even under a barrage of beats: never faster than DRIFT_VMAX, so the flow isn't shaken", () => {
+    expect(DRIFT_VMAX).toBeLessThanOrEqual(0.12);
+    const d = createDrift();
+    let far = 0;
+    for (let f = 0; f < 600; f++) {
+      d.step(f % 5 === 0, 1, 1 / 60, 2);
+      expect(Math.hypot(d.vx, d.vy)).toBeLessThanOrEqual(DRIFT_VMAX + 1e-9);
+      far = Math.max(far, Math.hypot(d.x, d.y));
+    }
+    expect(far).toBeGreaterThan(0.03); // but it does travel
   });
 
   it("stays in its region under a barrage of beats, and follows the same path at 60 and 120 Hz", () => {
