@@ -11,6 +11,8 @@
  *   audio=tones  sustained sine tones, loud/quiet pairs, on from 1 s (synth.js createTones)
  *   audio=melody a bass note per bar under a plucked arpeggio with harmonics (synth.js createMelody)
  *   finish=1  gl.finish() inside the timed region, so the number includes GPU work
+ *   sync=1    a 1-pixel gl.readPixels after each frame inside the timed region: WebKit's finish()
+ *             returns without waiting, a readback can't, so this is the one that includes GPU time
  *   lum=1     record mean frame luminance (for the flash-limiter check)
  *   bg=light  a bright, busy backdrop behind the transparent canvas (default black, like the shell)
  *   nocanvas=1  hide the canvas (screenshot the backdrop alone)
@@ -25,6 +27,8 @@ const q = new URLSearchParams(location.search);
 const repo = q.get("repo") ?? "builtin";
 const vizId = q.get("viz") ?? "bars";
 const finish = q.get("finish") === "1";
+const sync = q.get("sync") === "1";
+const px = new Uint8Array(4);
 const measureLum = q.get("lum") === "1";
 // WebKit coarsens performance.now() to 1 ms; rep=N runs frame() N times per rAF and divides.
 const rep = Number(q.get("rep") ?? 1);
@@ -223,6 +227,7 @@ async function main() {
         viz.frame(audio, time);
         if (ctx.three?.autoRender) ctx.three.renderer.render(ctx.three.scene, ctx.three.camera);
         if (finish && gl) gl.finish();
+        if (sync && gl) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
       }
     } catch (e) {
       errors.push(String(/** @type {any} */ (e)?.stack ?? e));
