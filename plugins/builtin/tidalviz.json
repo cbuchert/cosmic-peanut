@@ -142,6 +142,25 @@
         { "id": "floor", "type": "number", "label": "Floor (dB)", "min": -80, "max": -30, "step": 1, "default": -60 },
         { "id": "maxFreq", "type": "select", "label": "Top frequency", "options": ["4k", "8k", "16k"], "default": "16k" }
       ]
+    },
+    {
+      "id": "tetraballs",
+      "name": "Tetraballs",
+      "description": "Four metaballs on a tumbling tetrahedron: the waveform swells them and bursts them apart into droplets. Chrome, soap film, jade, brushed metal, velvet, glass, water, fire and smoke.",
+      "author": "Tidalviz",
+      "entry": "src/tetraballs.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/tetraballs.jpg",
+      "params": [
+        { "id": "material", "type": "select", "label": "Material", "options": ["auto", "chrome", "soap", "jade", "brushed", "velvet", "glass", "water", "fire", "smoke"], "default": "chrome" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "size", "type": "number", "label": "Size", "min": 0.5, "max": 1.4, "step": 0.01, "default": 1 },
+        { "id": "bounce", "type": "number", "label": "Bounce", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "tumble", "type": "number", "label": "Tumble speed (rad/s)", "min": 0, "max": 1.5, "step": 0.01, "default": 0.35 },
+        { "id": "background", "type": "select", "label": "Background", "options": ["studio", "none"], "default": "studio" },
+        { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "medium" },
+        { "id": "tint", "type": "color", "label": "Jade tint", "default": "#5fbf8a" }
+      ]
     }
   ]
 }

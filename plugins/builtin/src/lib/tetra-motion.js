@@ -202,10 +202,11 @@ export function createTumble() {
   };
 }
 
-/** Ball-centre distance from the centroid at rest (fused: the edge is under bridgeDistance). */
-export const REST_DIST = 0.45;
+/** Ball-centre distance from the centroid at rest: bridged while the music fills the balls out,
+ * separate droplets when they shrink in silence (edge 0.95 vs bridgeDistance(r, K)). */
+export const REST_DIST = 0.58;
 /** Largest outward (and inward) spring offset. */
-export const OFF_MAX = 1;
+export const OFF_MAX = 0.85;
 export const MAX_DIST = REST_DIST + OFF_MAX;
 export const MIN_DIST = 0.2;
 /** Ball radius range (before the Size param scales the whole scene). */
