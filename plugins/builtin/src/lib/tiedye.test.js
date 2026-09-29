@@ -15,7 +15,9 @@ import {
   bandCoord,
   bandOf,
   edgesFromWidths,
-  createBandWidths, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH } from "./tiedye.js";
+  createBandWidths,
+  createIntensity,
+  PULSE_MAX, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH } from "./tiedye.js";
 
 describe("createBandWidths", () => {
   it("gives even bands for a silent track", () => {
@@ -334,5 +336,34 @@ describe("band index (mirror of tiedye.frag)", () => {
     for (let k = 0; k < 100; k++) across.add(bandOf(t(k / 100), edges, n));
     expect(across.size).toBe(n);
     for (const x of [0.03, 0.11, 0.07]) expect(t(-x)).toBeCloseTo(t(x), 5);
+  });
+});
+
+describe("createIntensity", () => {
+  /** Rises that start per second under a 10 Hz onset train. */
+  const risesPerSecond = (/** @type {boolean} */ reduce) => {
+    const it = createIntensity();
+    let prev = 1;
+    let rising = false;
+    let rises = 0;
+    let max = 0;
+    for (let f = 0; f < 240; f++) {
+      const v = it.step(f % 6 === 0, 1, 1 / 60, reduce);
+      max = Math.max(max, v);
+      if (v > prev + 1e-6 && !rising) rises++;
+      rising = v > prev + 1e-6;
+      prev = v;
+    }
+    return { perSecond: rises / 4, max };
+  };
+
+  it("swells dye strength on beats, at most 3 rises per second with Reduce flashing", () => {
+    const off = risesPerSecond(false);
+    const on = risesPerSecond(true);
+    expect(off.perSecond).toBeGreaterThan(8);
+    expect(on.perSecond).toBeLessThanOrEqual(3);
+    expect(on.perSecond).toBeGreaterThan(1);
+    expect(off.max).toBeLessThanOrEqual(1 + PULSE_MAX);
+    expect(off.max).toBeGreaterThan(1 + PULSE_MAX / 2);
   });
 });

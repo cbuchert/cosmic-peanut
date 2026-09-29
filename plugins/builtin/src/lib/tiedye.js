@@ -1,5 +1,6 @@
 // @ts-check
-/** Tie-Dye's pure logic. */
+/** Tie-Dye's pure logic: band widths, spin, blooms, arm warp, selection, band geometry, intensity. */
+import { createFlashLimiter } from "./flash.js";
 
 /** Most colors a palette may have (uniform array sizes in the shader). */
 export const MAX_COLORS = 8;
@@ -300,4 +301,30 @@ export function bandOf(t, edges, n) {
   let i = 0;
   while (i < n - 1 && t >= edges[i + 1]) i++;
   return i;
+}
+
+/** Most a beat can strengthen the dye (full-frame, so it goes through the flash limiter). */
+export const PULSE_MAX = 0.15;
+
+/** Seconds for a beat's swell to decay. */
+const PULSE_DECAY = 0.25;
+
+/**
+ * Global dye strength, 1 to 1 + PULSE_MAX: a beat swells it, and it decays back. The swell is
+ * full-frame, so it passes through the flash limiter (≤ 3 new rises per second with Reduce
+ * flashing on).
+ */
+export function createIntensity() {
+  const flash = createFlashLimiter();
+  let kick = 0;
+  return {
+    /**
+     * @param {boolean} onset `audio.onset` @param {number} onsetStrength `audio.onsetStrength`
+     * @param {number} dt seconds @param {boolean} reduceFlashing `ctx.reduceFlashing`
+     */
+    step(onset, onsetStrength, dt, reduceFlashing) {
+      kick = onset ? Math.max(kick, Math.min(1, 0.5 + Math.max(0, onsetStrength))) : kick * Math.exp(-dt / PULSE_DECAY);
+      return 1 + PULSE_MAX * flash.step(kick, dt, reduceFlashing);
+    },
+  };
 }
