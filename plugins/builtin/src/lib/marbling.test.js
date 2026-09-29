@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { resizeMap, toOldPage, DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
+import { createEventQueue, MAX_PENDING, resizeMap, toOldPage, DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
 
 const out = new Float64Array(2);
 
@@ -235,6 +235,8 @@ describe("createMarbler", () => {
       m.step(audioFrame({ onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, PARAMS, ENV);
       const px = m.evA[1];
       const py = m.evA[2];
+      const spray = new Set(); // drops flicked around it on the same frame
+      for (let i = 1; i < m.count; i++) spray.add(`${m.evA[i * 4 + 1]},${m.evA[i * 4 + 2]}`);
       let parent2 = 0;
       for (let f = 0; f < 60; f++) {
         for (let i = 0; i < m.count; i++) {
@@ -244,6 +246,7 @@ describe("createMarbler", () => {
             parent2 += m.evA[i * 4 + 3];
             continue;
           }
+          if (spray.has(`${x},${y}`)) continue;
           seen++;
           expect(Math.hypot(x - px, y - py)).toBeLessThan(0.5 * Math.sqrt(parent2));
           expect(m.evC[i * 4 + 2] + m.evC[i * 4 + 3]).toBe(1); // light or deep ink
@@ -487,6 +490,47 @@ describe("resize", () => {
     expect(m.evA[2]).toBeCloseTo((y - 0.5) * k + 0.5, 5);
     expect(m.evA[3]).toBeGreaterThan(0);
     expect(m.evA[3]).toBeLessThan(r2 * k * k);
+  });
+
+  it("flicks a spray of smaller drops around each hit, some of them vein ink (black ground)", () => {
+    let spray = 0;
+    let vein = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      const m = createMarbler(seed);
+      m.step(audioFrame(), DT, PARAMS, ENV);
+      m.step(audioFrame({ onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, PARAMS, ENV);
+      const r = Math.sqrt(0.075 ** 2 * 2); // generous bound on the main drop's radius
+      for (let i = 1; i < m.count; i++) {
+        if (m.evA[i * 4] !== EV_DROP) continue;
+        spray++;
+        expect(Math.hypot(m.evA[i * 4 + 1] - m.evA[1], m.evA[i * 4 + 2] - m.evA[2])).toBeLessThan(4 * r);
+        if (m.evC[i * 4] === 1) vein++;
+      }
+    }
+    expect(spray / 20).toBeGreaterThan(2);
+    expect(vein).toBeGreaterThan(spray * 0.15);
+  });
+});
+
+describe("createEventQueue", () => {
+  it("collects several frames of events, oldest first, until it is full", () => {
+    const q = createEventQueue();
+    expect(MAX_PENDING).toBe(48);
+    const m = createMarbler(1);
+    const frames = [];
+    for (let f = 0; f < 200 && q.fits(MAX_EVENTS); f++) {
+      m.step(audioFrame({ rms: 0.2, onset: f % 10 === 0, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, PARAMS, ENV);
+      frames.push([...m.evA.slice(0, m.count * 4)]);
+      q.append(m);
+    }
+    const all = frames.flat();
+    expect(q.count * 4).toBe(all.length);
+    expect([...q.evA.slice(0, q.count * 4)]).toEqual(all);
+    expect(q.count).toBeGreaterThan(MAX_PENDING - MAX_EVENTS);
+    expect(q.fits(MAX_EVENTS)).toBe(false);
+    q.clear();
+    expect(q.count).toBe(0);
+    expect(q.fits(MAX_EVENTS)).toBe(true);
   });
 });
 

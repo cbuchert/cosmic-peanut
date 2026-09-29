@@ -247,7 +247,7 @@ function loudestRegion(bands) {
 /** Events applied per frame (uniform array length in sim.frag). */
 export const MAX_EVENTS = 16;
 /** Drops being poured at once (each emits one DROP slice per frame). */
-export const MAX_POURS = 12;
+export const MAX_POURS = 14;
 export const EV_DROP = 1;
 export const EV_DRAG = 2;
 export const EV_SHIFT = 3;
@@ -402,6 +402,21 @@ export function createMarbler(seed) {
     const y = 0.5 + (rand() - 0.5) * rc.spread;
     if (rand() < rc.clear) spawn(x, y, r, 0, -1, -1, rc.pour, 0);
     else spawn(x, y, r, rc.rimT, rc.ink, rc.rimInk, rc.pour, 0);
+    if (scale === 1) {
+      // A flick of the brush: a spray of smaller drops around the hit, a third of them vein ink
+      // that later gets squeezed into the dark ground between the cells.
+      const k = 1 + Math.floor(rand() * 3 + 3 * hit);
+      for (let j = 0; j < k; j++) {
+        const a = rand() * 2 * Math.PI;
+        const d = r * (1.2 + 1.8 * rand());
+        const sr = r * (0.15 + 0.4 * rand());
+        const u = rand();
+        const sxj = x + d * Math.cos(a);
+        const syj = y + d * Math.sin(a);
+        if (u < 0.35) spawn(sxj, syj, sr * 1.3, 0, 0, 0, 0.12, 0);
+        else spawn(sxj, syj, sr, 0.0015, u < 0.6 ? 1 : u < 0.8 ? 2 : 3, 0, 0.12, 0);
+      }
+    }
     if (scale === 1 && rand() < rc.sat) {
       const k = 1 + Math.floor(rand() * rc.maxSat);
       for (let j = 0; j < k; j++) {
@@ -648,4 +663,41 @@ export function toOldPage(map, x, y, out) {
   out[0] = (x - map[3]) / map[0] + map[1];
   out[1] = (y - map[4]) / map[0] + map[2];
   return out;
+}
+
+/**
+ * Events waiting to be baked into the ink texture. Resampling the texture is what blurs it, so
+ * instead of baking every frame, the composite applies all pending events on the fly (exact, no
+ * blur) and the texture is only re-baked when the queue fills — ~10× fewer resamples.
+ */
+export const MAX_PENDING = 48;
+
+export function createEventQueue() {
+  const q = {
+    evA: new Float32Array(MAX_PENDING * 4),
+    evB: new Float32Array(MAX_PENDING * 4),
+    evC: new Float32Array(MAX_PENDING * 4),
+    evD: new Float32Array(MAX_PENDING * 4),
+    count: 0,
+    /** @param {number} n */
+    fits(n) {
+      return q.count + n <= MAX_PENDING;
+    },
+    /** Append a frame's events (the caller bakes first when they don't fit). @param {{ evA: Float32Array, evB: Float32Array, evC: Float32Array, evD: Float32Array, count: number }} m */
+    append(m) {
+      const n = Math.min(m.count, MAX_PENDING - q.count);
+      const at = q.count * 4;
+      for (let i = 0; i < n * 4; i++) {
+        q.evA[at + i] = m.evA[i];
+        q.evB[at + i] = m.evB[i];
+        q.evC[at + i] = m.evC[i];
+        q.evD[at + i] = m.evD[i];
+      }
+      q.count += n;
+    },
+    clear() {
+      q.count = 0;
+    },
+  };
+  return q;
 }
