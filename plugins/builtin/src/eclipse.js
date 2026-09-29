@@ -22,6 +22,7 @@ import {
   createGlare,
   createRing,
   BASS_WIDEN,
+  cloudThreshold,
   createRipple,
   effectiveMotion,
   fitEclipse,
@@ -34,7 +35,7 @@ import { createProgram, createTarget } from "./lib/gl.js";
 const CLOUD_DIV = 3;
 
 /** How far (composition units) a full-level sector's tendrils reach past the ring at Reach 1. */
-const REACH = 0.45;
+const REACH = 0.6;
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
@@ -50,6 +51,7 @@ export default async function create(ctx) {
   const cu = cloudProg.u;
   // Cloud fields at 1/CLOUD_DIV of the canvas resolution (smooth; edges are cut at full res).
   const fields = createTarget(gl);
+  fields.resize(1, 1); // complete before the first cloud pass
   const vao = gl.createVertexArray();
 
   const tex = gl.createTexture();
@@ -110,6 +112,7 @@ export default async function create(ctx) {
       gl.disable(gl.BLEND);
       gl.bindVertexArray(vao);
       const clouds = Number(p.clouds);
+      const th = cloudThreshold(clouds, mid);
       if (clouds > 0) {
         const fw = Math.max(1, Math.ceil(w / CLOUD_DIV));
         const fh = Math.max(1, Math.ceil(h / CLOUD_DIV));
@@ -122,6 +125,7 @@ export default async function create(ctx) {
         gl.uniform1f(cu.u_radius, layout.radius);
         gl.uniform1f(cu.u_outer, outer);
         gl.uniform1f(cu.u_time, clock);
+        gl.uniform1f(cu.u_th, th);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
 
@@ -138,6 +142,8 @@ export default async function create(ctx) {
       gl.uniform1i(u.u_lev, 0);
       gl.uniform1i(u.u_fields, 1);
       gl.uniform2f(u.u_res, w, h);
+      gl.uniform1f(u.u_fieldTexel, 1 / fields.width);
+      gl.uniform1f(u.u_th, th);
       gl.uniform2f(u.u_center, layout.cx, layout.cy);
       gl.uniform1f(u.u_radius, layout.radius);
       gl.uniform1f(u.u_disc, ring.disc);
@@ -147,7 +153,6 @@ export default async function create(ctx) {
       gl.uniform1f(u.u_time, clock);
       gl.uniform1f(u.u_reach, REACH * Number(p.reach) * Math.min(1.5, react));
       gl.uniform1f(u.u_clouds, clouds);
-      gl.uniform1f(u.u_mid, mid);
       gl.uniform2fv(u.u_flares, flareOut);
       gl.uniform3f(u.u_gamma, gamma[0], gamma[1], gamma[2]);
       gl.uniform1f(u.u_sky, skyAlpha(p.sky));

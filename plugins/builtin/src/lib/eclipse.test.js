@@ -9,6 +9,7 @@ import {
   createFlares,
   createGlare,
   createRing,
+  cloudThreshold,
   createRipple,
   DEFAULT_REACTIVITY,
   DEFAULT_ROTATION,
@@ -315,5 +316,24 @@ describe("createRipple", () => {
       if (len) expect(peak).toBeGreaterThan(0.5);
       else expect(peak).toBe(0);
     }
+  });
+});
+
+describe("cloudThreshold", () => {
+  it("more Clouds and louder mids lower the density threshold (denser ink), bounded and smooth", () => {
+    expect(cloudThreshold(0.5, 1)).toBeLessThan(cloudThreshold(0.5, 0));
+    expect(cloudThreshold(1, 0)).toBeLessThan(cloudThreshold(0.2, 0));
+    for (const [c, m] of [
+      [0, 0],
+      [1, 1],
+      [5, 9],
+      [NaN, NaN],
+      [-1, -1],
+    ]) {
+      const th = cloudThreshold(c, m);
+      expect(th).toBeGreaterThanOrEqual(-0.2);
+      expect(th).toBeLessThanOrEqual(0.2);
+    }
+    expect(Math.abs(cloudThreshold(0.5, 0.51) - cloudThreshold(0.5, 0.5))).toBeLessThan(0.002);
   });
 });

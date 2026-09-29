@@ -13,12 +13,13 @@ uniform float u_rot;       // pattern rotation, rad
 uniform float u_time;      // drift clock, s
 uniform float u_reach;     // tendril reach at level 1, units
 uniform float u_clouds;    // cloud amount 0–1
-uniform float u_mid;       // smoothed mids 0–1
 uniform vec2 u_flares[4];  // (distance past the ring, amplitude)
 uniform vec3 u_gamma;      // tint: colour = grey^gamma
 uniform float u_sky;       // 1 = opaque black sky, 0 = black is transparent
 uniform sampler2D u_fields; // cloud fields (clouds.frag), screen-aligned
 uniform vec2 u_res;        // canvas px
+uniform float u_th;        // cloud edge threshold (eclipse.js cloudThreshold)
+uniform float u_fieldTexel; // one cloud-field texel, in st (x) units
 
 out vec4 outColor;
 
@@ -102,19 +103,53 @@ void main() {
   float outer = u_outer + 0.007 * rip;
   float ringM = clamp((r - inner) / px + 0.5, 0.0, 1.0) * clamp((outer - r) / px + 0.5, 0.0, 1.0);
 
+  float rho = max(r - outer, 0.0);
+
+  // Flares: rings of extra light travelling outward.
+  float flare = 0.0;
+  for (int i = 0; i < 4; i++) {
+    float d = (rho - u_flares[i].x) / 0.06;
+    flare += u_flares[i].y * exp(-d * d);
+  }
+
+  // ---- Marbled ink clouds, from the low-resolution fields (clouds.frag); crisp edges and
+  // streaks are cut here at full resolution. (Uniform control flow: derivatives are valid.)
+  float cloud = 0.0;
+  if (u_clouds > 0.0) {
+    vec2 st = gl_FragCoord.xy / u_res;
+    vec4 fld = texture(u_fields, st);
+    float dens = fld.r * 2.0 - 1.0;
+    float m = (fld.g - 0.5) * 40.0;
+    float vn = fld.b * 2.0 - 1.0;
+    float tone = mix(0.6, 1.0, smoothstep(-0.15, 0.25, fld.a * 2.0 - 1.0));
+    float th = u_th;
+    float aa = max(fwidth(dens), 1e-5);
+    // Marbling: fine grey-white streaks following the warp (marbled paper), dark cracks.
+    float streak = abs(fract(m) - 0.5) * 2.0; // 0 on a streak … 1 between
+    float mw = max(2.0 * fwidth(m), 1e-4); // streak phase per pixel (×2: distance to the line)
+    float lines = smoothstep(0.35 - mw, 0.35 + mw, streak);
+    // Crisp body; past its edge the marbling streaks run on as fibres that thin out: feathery.
+    // Fibres only where the streaks run (not round the little loops at their turning points).
+    // |∇m| from smooth central differences of the field (fwidth is too blocky here).
+    vec2 e = vec2(1.5 * u_fieldTexel, 0.0);
+    float gx = texture(u_fields, st + e.xy).g - texture(u_fields, st - e.xy).g;
+    vec2 ey = vec2(0.0, e.x * u_res.x / u_res.y); // the same distance in y
+    float gy = texture(u_fields, st + ey).g - texture(u_fields, st - ey).g;
+    float grad = 40.0 * length(vec2(gx, gy)) / (2.0 * e.x * u_res.x * px); // m per unit
+    float run = smoothstep(4.0, 12.0, grad);
+    float fibres = (1.0 - smoothstep(0.12, 0.12 + mw, streak)) * smoothstep(th - 0.07, th, dens) * run;
+    float body = max(smoothstep(th - aa, th + aa, dens), 0.8 * fibres);
+    float vein = smoothstep(0.0, 0.025 + aa, abs(vn));
+    // Brighter toward the eroded edge, like ink pooled at a drying front.
+    float rim = smoothstep(th + 0.12, th, dens);
+    cloud = body * tone * mix(0.9, 1.0, max(lines, 1.0 - run)) * mix(0.3, 1.0, vein) * (0.85 + 0.15 * rim);
+    cloud *= min(1.0, 0.5 + u_clouds) * (1.0 + 0.35 * flare);
+  }
+
   float v = 0.0;
   if (r > outer - 0.02) {
-    float rho = max(r - outer, 0.0);
-
-    // Flares: rings of extra light travelling outward.
-    float flare = 0.0;
-    for (int i = 0; i < 4; i++) {
-      float d = (rho - u_flares[i].x) / 0.06;
-      flare += u_flares[i].y * exp(-d * d);
-    }
-
     // ---- Corona: radially stretched, domain-warped ridged noise, gated by the level per angle.
-    float L = 0.055 + u_reach * lvl + 0.22 * flare * (0.4 + lvl);
+    float L = 0.055 + u_reach * pow(lvl, 0.8) + 0.22 * flare * (0.4 + lvl);
     float t = rho / L;
     float corona = 0.0;
     if (t < 1.05) {
@@ -137,34 +172,9 @@ void main() {
       }
       corona = max(fil.x, 0.3 * fil.y) * mix(1.0, 0.62, smoothstep(0.0, 1.0, t));
       // The white mass fused to the ring, with a torn edge.
-      float fused = 1.0 - smoothstep(0.0, 0.003 + 0.004 * lvl, rho - 0.008 - 0.02 * lvl - 0.01 * warp.x - 0.005 * jit);
+      float fused = 1.0 - smoothstep(0.0, 0.003 + 0.004 * lvl, rho - 0.008 - 0.03 * lvl - 0.012 * warp.x - 0.006 * jit);
       corona = max(corona, fused);
       corona *= 1.0 + 0.8 * flare;
-    }
-
-    // ---- Marbled ink clouds, from the low-resolution fields (clouds.frag); crisp edges and
-    // streaks are cut here at full resolution.
-    float cloud = 0.0;
-    if (u_clouds > 0.0) {
-      vec4 fld = texture(u_fields, gl_FragCoord.xy / u_res);
-      float dens = fld.r * 2.0 - 1.0;
-      float m = (fld.g - 0.5) * 40.0;
-      float vn = fld.b * 2.0 - 1.0;
-      float tone = mix(0.5, 1.0, smoothstep(-0.15, 0.25, fld.a * 2.0 - 1.0));
-      float th = 0.16 - 0.28 * u_clouds - 0.06 * u_mid;
-      float aa = 2.2 * px; // density units per pixel ≈ px (its gradient is ~1–2 per unit)
-      // Marbling: fine grey-white streaks following the warp (marbled paper), dark cracks.
-      float streak = abs(fract(m) - 0.5) * 2.0; // 0 on a streak … 1 between
-      float mw = 14.0 * 2.0 * px * 2.0; // streak phase per pixel
-      float lines = smoothstep(0.35 - mw, 0.35 + mw, streak);
-      // Crisp body; past its edge the marbling streaks run on as fibres that thin out: feathery.
-      float fibres = (1.0 - smoothstep(0.12, 0.12 + mw, streak)) * smoothstep(th - 0.07, th, dens);
-      float body = max(smoothstep(th - aa, th + aa, dens), 0.8 * fibres);
-      float vein = smoothstep(0.0, 0.04 + aa, abs(vn));
-      // Brighter toward the eroded edge, like ink pooled at a drying front.
-      float rim = smoothstep(th + 0.12, th, dens);
-      cloud = body * tone * mix(0.9, 1.0, lines) * mix(0.1, 1.0, vein) * (0.85 + 0.15 * rim);
-      cloud *= min(1.0, 0.5 + u_clouds) * (1.0 + 0.35 * flare);
     }
 
     float glow = exp(-rho / (0.004 + 0.012 * u_swell)) * (0.45 + 0.4 * u_swell);

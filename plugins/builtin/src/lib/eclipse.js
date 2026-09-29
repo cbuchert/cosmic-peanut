@@ -315,3 +315,15 @@ export function createRipple(count = SECTORS) {
     },
   };
 }
+
+/**
+ * The density at which the marbled clouds' edge is cut (shaders/eclipse): more Clouds and louder
+ * mids (smoothed, 0–1) lower it, so the ink spreads.
+ * @param {number} clouds Clouds param, 0–1
+ * @param {number} mid smoothed mids, 0–1
+ */
+export function cloudThreshold(clouds, mid) {
+  const c = clouds > 0 ? (clouds < 1 ? clouds : 1) : 0; // NaN → 0
+  const m = mid > 0 ? (mid < 1 ? mid : 1) : 0;
+  return 0.16 - 0.28 * c - 0.06 * m;
+}
