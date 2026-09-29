@@ -383,3 +383,42 @@ describe("renew", () => {
   });
 });
 
+describe("determinism and brightness", () => {
+  /** @param {number} seed @param {boolean} reduceFlashing */
+  const run = (seed, reduceFlashing = true) => {
+    const m = createMarbler(seed);
+    const log = [];
+    const sheen = [];
+    for (let f = 0; f < 240; f++) {
+      const onset = f % 6 === 0; // 10 Hz strobe of hits
+      const lo = (f * 13) % 48;
+      const a = audioFrame({ rms: 0.25, peak: 0.5, onset, onsetStrength: 1, centroid: 0.2, bands: bandsHit(lo, lo + 16) });
+      m.step(a, DT, { ...PARAMS, rake: 1, renew: 1 }, { ...ENV, reduceFlashing });
+      log.push(m.count, ...m.evA.slice(0, m.count * 4), ...m.evB.slice(0, m.count * 4));
+      sheen.push(m.sheen);
+    }
+    return { log, sheen };
+  };
+
+  it("is deterministic given the seed and the audio", () => {
+    expect(run(9).log).toEqual(run(9).log);
+    expect(run(9).log).not.toEqual(run(10).log);
+  });
+
+  it("pulses a sheen on hits, at most 3 rises a second with reduceFlashing", () => {
+    /** @param {number[]} s */
+    const risesPerSecond = (s) => {
+      let best = 0;
+      const starts = [];
+      for (let i = 1; i < s.length; i++) if (s[i] > s[i - 1] + 1e-6 && !(s[i - 1] > s[i - 2] + 1e-6)) starts.push(i);
+      for (const a of starts) best = Math.max(best, starts.filter((b) => b >= a && b < a + 60).length);
+      return best;
+    };
+    const limited = run(1).sheen;
+    expect(Math.max(...limited)).toBeGreaterThan(0.3);
+    expect(Math.max(...limited)).toBeLessThanOrEqual(1);
+    expect(risesPerSecond(limited)).toBeLessThanOrEqual(3);
+    expect(risesPerSecond(run(1, false).sheen)).toBeGreaterThan(3);
+  });
+});
+

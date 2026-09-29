@@ -5,6 +5,7 @@
  *
  * Coordinates are "page units": y from 0 (bottom) to 1 (top), x from 0 to the aspect ratio.
  */
+import { createFlashLimiter } from "./flash.js";
 
 /**
  * A drop of radius √r2 landing at (cx, cy): every existing point p moves to
@@ -357,6 +358,8 @@ export function createMarbler(seed) {
   // Renew: sub-pixel drift accumulator (sim pixels) and the next large clear drop.
   let driftX = 0;
   let driftY = 0;
+  const flash = createFlashLimiter();
+  let kick = 0;
   let clearClock = 0;
   let nextClear = CLEAR_EVERY;
 
@@ -434,6 +437,8 @@ export function createMarbler(seed) {
     count: 0,
     /** Smoothed loudness 0–1 that sets the pour rate. */
     energy: 0,
+    /** 0–1 sheen pulse on hits (≤ 3 rises/s under reduceFlashing). */
+    sheen: 0,
     /**
      * @param {PourAudio} audio
      * @param {number} dt seconds
@@ -465,6 +470,10 @@ export function createMarbler(seed) {
       }
       if (drizzle > 1) drizzle = 1;
       if (region >= 0) dropFrom(region, scale, audio, params, env);
+
+      // A wet sheen on each hit (the composite brightens the page a little): flash-limited.
+      kick = audio.onset && !audio.silent ? clamp01(audio.onsetStrength * params.reactivity) : kick * Math.exp(-dt * 5);
+      m.sheen = flash.step(kick, dt, env.reduceFlashing);
 
       let n = 0;
       // Renew. The page drifts slowly, by whole sim pixels only (an exact copy, no resampling
