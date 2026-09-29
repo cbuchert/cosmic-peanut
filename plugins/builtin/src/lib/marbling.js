@@ -302,6 +302,12 @@ const STYLUS_GRIP = 0.9;
 const STYLUS_MARGIN = 0.03;
 const STYLUS_SPACING = 0.02;
 
+/** Renew: drift speed (page heights/s at Renew 1), mean seconds between large clear drops at
+ * Renew 1 (scaled 0.6× when quiet … 1.4× when loud), and how long one takes to bloom open. */
+const DRIFT_SPEED = 0.003;
+const CLEAR_EVERY = 30;
+const CLEAR_POUR = 2.5;
+
 /** @param {number} x */
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
@@ -310,6 +316,7 @@ const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
  * - DROP  evA (1, x, y, R²)   evB (cellR², 0, 0, 0): a concentric slice of a drop being poured;
  *   inside √cellR² takes evC's ink, the ring out to R takes evD's (the rim, poured first).
  * - DRAG  evA (2, sx, sy, 1/σ²) evB (vx, vy, 0, 0): the stylus step (see dragForward).
+ * - SHIFT evA (3, dx, dy, 0): the whole page drifts by whole sim pixels.
  * Inks are 4-vectors of ink amounts (one-hot; all zero = clear, i.e. paper).
  * @param {number} seed
  */
@@ -347,6 +354,11 @@ export function createMarbler(seed) {
   let centroidS = 0.1;
   let peakS = 0;
   const v = new Float64Array(2);
+  // Renew: sub-pixel drift accumulator (sim pixels) and the next large clear drop.
+  let driftX = 0;
+  let driftY = 0;
+  let clearClock = 0;
+  let nextClear = CLEAR_EVERY;
 
   /**
    * Queue a drop. Returns the slot, or -1 when every slot is busy (the drop is skipped: the cap).
@@ -455,6 +467,35 @@ export function createMarbler(seed) {
       if (region >= 0) dropFrom(region, scale, audio, params, env);
 
       let n = 0;
+      // Renew. The page drifts slowly, by whole sim pixels only (an exact copy, no resampling
+      // blur), pushing old paint off one edge and bringing fresh paper in at the other; and now
+      // and then (sooner when it's quiet) a large clear drop blooms open over a few seconds.
+      const renew = Math.max(0, params.renew);
+      if (renew > 0) {
+        const a = 0.9 + 0.05 * now;
+        const speed = renew * DRIFT_SPEED * dt * env.pxPerUnit;
+        driftX += speed * Math.cos(a);
+        driftY += speed * Math.sin(a);
+        const ix = Math.trunc(driftX);
+        const iy = Math.trunc(driftY);
+        if (ix !== 0 || iy !== 0) {
+          driftX -= ix;
+          driftY -= iy;
+          evA[0] = EV_SHIFT;
+          evA[1] = ix / env.pxPerUnit;
+          evA[2] = iy / env.pxPerUnit;
+          evA[3] = 0;
+          n = 1;
+        }
+        clearClock += dt * renew;
+        if (clearClock >= nextClear) {
+          nextClear = clearClock + CLEAR_EVERY * (0.6 + 0.8 * energy) * (0.7 + 0.6 * rand());
+          const x = env.aspect * (0.15 + 0.7 * rand());
+          const y = 0.2 + 0.6 * rand();
+          spawn(x, y, 0.1 + 0.08 * rand(), 0, -1, -1, CLEAR_POUR, 0);
+        }
+      }
+
       // The stylus rakes through the paint: height from the (smoothed) spectral centroid, a
       // wobble from the waveform's peak, speed from the energy; it drips clear paper as it goes.
       centroidS += (audio.centroid - centroidS) * (1 - Math.exp(-dt / 0.6));
@@ -472,15 +513,15 @@ export function createMarbler(seed) {
         v[0] = (sx - x0) * STYLUS_GRIP;
         v[1] = (sy - y0) * STYLUS_GRIP;
         clampDrag(STYLUS_INV_S2, v);
-        evA[0] = EV_DRAG;
-        evA[1] = x0;
-        evA[2] = y0;
-        evA[3] = STYLUS_INV_S2;
-        evB[0] = v[0];
-        evB[1] = v[1];
-        evB[2] = 0;
-        evB[3] = 0;
-        n = 1;
+        evA[n * 4] = EV_DRAG;
+        evA[n * 4 + 1] = x0;
+        evA[n * 4 + 2] = y0;
+        evA[n * 4 + 3] = STYLUS_INV_S2;
+        evB[n * 4] = v[0];
+        evB[n * 4 + 1] = v[1];
+        evB[n * 4 + 2] = 0;
+        evB[n * 4 + 3] = 0;
+        n++;
         travelled += Math.hypot(sx - x0, sy - y0);
         if (travelled - deposited >= STYLUS_SPACING) {
           deposited = travelled;

@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createMarbler, EV_DRAG, EV_DROP, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
+import { createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
 
 const out = new Float64Array(2);
 
@@ -331,6 +331,55 @@ describe("stylus", () => {
         for (let i = 0; i < m.count; i++) expect(m.evA[i * 4]).not.toBe(EV_DRAG);
       }
     }
+  });
+});
+
+describe("renew", () => {
+  /** Run `seconds` of quiet music; collect clear drops' total r² by centre, shifts, max slice. */
+  const run = (/** @type {number} */ renew, seconds = 120) => {
+    const m = createMarbler(4);
+    /** @type {Map<string, number>} */
+    const clear = new Map();
+    let shiftPx = 0;
+    let maxSlice = 0;
+    for (let f = 0; f < seconds * 60; f++) {
+      m.step(audioFrame({ rms: 0.03 }), DT, { ...PARAMS, renew }, ENV);
+      for (let i = 0; i < m.count; i++) {
+        const t = m.evA[i * 4];
+        if (t === EV_SHIFT) {
+          const dx = m.evA[i * 4 + 1] * ENV.pxPerUnit;
+          const dy = m.evA[i * 4 + 2] * ENV.pxPerUnit;
+          expect(Math.abs(dx - Math.round(dx))).toBeLessThan(1e-3); // whole pixels: no resampling blur
+          expect(Math.abs(dy - Math.round(dy))).toBeLessThan(1e-3);
+          shiftPx += Math.hypot(dx, dy);
+        }
+        if (t !== EV_DROP) continue;
+        maxSlice = Math.max(maxSlice, m.evA[i * 4 + 3]);
+        if ([0, 1, 2, 3].some((k) => m.evC[i * 4 + k] !== 0)) continue;
+        const key = `${m.evA[i * 4 + 1]},${m.evA[i * 4 + 2]}`;
+        clear.set(key, (clear.get(key) ?? 0) + m.evA[i * 4 + 3]);
+      }
+    }
+    const big = [...clear.values()].filter((r2) => Math.sqrt(r2) >= 0.1).length;
+    return { big, shiftPx, maxSlice };
+  };
+
+  it("slowly drifts the page by whole pixels and opens occasional large clear drops", () => {
+    const r = run(1);
+    expect(r.big).toBeGreaterThanOrEqual(2);
+    expect(r.shiftPx).toBeGreaterThan(120 * 2); // a few px/s at 1440p
+    expect(r.shiftPx).toBeLessThan(120 * 20);
+  });
+
+  it("never resets visibly: no frame pours more than a sliver of the page", () => {
+    // π·0.0015 ≈ 0.3% of a 16:9 page per frame at most.
+    expect(run(2, 60).maxSlice).toBeLessThan(0.0015);
+  });
+
+  it("stands still with Renew at 0", () => {
+    const r = run(0, 60);
+    expect(r.big).toBe(0);
+    expect(r.shiftPx).toBe(0);
   });
 });
 
