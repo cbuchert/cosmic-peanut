@@ -42,7 +42,8 @@ export function rippleWave(j, nodes, t) {
 }
 
 /**
- * Verlet chains, one per tentacle. Node 0 is pinned to its anchor (a point on the moving cube);
+ * Verlet chains, one per tentacle. Node 0 is pinned to its anchor (a point on the moving cube)
+ * and node 1 one segment straight out along the normal;
  * the rest integrate with damping and a pull toward the chain's rest pose (straight out along the
  * anchor normal, strongest near the root, so tentacles extend rather than collapse), then distance
  * constraints restore the segment lengths (a few relaxation passes, then a root→tip pass that makes
@@ -126,8 +127,13 @@ export function createChains(count, nodes) {
         pos[base] = old[base] = rx;
         pos[base + 1] = old[base + 1] = ry;
         pos[base + 2] = old[base + 2] = rz;
+        // The first segment is rigid, straight out of the face: the tentacle always leaves its
+        // face square, however hard the rest whips.
+        pos[base + 3] = old[base + 3] = rx + nx * L;
+        pos[base + 4] = old[base + 4] = ry + ny * L;
+        pos[base + 5] = old[base + 5] = rz + nz * L;
         // Integrate.
-        for (let j = 1; j < nodes; j++) {
+        for (let j = 2; j < nodes; j++) {
           const o = base + j * 3;
           const d = L * j;
           const g = kh2 * pull[j];
@@ -145,13 +151,13 @@ export function createChains(count, nodes) {
         }
         // Relax the distance constraints (the root is pinned).
         for (let it = 0; it < this.iterations - 1; it++) {
-          for (let j = 1; j < nodes; j++) {
+          for (let j = 2; j < nodes; j++) {
             const a = base + (j - 1) * 3;
             const b = a + 3;
             const dx = pos[b] - pos[a], dy = pos[b + 1] - pos[a + 1], dz = pos[b + 2] - pos[a + 2];
             const len = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-9;
             const diff = (len - L) / len;
-            if (j === 1) {
+            if (j === 2) {
               pos[b] -= dx * diff;
               pos[b + 1] -= dy * diff;
               pos[b + 2] -= dz * diff;
@@ -167,7 +173,7 @@ export function createChains(count, nodes) {
           }
         }
         // Final root→tip pass: exact lengths.
-        for (let j = 1; j < nodes; j++) {
+        for (let j = 2; j < nodes; j++) {
           const a = base + (j - 1) * 3;
           const b = a + 3;
           const dx = pos[b] - pos[a], dy = pos[b + 1] - pos[a + 1], dz = pos[b + 2] - pos[a + 2];

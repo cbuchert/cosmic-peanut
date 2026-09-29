@@ -37,6 +37,19 @@ function node(c, i, j) {
 }
 
 describe("createChains", () => {
+  it("keeps the first segment rigid along the face normal (the tentacle leaves its face square)", () => {
+    const c = createChains(1, 12);
+    c.segLen = 0.1;
+    c.anchor(0, 0, 0, 0, 1, 0, 0, 0, 1, 0);
+    c.reset();
+    for (let s = 0; s < 120; s++) {
+      c.anchor(0, 0, Math.sin(s / 10), 0, 0.6, 0.8, 0, 0, 0, 1);
+      c.step(1 / 240);
+      expect(c.pos[3]).toBeCloseTo(0.06, 6);
+      expect(c.pos[4] - Math.sin(s / 10)).toBeCloseTo(0.08, 6);
+    }
+  });
+
   const h = 1 / 240;
 
   it("keeps every segment at its rest length while the root is shaken hard", () => {

@@ -41,6 +41,7 @@ def test_builtin_renderers():
         "blaze": ("webgl2", []),
         "cascade": ("webgl2", []),
         "radar": ("webgl2", []),
+        "tentacube": ("three", ["three"]),
     }
 
 
@@ -263,3 +264,37 @@ def test_radar_manifest():
     assert "contacts" not in params
     for f in ("fullscreen.vert", "paint.frag", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/radar" / f).is_file(), f
+
+
+def test_tentacube_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "tentacube"]
+    assert (v["name"], v["entry"], v["renderer"], v["libs"], v["thumbnail"]) == (
+        "Tentacube",
+        "src/tentacube.js",
+        "three",
+        ["three"],
+        "thumbs/tentacube.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "length",
+        "segments",
+        "drag",
+        "twitch",
+        "pulse",
+        "morph",
+        "material",
+        "background",
+        "tiling",
+        "bloom",
+        "distance",
+    ]
+    assert params["morph"]["options"] == ["off", "slow", "fast"]
+    assert params["material"]["options"] == ["auto", "chrome", "iridescent", "emissive", "obsidian"]
+    assert params["material"]["default"] == "auto"
+    assert params["background"]["options"] == ["hyperbolic", "none"]
+    assert params["tiling"]["options"] == ["{7,3}", "{5,4}", "{4,5}"]
+    seg = params["segments"]
+    assert (seg["min"], seg["max"], seg["step"], seg["default"]) == (12, 48, 1, 24)
+    # The creature code keys "reduce motion" off the twitch default.
+    assert params["twitch"]["default"] == 1

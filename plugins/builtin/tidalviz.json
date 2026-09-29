@@ -142,6 +142,29 @@
         { "id": "floor", "type": "number", "label": "Floor (dB)", "min": -80, "max": -30, "step": 1, "default": -60 },
         { "id": "maxFreq", "type": "select", "label": "Top frequency", "options": ["4k", "8k", "16k"], "default": "16k" }
       ]
+    },
+    {
+      "id": "tentacube",
+      "name": "Tentacube",
+      "description": "A tentacled cube that pulses, twists and twitches to the music, its tentacles dragging behind, adrift in hyperbolic space. Its skin morphs between chrome, oil slick, glowing and obsidian.",
+      "author": "Tidalviz",
+      "entry": "src/tentacube.js",
+      "renderer": "three",
+      "libs": ["three"],
+      "thumbnail": "thumbs/tentacube.jpg",
+      "params": [
+        { "id": "length", "type": "number", "label": "Tentacle length", "min": 0.4, "max": 1.8, "step": 0.01, "default": 1 },
+        { "id": "segments", "type": "number", "label": "Segments", "min": 12, "max": 48, "step": 1, "default": 24 },
+        { "id": "drag", "type": "number", "label": "Inertia", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
+        { "id": "twitch", "type": "number", "label": "Twitch", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "pulse", "type": "number", "label": "Pulse", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "morph", "type": "select", "label": "Morph", "options": ["off", "slow", "fast"], "default": "slow" },
+        { "id": "material", "type": "select", "label": "Material", "options": ["auto", "chrome", "iridescent", "emissive", "obsidian"], "default": "auto" },
+        { "id": "background", "type": "select", "label": "Background", "options": ["hyperbolic", "none"], "default": "hyperbolic" },
+        { "id": "tiling", "type": "select", "label": "Tiling", "options": ["{7,3}", "{5,4}", "{4,5}"], "default": "{7,3}" },
+        { "id": "bloom", "type": "number", "label": "Bloom", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "distance", "type": "number", "label": "Camera distance", "min": 5, "max": 14, "step": 0.1, "default": 7 }
+      ]
     }
   ]
 }

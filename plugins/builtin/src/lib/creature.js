@@ -61,7 +61,7 @@ export function quatAngle(a, b) {
  * out = a * b (Hamilton product, [x, y, z, w]); out may alias a or b.
  * @param {Float64Array} out @param {ArrayLike<number>} a @param {ArrayLike<number>} b
  */
-function quatMul(out, a, b) {
+export function quatMul(out, a, b) {
   const ax = a[0], ay = a[1], az = a[2], aw = a[3];
   const bx = b[0], by = b[1], bz = b[2], bw = b[3];
   out[0] = aw * bx + ax * bw + ay * bz - az * by;
@@ -75,7 +75,7 @@ function quatMul(out, a, b) {
  * out = rotation by |r| about r/|r| (a rotation vector).
  * @param {Float64Array} out @param {number} rx @param {number} ry @param {number} rz
  */
-function quatFromRotVec(out, rx, ry, rz) {
+export function quatFromRotVec(out, rx, ry, rz) {
   const a = Math.hypot(rx, ry, rz);
   const s = a > 1e-12 ? Math.sin(a / 2) / a : 0.5;
   out[0] = rx * s;
