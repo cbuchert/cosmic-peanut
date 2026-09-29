@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createHorizon, createPeakEnvelope, F_MAX, F_MIN, HOLD, REST } from "./horizon.js";
+import { createHorizon, createPeakEnvelope, F_MAX, F_MIN, HOLD, REST, shapeLevel } from "./horizon.js";
 
 const SR = 48000;
 const BINS = 1024;
@@ -48,6 +48,17 @@ describe("createHorizon: the mirrored log-frequency profile", () => {
     expect(out[1]).toBeLessThan(0.1);
     expect(out[N / 2]).toBeGreaterThan(0.5); // the middle stays deep
     for (let i = 1; i < N / 4; i++) expect(out[i], `texel ${i}`).toBeGreaterThanOrEqual(out[i - 1] - 0.02);
+  });
+
+  it("hangs deepest at the centre, like the cover's range, for an evenly loud spectrum", () => {
+    const loud = new Float32Array(BINS);
+    for (let k = 1; k < BINS; k++) loud[k] = 0.3 / Math.sqrt((k * SR) / (2 * BINS) / 1000);
+    const out = run(loud);
+    const centre = out[N / 2];
+    const mid = out[N / 2 + N / 8];
+    const outer = out[N / 2 + (3 * N) / 8 - 4];
+    expect(centre).toBeGreaterThan(mid + 0.08);
+    expect(mid).toBeGreaterThan(outer + 0.08);
   });
 });
 
@@ -105,5 +116,20 @@ describe("createPeakEnvelope: fast attack, gentle peak-hold, slow release", () =
     const a = trace(60, 0.7);
     const b = trace(120, 0.7);
     for (let f = 0; f < a.length; f += 6) expect(Math.abs(a[f] - b[2 * f + 1]), `frame ${f}`).toBeLessThan(0.06);
+  });
+});
+
+describe("shapeLevel: Reactivity as the range's contrast", () => {
+  it("squares levels at 1 (loud frequencies stand out as peaks), is linear at 2 and flat at 0", () => {
+    expect(shapeLevel(0.5, 1)).toBeCloseTo(0.25, 6);
+    expect(shapeLevel(0.5, 2)).toBeCloseTo(0.5, 6);
+    expect(shapeLevel(0.9, 0)).toBe(0);
+    expect(shapeLevel(1, 1)).toBe(1);
+    expect(shapeLevel(0.5, 1.5)).toBeGreaterThan(shapeLevel(0.5, 1));
+    expect(shapeLevel(0.5, 0.5)).toBeLessThan(shapeLevel(0.5, 1));
+    for (const [l, r] of [[7, 1], [-1, 2], [NaN, 1], [0.5, NaN], [0.5, 9]]) {
+      const v = shapeLevel(l, r);
+      expect(v >= 0 && v <= 1, `${l} ${r}`).toBe(true);
+    }
   });
 });

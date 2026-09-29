@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { DEFAULTS, isPainted, layout, PALETTES, palette, resolveParams, BEAM_BRIGHT, BEAM_WIDTH, createBeam, createDiamond, createSun, createSurge, DIAMOND_RATE, REACH_MAX, REACH_MIN, RIM_MAX, RIM_MIN } from "./darksun.js";
+import { createGlow, GLOW_RANGE, DEFAULTS, isPainted, layout, PALETTES, palette, resolveParams, BEAM_BRIGHT, BEAM_WIDTH, createBeam, createDiamond, createSun, createSurge, DIAMOND_RATE, REACH_MAX, REACH_MIN, RIM_MAX, RIM_MIN } from "./darksun.js";
 
 describe("createSun: bass swells the rim and the corona's reach", () => {
   it("is bounded and smooth under violent kicks, and grows with the bass", () => {
@@ -215,5 +215,29 @@ describe("resolveParams", () => {
     expect(calm.reactivity).toBeLessThan(DEFAULTS.reactivity);
     const chosen = resolveParams({ ...base, reactivity: 1.5 }, true, /** @type {any} */ ({}));
     expect(chosen.reactivity).toBe(1.5);
+  });
+});
+
+describe("createGlow: the horizon breathes with the mids", () => {
+  it("rises with midAtt, smoothly, bounded, and adds the (already limited) surge", () => {
+    const glow = createGlow();
+    const dt = 1 / 60;
+    for (let f = 0; f < 120; f++) glow.step(0, 0, dt, 1);
+    const rest = glow.value;
+    expect(rest).toBeCloseTo(GLOW_RANGE[0], 3);
+    let prev = rest;
+    for (let f = 0; f < 120; f++) {
+      glow.step(f % 20 < 2 ? 50 : 1.6, 0, dt, 2);
+      expect(Math.abs(glow.value - prev)).toBeLessThan(0.05);
+      expect(glow.value).toBeLessThanOrEqual(GLOW_RANGE[1] + 1e-9);
+      prev = glow.value;
+    }
+    expect(glow.value).toBeGreaterThan(rest + 0.2);
+    const flared = glow.step(1.6, 1, dt, 2);
+    expect(flared).toBeGreaterThan(prev);
+    expect(flared).toBeLessThanOrEqual(GLOW_RANGE[1] + 0.5 + 1e-9);
+    const still = createGlow();
+    for (let f = 0; f < 120; f++) still.step(2, 0, dt, 0);
+    expect(still.value).toBeCloseTo(GLOW_RANGE[0], 6);
   });
 });

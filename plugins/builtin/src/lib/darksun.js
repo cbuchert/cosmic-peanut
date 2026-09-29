@@ -154,7 +154,7 @@ export function createSurge() {
  * The cover's composition, scaled by min(w, h) so it holds in landscape, portrait and small
  * windows: horizon at half height; the sun centred at 22 % from the top (lower if its corona would
  * clip the top edge); the range centred, `rangeWidth` of the width across, hanging up to
- * 0.16 · min(w, h) · rangeDepth (never more than 80 % of the way to the bottom).
+ * 0.28 · min(w, h) · rangeDepth (typical levels sit well under 1) (never more than 80 % of the way to the bottom).
  * @param {number} w
  * @param {number} h
  * @param {{ sunSize: number, rangeWidth: number, rangeDepth: number }} o
@@ -171,7 +171,7 @@ export function layout(w, h, o, out) {
   out.sunR = r;
   out.sunY = Math.max(0.22 * h, 1.2 * r);
   out.rangeHalf = 0.5 * o.rangeWidth * w;
-  out.rangeDepth = Math.min(0.16 * unit * o.rangeDepth, 0.8 * (h - horizon));
+  out.rangeDepth = Math.min(0.28 * unit * o.rangeDepth, 0.8 * (h - horizon));
   out.beamWidth = 0.004 * unit;
   return out;
 }
@@ -186,6 +186,7 @@ export const RANGES = {
   beam: [0, 2],
   sunSize: [0.5, 1.6],
 };
+const KEYS = /** @type {(keyof typeof DEFAULTS)[]} */ (Object.keys(DEFAULTS));
 /** Under Reduce motion: drift/rotation scale, and the reactivity used while it's at its default. */
 export const REDUCED_MOTION = 0.4;
 export const REDUCED_REACTIVITY = 0.6;
@@ -208,7 +209,8 @@ export const REDUCED_REACTIVITY = 0.6;
  * @param {Resolved} out
  */
 export function resolveParams(p, reduceMotion, out) {
-  for (const k of /** @type {(keyof typeof DEFAULTS)[]} */ (Object.keys(DEFAULTS))) {
+  for (let i = 0; i < KEYS.length; i++) {
+    const k = KEYS[i];
     const v = Number(p[k]);
     const [lo, hi] = RANGES[k];
     out[k] = Number.isFinite(v) ? (v < lo ? lo : v > hi ? hi : v) : DEFAULTS[k];
@@ -266,4 +268,34 @@ export function palette(name, out) {
 /** Backdrop "none" leaves sky and ground transparent; anything else paints them. @param {unknown} b */
 export function isPainted(b) {
   return b !== "none";
+}
+
+/** Horizon glow at rest and at full breath; a surge adds up to 0.5 on top. */
+export const GLOW_RANGE = [0.5, 1];
+/** Breathing time constant (s). */
+const GLOW_TAU = 0.4;
+
+/**
+ * The horizon glow: breathes with `audio.midAtt` (1 = average; drive = reactivity · 0.5 · midAtt,
+ * capped at 1, smoothed over GLOW_TAU), plus half the surge, which the caller has already passed
+ * through the flash limiter.
+ */
+export function createGlow() {
+  const g = {
+    level: 0,
+    value: GLOW_RANGE[0],
+    /**
+     * @param {number} midAtt `audio.midAtt`
+     * @param {number} surge 0–1, flash-limited
+     * @param {number} dt seconds
+     * @param {number} reactivity 0–2
+     */
+    step(midAtt, surge, dt, reactivity) {
+      const drive = clamp(0.5 * clamp(reactivity, 2) * clamp(midAtt, 3), 1);
+      g.level += (drive - g.level) * (1 - Math.exp(-dt / GLOW_TAU));
+      g.value = GLOW_RANGE[0] + (GLOW_RANGE[1] - GLOW_RANGE[0]) * g.level + 0.5 * clamp(surge, 1);
+      return g.value;
+    },
+  };
+  return g;
 }

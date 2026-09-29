@@ -16,32 +16,41 @@ export const F_MIN = 40;
 export const F_MAX = 14000;
 /** Fraction of each half (from its outer edge) over which the range tapers to the horizon. */
 export const TAPER = 0.3;
+/** dB span of the display (spectro.js gain): tighter than Blaze's 24 dB for jagged contrast. */
+const RANGE_DB = 18;
 /** Depth of the static, jagged ridge the range rests at in silence (so the motif stays). */
 export const REST = 0.1;
 
 /**
- * Reactivity as a level curve: 0 flattens the range, 1 is linear, 2 lifts quiet peaks
- * (level^(1/r)). Always 0–1.
+ * Reactivity as the range's contrast: level^(2/r) for r ≥ 1 (1 squares levels, so the loud
+ * frequencies hang as distinct downward peaks; 2 is linear), r · level² below 1 (0 is flat).
+ * Always 0–1; NaN reads as 0.
  * @param {number} level 0–1
  * @param {number} reactivity 0–2
  */
 export function shapeLevel(level, reactivity) {
   const l = level > 0 ? (level < 1 ? level : 1) : 0;
   const r = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
-  return r <= 1 ? l * r : l ** (1 / r);
+  return r >= 1 ? l ** (2 / r) : r * l * l;
 }
 
+/** Depth scale at the range's sides relative to its centre (before the taper). */
+export const SHOULDER = 0.5;
+
 /**
- * Edge taper per texel: 0 at the outermost texels, smoothstep up to 1 by TAPER of the half-width.
+ * The range's envelope per texel: deepest at the centre, falling linearly to SHOULDER toward the
+ * sides like the cover's range, times a taper that is 0 at the outermost texels and smoothsteps up
+ * to 1 by TAPER of the half-width.
  * @param {Float32Array} out
  */
 export function edgeTaper(out) {
   const n = out.length;
   const half = n / 2 - 0.5;
   for (let i = 0; i < n; i++) {
-    const d = Math.min(i, n - 1 - i) / half / TAPER; // 0 at the edge, 1 where the taper ends
+    const e = Math.min(i, n - 1 - i) / half; // 0 at the edge, 1 at the centre
+    const d = e / TAPER;
     const t = d < 1 ? d : 1;
-    out[i] = t * t * (3 - 2 * t);
+    out[i] = t * t * (3 - 2 * t) * (SHOULDER + (1 - SHOULDER) * e);
   }
 }
 
@@ -119,7 +128,7 @@ export function createHorizon(n) {
   logColumns("mirrored", F_MIN, F_MAX, lo, hi);
   edgeTaper(taper);
   restRidge(rest);
-  const gain = createSpectroGain(n);
+  const gain = createSpectroGain(n, { rangeDb: RANGE_DB });
   gain.setTilt(lo, hi);
   return {
     /**
