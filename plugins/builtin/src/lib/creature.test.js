@@ -1,6 +1,19 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createRng, createSpring, createTransient, createTwist, createTwitch, quatAngle } from "./creature.js";
+import {
+  createMorph,
+  createRng,
+  createSpring,
+  createSurge,
+  createTransient,
+  createTwist,
+  createTwitch,
+  DEFAULT_TWITCH,
+  effectiveMotion,
+  PRESETS,
+  pulseTarget,
+  quatAngle,
+} from "./creature.js";
 
 describe("createRng", () => {
   it("is deterministic per seed, uniform in [0, 1), and differs between seeds", () => {
@@ -139,5 +152,131 @@ describe("createTransient", () => {
     }
     expect(fired).toBeGreaterThan(4);
     expect(fired).toBeLessThanOrEqual(2 * 8); // refractory ≥ 1/8 s
+  });
+});
+
+describe("pulseTarget", () => {
+  it("is 1 at or below average bass, swells with heavier bass, bounded, scaled by the amount", () => {
+    expect(pulseTarget(0, 1)).toBe(1);
+    expect(pulseTarget(1, 1)).toBe(1);
+    expect(pulseTarget(1.6, 1)).toBeGreaterThan(1.1);
+    expect(pulseTarget(50, 1)).toBeLessThanOrEqual(1.4);
+    expect(pulseTarget(50, 2) - 1).toBeCloseTo(2 * (pulseTarget(50, 1) - 1), 9);
+    expect(pulseTarget(1.6, 0)).toBe(1);
+  });
+});
+
+describe("createSurge", () => {
+  /** Rises that start per second of a 10 Hz beat train. @param {boolean} reduce */
+  const risesPerSecond = (reduce) => {
+    const s = createSurge();
+    const dt = 1 / 60;
+    let rises = 0;
+    let prev = 0;
+    let up = false;
+    for (let f = 0; f < 240; f++) {
+      const v = s.step(f % 6 === 0, 1, dt, reduce);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+      if (v > prev + 1e-6 && !up) rises++;
+      up = v > prev + 1e-6;
+      prev = v;
+    }
+    return rises / 4;
+  };
+
+  it("jumps on a beat and decays; a 10 Hz strobe becomes at most 3 surges/s with reduceFlashing", () => {
+    expect(risesPerSecond(false)).toBeGreaterThan(8);
+    expect(risesPerSecond(true)).toBeLessThanOrEqual(3);
+  });
+});
+
+describe("createMorph", () => {
+  const dt = 1 / 60;
+  /**
+   * Run the sequencer; returns the times (s) a new preset became the target, and its index.
+   * @param {number} seconds @param {string} morph @param {string} material
+   * @param {(t: number) => number} energy @param {number} [bpm]
+   */
+  const run = (seconds, morph, material, energy, bpm = 120) => {
+    const m = createMorph();
+    /** @type {[number, number][]} */
+    const switches = [];
+    let last = m.target;
+    let maxSlope = 0;
+    const prev = Float32Array.from(m.weights);
+    for (let f = 0; f < seconds * 60; f++) {
+      const t = f * dt;
+      m.step(dt, morph, material, energy(t), bpm);
+      if (m.target !== last) switches.push([Math.round(t * 10) / 10, m.target]);
+      last = m.target;
+      let sum = 0;
+      for (let i = 0; i < 4; i++) {
+        sum += m.weights[i];
+        maxSlope = Math.max(maxSlope, Math.abs(m.weights[i] - prev[i]) / dt);
+        prev[i] = m.weights[i];
+      }
+      expect(sum).toBeCloseTo(1, 5);
+    }
+    return { m, switches, maxSlope };
+  };
+
+  it("cycles chrome → iridescent → emissive → obsidian every 16 bars on slow, 4 on fast", () => {
+    expect(PRESETS).toEqual(["chrome", "iridescent", "emissive", "obsidian"]);
+    const slow = run(140, "slow", "auto", () => 0.3).switches;
+    expect(slow.map((s) => s[1])).toEqual([1, 2, 3, 0]);
+    expect(slow[0][0]).toBeCloseTo(32, 0); // 16 bars of 4 beats at 120 bpm
+    expect(slow[1][0] - slow[0][0]).toBeCloseTo(32, 0);
+    const fast = run(20, "fast", "auto", () => 0.3).switches;
+    expect(fast.map((s) => s[0])).toEqual([8, 16]);
+    const noTempo = run(40, "slow", "auto", () => 0.3, 0).switches;
+    expect(noTempo[0][0]).toBeCloseTo(32, 0); // 120 bpm assumed until the tempo is known
+  });
+
+  it("crossfades smoothly over about 1.5 s", () => {
+    const { m, maxSlope } = run(33, "slow", "auto", () => 0.3);
+    expect(maxSlope).toBeLessThan(1.6 / 1); // smoothstep over ≥ 1 s
+    expect(m.weights[0]).toBeGreaterThan(0.2); // mid-fade at 33 s
+    expect(m.weights[1]).toBeGreaterThan(0.2);
+    const after = run(34.5, "slow", "auto", () => 0.3).m;
+    expect(after.weights[1]).toBeCloseTo(1, 5);
+  });
+
+  it("switches early on a sustained change in energy, but not on a brief spike", () => {
+    const jump = run(20, "slow", "auto", (t) => (t < 10 ? 0.1 : 0.6)).switches;
+    expect(jump.length).toBe(1);
+    expect(jump[0][0]).toBeGreaterThan(10.5);
+    expect(jump[0][0]).toBeLessThan(14);
+    const spike = run(20, "slow", "auto", (t) => (t > 10 && t < 10.3 ? 0.9 : 0.1)).switches;
+    expect(spike).toEqual([]);
+  });
+
+  it("never switches with morph off; a fixed material fades to that preset and stays", () => {
+    expect(run(80, "off", "auto", (t) => (t < 10 ? 0.1 : 0.6)).switches).toEqual([]);
+    const fixed = run(80, "fast", "emissive", (t) => (t < 10 ? 0.1 : 0.6));
+    expect(fixed.switches).toEqual([[0, 2]]);
+    expect(fixed.m.weights[2]).toBe(1);
+  });
+
+  it("is deterministic", () => {
+    const e = (/** @type {number} */ t) => 0.3 + 0.25 * Math.sin(t * 0.37) * Math.sin(t * 1.3);
+    const a = run(120, "fast", "auto", e).switches;
+    expect(a.length).toBeGreaterThan(3);
+    expect(a).toEqual(run(120, "fast", "auto", e).switches);
+  });
+});
+
+describe("effectiveMotion", () => {
+  it("calms twitch, drift and tumble under Reduce Motion while twitch is at its default", () => {
+    const out = { twitch: 0, drift: 0, tumble: 0 };
+    effectiveMotion(DEFAULT_TWITCH, false, out);
+    expect(out).toEqual({ twitch: DEFAULT_TWITCH, drift: 1, tumble: 1 });
+    effectiveMotion(DEFAULT_TWITCH, true, out);
+    expect(out.twitch).toBeLessThan(DEFAULT_TWITCH * 0.5);
+    expect(out.drift).toBeLessThan(0.5);
+    expect(out.tumble).toBeLessThan(0.6);
+    effectiveMotion(1.7, true, out); // the user chose a twitch: respect it
+    expect(out.twitch).toBe(1.7);
+    expect(out.drift).toBeLessThan(0.5);
   });
 });

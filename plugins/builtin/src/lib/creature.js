@@ -3,6 +3,7 @@
  * Tentacube creature dynamics (pure, allocation-free per step): seeded PRNG, damped springs for
  * the pulse / twist / twitch, the material-morph sequencer and the reduce-motion defaults.
  */
+import { createFlashLimiter } from "./flash.js";
 
 /**
  * mulberry32: a tiny seeded PRNG, so beat twists pick the same axes every run.
@@ -257,4 +258,127 @@ export function createTransient() {
       return Math.min(1, 0.4 + 0.3 * (j - 1));
     },
   };
+}
+
+const PULSE_MAX = 0.3;
+
+/**
+ * Scale target for the bass pulse: 1 at or below average bass, swelling smoothly (and bounded at
+ * 1 + PULSE_MAX × amount) with heavier bass. Feed it `bassAtt` and chase it with a spring.
+ * @param {number} bassAtt @param {number} amount
+ */
+export function pulseTarget(bassAtt, amount) {
+  const over = bassAtt > 1 ? bassAtt - 1 : 0;
+  return 1 + amount * PULSE_MAX * Math.tanh(over * 1.5);
+}
+
+const SURGE_DECAY = 7;
+
+/**
+ * Beat surge envelope (0..1) for emissive glow and background brightness: jumps on an onset,
+ * decays exponentially, and goes through the photosensitivity flash limiter (≤ 3 rises/s).
+ */
+export function createSurge() {
+  const flash = createFlashLimiter();
+  let env = 0;
+  return {
+    /** @param {boolean} onset @param {number} strength @param {number} dt @param {boolean} reduceFlashing */
+    step(onset, strength, dt, reduceFlashing) {
+      env *= Math.exp(-dt * SURGE_DECAY);
+      if (onset) env = Math.max(env, Math.min(1, 0.5 + 0.5 * strength));
+      return flash.step(env, dt, reduceFlashing);
+    },
+  };
+}
+
+/** Material presets, in morph order. */
+export const PRESETS = ["chrome", "iridescent", "emissive", "obsidian"];
+
+/** Crossfade time between presets (s). */
+export const MORPH_FADE = 1.5;
+const MORPH = {
+  slow: { bars: 16, sustain: 2, hold: 6 },
+  fast: { bars: 4, sustain: 1.25, hold: 3 },
+};
+const ENERGY_SHORT = 1;
+const ENERGY_LONG = 8;
+/** |ln(short / long)| above this is a "big energy change". */
+const ENERGY_CHANGE = 0.45;
+
+/**
+ * The material-morph sequencer. With material "auto" it steps through PRESETS in order — every
+ * 16 bars ("slow") or 4 bars ("fast"), or earlier when the energy (e.g. rms) changes a lot and
+ * stays changed for a couple of seconds — crossfading `weights` (sum 1) over MORPH_FADE with a
+ * smoothstep. A fixed material fades to that preset and stays. Deterministic; allocation-free.
+ */
+export function createMorph() {
+  const from = new Float32Array(4);
+  let fade = 1;
+  let beats = 0;
+  let short = -1;
+  let long = 0;
+  let changed = 0;
+  let sinceSwitch = 0;
+  return {
+    weights: new Float32Array([1, 0, 0, 0]),
+    target: 0,
+    /** @param {number} next */
+    switchTo(next) {
+      from.set(this.weights);
+      this.target = next;
+      fade = 0;
+      beats = 0;
+      changed = 0;
+      sinceSwitch = 0;
+      long = short;
+    },
+    /**
+     * @param {number} dt @param {string} morph off|slow|fast @param {string} material auto|preset
+     * @param {number} energy e.g. audio.rms @param {number} bpm 0 = unknown
+     */
+    step(dt, morph, material, energy, bpm) {
+      if (short < 0) short = long = energy;
+      short += (energy - short) * (1 - Math.exp(-dt / ENERGY_SHORT));
+      long += (energy - long) * (1 - Math.exp(-dt / ENERGY_LONG));
+      sinceSwitch += dt;
+      const fixed = PRESETS.indexOf(material);
+      if (fixed >= 0) {
+        if (fixed !== this.target) this.switchTo(fixed);
+      } else if (morph === "slow" || morph === "fast") {
+        const cfg = MORPH[morph];
+        beats += (dt * (bpm > 0 ? bpm : 120)) / 60;
+        const big = Math.abs(Math.log((short + 0.02) / (long + 0.02))) > ENERGY_CHANGE;
+        changed = big ? changed + dt : 0;
+        if (beats >= cfg.bars * 4 - 1e-6 || (changed >= cfg.sustain && sinceSwitch >= cfg.hold)) {
+          this.switchTo((this.target + 1) % PRESETS.length);
+        }
+      }
+      const w = this.weights;
+      if (fade < 1) {
+        fade = Math.min(1, fade + dt / MORPH_FADE);
+        const sm = fade * fade * (3 - 2 * fade);
+        for (let i = 0; i < 4; i++) w[i] = from[i] * (1 - sm) + (i === this.target ? sm : 0);
+      } else {
+        for (let i = 0; i < 4; i++) w[i] = i === this.target ? 1 : 0;
+      }
+    },
+  };
+}
+
+export const DEFAULT_TWITCH = 1;
+export const REDUCED_TWITCH = 0.3;
+const REDUCED_DRIFT = 0.35;
+const REDUCED_TUMBLE = 0.5;
+
+/**
+ * Reduce Motion: a calmer creature — less twitch (only while the twitch param is at its default,
+ * so a deliberate choice is respected), slower background drift and idle tumble.
+ * @param {number} twitch @param {boolean} reduceMotion
+ * @param {{ twitch: number, drift: number, tumble: number }} out
+ */
+export function effectiveMotion(twitch, reduceMotion, out) {
+  out.twitch = reduceMotion && twitch === DEFAULT_TWITCH ? REDUCED_TWITCH : twitch;
+  out.drift = reduceMotion ? REDUCED_DRIFT : 1;
+  out.tumble = reduceMotion ? REDUCED_TUMBLE : 1;
+  return out;
 }
