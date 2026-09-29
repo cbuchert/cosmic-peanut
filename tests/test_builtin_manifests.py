@@ -42,6 +42,7 @@ def test_builtin_renderers():
         "cascade": ("webgl2", []),
         "radar": ("webgl2", []),
         "tentacube": ("three", ["three"]),
+        "tiedye": ("webgl2", []),
     }
 
 
@@ -298,3 +299,37 @@ def test_tentacube_manifest():
     assert (seg["min"], seg["max"], seg["step"], seg["default"]) == (12, 48, 1, 24)
     # The creature code keys "reduce motion" off the twitch default.
     assert params["twitch"]["default"] == 1
+
+
+def test_tiedye_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "tiedye"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Tie-Dye",
+        "src/tiedye.js",
+        "webgl2",
+        "thumbs/tiedye.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "pattern",
+        "palette",
+        "fabric",
+        "twist",
+        "speed",
+        "bleed",
+        "reactivity",
+        "bloom",
+    ]
+    # Option order is the shader index order in lib/tiedye.js (PATTERNS, PALETTES, FABRICS).
+    assert params["pattern"]["options"] == ["spiral", "bullseye", "crumple", "shibori"]
+    assert params["pattern"]["default"] == "spiral"
+    assert params["palette"]["options"] == ["rainbow", "sunset", "ocean", "neon"]
+    assert params["palette"]["default"] == "rainbow"
+    assert params["fabric"]["options"] == ["white", "none"]
+    assert params["fabric"]["default"] == "white"
+    # lib/tiedye.js DEFAULT_SPEED: Reduce motion slows the spin only while Speed is at this default.
+    assert params["speed"]["default"] == 1
+    assert params["bloom"]["type"] == "boolean"
+    assert params["bloom"]["default"] is True
+    for f in ("fullscreen.vert", "tiedye.frag"):
+        assert (REPOS["builtin"] / "shaders/tiedye" / f).is_file(), f
