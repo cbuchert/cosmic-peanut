@@ -11,7 +11,11 @@ import {
   paletteOf,
   patternIndex,
   fabricIndex,
-  MAX_COLORS, createBandWidths, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH } from "./tiedye.js";
+  MAX_COLORS,
+  bandCoord,
+  bandOf,
+  edgesFromWidths,
+  createBandWidths, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH } from "./tiedye.js";
 
 describe("createBandWidths", () => {
   it("gives even bands for a silent track", () => {
@@ -282,5 +286,53 @@ describe("selection", () => {
     }
     expect(new Set(seen).size).toBe(PALETTES.length);
     expect(paletteOf("plaid", out)).toBe(paletteOf("rainbow", out));
+  });
+});
+
+describe("band index (mirror of tiedye.frag)", () => {
+  const n = 6;
+  const edges = edgesFromWidths(new Float32Array([0.1, 0.3, 0.1, 0.2, 0.15, 0.15]), n, new Float32Array(MAX_COLORS + 1));
+  const band = (/** @type {number} */ p, /** @type {number} */ r, /** @type {number} */ a, twist = 1.5, turns = 0) =>
+    bandOf(bandCoord(p, r * Math.cos(a), r * Math.sin(a), twist, turns), edges, n);
+
+  it("turns widths into cumulative edges from 0 to one full turn", () => {
+    expect(Array.from(edges.slice(0, n + 1)).map((x) => +x.toFixed(4))).toEqual([0, 0.1, 0.4, 0.5, 0.7, 0.85, 1]);
+    expect(bandOf(0.05, edges, n)).toBe(0);
+    expect(bandOf(0.45, edges, n)).toBe(2);
+    expect(bandOf(0.999, edges, n)).toBe(5);
+  });
+
+  it("spiral: the band changes with angle, and twists with radius", () => {
+    const around = new Set();
+    for (let k = 0; k < 64; k++) around.add(band(0, 0.5, (2 * Math.PI * k) / 64));
+    expect(around.size).toBe(n);
+    // Along a ray the band changes only when twisted.
+    const ray = (/** @type {number} */ twist) => {
+      const s = new Set();
+      for (let k = 1; k < 40; k++) s.add(band(0, k / 40, 0.3, twist));
+      return s.size;
+    };
+    expect(ray(0)).toBe(1);
+    expect(ray(1.5)).toBeGreaterThan(3);
+    // Rotation turns the whole pattern.
+    expect(band(0, 0.5, 0.3, 1.5, 0.25)).toBe(band(0, 0.5, 0.3 + Math.PI / 2, 1.5, 0));
+  });
+
+  it("bullseye: the band depends on radius only", () => {
+    for (const r of [0.1, 0.33, 0.6, 0.9]) {
+      const b = band(1, r, 0, 1.5, 0.3);
+      for (let k = 1; k < 16; k++) expect(band(1, r, (2 * Math.PI * k) / 16, 1.5, 0.3)).toBe(b);
+    }
+    const out = new Set();
+    for (let k = 0; k < 50; k++) out.add(band(1, k / 50, 0));
+    expect(out.size).toBe(n);
+  });
+
+  it("shibori: accordion-folded stripes, mirror-symmetric across each fold", () => {
+    const t = (/** @type {number} */ x) => bandCoord(3, x, 0.2, 1.5, 0);
+    const across = new Set();
+    for (let k = 0; k < 100; k++) across.add(bandOf(t(k / 100), edges, n));
+    expect(across.size).toBe(n);
+    for (const x of [0.03, 0.11, 0.07]) expect(t(-x)).toBeCloseTo(t(x), 5);
   });
 });

@@ -246,3 +246,58 @@ export function paletteOf(name, out) {
   }
   return hex.length;
 }
+
+/**
+ * Band geometry, mirrored in shaders/tiedye/tiedye.frag (keep the constants in sync). Positions are
+ * in unit-radius coordinates (1 = half the shorter screen side), centered.
+ */
+/** Times the palette repeats around the spiral. */
+export const SPIRAL_ARMS = 2;
+/** Times the palette repeats across the unit radius in bullseye, and how far rings drift per turn. */
+export const RINGS = 2.5;
+const RING_DRIFT = 1;
+/** Shibori: width of one accordion fold (one pass through the palette) and stripe tilt per turn. */
+export const FOLD = 0.4;
+const FOLD_TILT = 0.25;
+
+/**
+ * Cumulative band edges: out[0] = 0, out[i + 1] = out[i] + w[i], out[n] = 1 (one full turn).
+ * @param {Float32Array} w widths, summing to 1 @param {number} n @param {Float32Array} out length ≥ n + 1
+ */
+export function edgesFromWidths(w, n, out) {
+  out[0] = 0;
+  for (let i = 0; i < n; i++) out[i + 1] = out[i] + w[i];
+  out[n] = 1;
+  return out;
+}
+
+/**
+ * Where a point falls in the palette, 0–1, before noise (crumple is noise-only, so it has no mirror
+ * here and returns 0).
+ * @param {number} pattern patternIndex
+ * @param {number} x @param {number} y unit-radius coordinates
+ * @param {number} twist spiral twist, turns across the unit radius
+ * @param {number} turns rotation, turns
+ */
+export function bandCoord(pattern, x, y, twist, turns) {
+  const r = Math.hypot(x, y);
+  const fract = (/** @type {number} */ v) => v - Math.floor(v);
+  if (pattern === 0) return fract(SPIRAL_ARMS * (Math.atan2(y, x) / (2 * Math.PI) + turns + twist * r));
+  if (pattern === 1) return fract(RINGS * r - RING_DRIFT * turns);
+  if (pattern === 3) {
+    const th = 2 * Math.PI * FOLD_TILT * turns;
+    const u = x * Math.cos(th) + y * Math.sin(th);
+    return Math.abs(fract(u / FOLD + 0.5) * 2 - 1);
+  }
+  return 0;
+}
+
+/**
+ * The band that palette position `t` falls in.
+ * @param {number} t 0–1 @param {Float32Array} edges from edgesFromWidths @param {number} n
+ */
+export function bandOf(t, edges, n) {
+  let i = 0;
+  while (i < n - 1 && t >= edges[i + 1]) i++;
+  return i;
+}
