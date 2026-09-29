@@ -173,3 +173,33 @@ export function createBlooms(seed) {
   };
   return b;
 }
+
+/** Points around the circle at which the waveform warps the arms. */
+export const WARP_N = 64;
+/** Seconds the warp takes to follow the waveform: arms wobble with the sound, never flicker. */
+const WARP_TAU = 0.06;
+
+/**
+ * The waveform as WARP_N points around the circle, for warping the spiral arms. Each point is the
+ * signed peak of its stretch of samples (so busy audio stays jagged), clamped to −1..1 and lightly
+ * smoothed over time. Reads `waveform.length`; allocates nothing per step.
+ */
+export function createArmWarp() {
+  const out = new Float32Array(WARP_N);
+  return {
+    /** @param {Float32Array} waveform @param {number} dt */
+    step(waveform, dt) {
+      const n = waveform.length;
+      const a = 1 - Math.exp(-dt / WARP_TAU);
+      for (let k = 0; k < WARP_N; k++) {
+        const lo = Math.floor((k * n) / WARP_N);
+        const hi = Math.floor(((k + 1) * n) / WARP_N);
+        // The signed sample of largest magnitude: averaging would cancel busy audio to ~0.
+        let v = 0;
+        for (let i = lo; i < hi; i++) if (Math.abs(waveform[i]) > Math.abs(v)) v = waveform[i];
+        out[k] += (Math.max(-1, Math.min(1, v)) - out[k]) * a;
+      }
+      return out;
+    },
+  };
+}

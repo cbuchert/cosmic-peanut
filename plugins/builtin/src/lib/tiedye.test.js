@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { BLOOM_CAP, BLOOM_SPREAD, createBandWidths, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH } from "./tiedye.js";
+import { BLOOM_CAP, BLOOM_SPREAD, createArmWarp, WARP_N, createBandWidths, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH } from "./tiedye.js";
 
 describe("createBandWidths", () => {
   it("gives even bands for a silent track", () => {
@@ -195,5 +195,51 @@ describe("createBlooms", () => {
     expect(peak).toBeLessThanOrEqual(1);
     expect(b.data[3]).toBe(0);
     expect(active(b)).toBe(0);
+  });
+});
+
+describe("createArmWarp", () => {
+  const settleWarp = (/** @type {Float32Array} */ wave, frames = 60) => {
+    const w = createArmWarp();
+    let out = w.step(wave, 1 / 60);
+    for (let f = 1; f < frames; f++) out = w.step(wave, 1 / 60);
+    return out;
+  };
+
+  it("stays within -1..1 however loud the waveform", () => {
+    const wave = new Float32Array(2048);
+    for (let i = 0; i < wave.length; i++) wave[i] = i % 7 < 3 ? 40 : -40;
+    const out = settleWarp(wave);
+    expect(out.length).toBe(WARP_N);
+    expect(Math.max(...out.map(Math.abs))).toBeLessThanOrEqual(1);
+    expect(Math.max(...out.map(Math.abs))).toBeGreaterThan(0.5);
+  });
+
+  it("keeps the jaggedness of busy audio when resampling (peaks, not averages)", () => {
+    // A 3 kHz tone at 48 kHz: 16-sample period, so every bucket averages to ~0.
+    const wave = new Float32Array(2048);
+    for (let i = 0; i < wave.length; i++) wave[i] = 0.6 * Math.sin((2 * Math.PI * i) / 16);
+    const out = settleWarp(wave);
+    let mean = 0;
+    for (const v of out) mean += Math.abs(v) / WARP_N;
+    expect(mean).toBeGreaterThan(0.3);
+  });
+
+  it("reads the waveform's length (any size)", () => {
+    const wave = new Float32Array(1000).fill(0.4);
+    const out = settleWarp(wave);
+    for (const v of out) expect(v).toBeCloseTo(0.4, 2);
+  });
+
+  it("wobbles rather than flickers: a waveform flipping sign every frame barely moves the arms", () => {
+    const up = new Float32Array(2048).fill(0.8);
+    const down = new Float32Array(2048).fill(-0.8);
+    const w = createArmWarp();
+    let out = w.step(up, 1 / 60);
+    for (let f = 1; f < 120; f++) out = w.step(f % 2 ? down : up, 1 / 60);
+    expect(Math.abs(out[0])).toBeLessThan(0.3);
+    // …while a sustained shape comes through within a fraction of a second.
+    for (let f = 0; f < 15; f++) out = w.step(up, 1 / 60);
+    expect(out[0]).toBeGreaterThan(0.6);
   });
 });
