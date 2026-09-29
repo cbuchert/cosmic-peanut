@@ -19,8 +19,8 @@ uniform float u_paperAlpha; // 0 for "black only": white stripes are transparent
 
 const float PI = 3.14159265;
 const float WAVE_PHASE = 1.0;   // lib/opart.js WAVE_PHASE
-const float RIPPLE_PHASE = 2.4; // phase a full-strength ripple adds at its crest
-const float RIPPLE_WIDTH = 0.14;
+const float RIPPLE_PHASE = 3.0; // phase a full-strength ripple adds at its crest
+const float RIPPLE_WIDTH = 0.2;
 
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -90,8 +90,9 @@ float waveAt(vec2 p) {
   return mix(u_wave[i], u_wave[min(i + 1, 31)], fract(a));
 }
 
+// Beat ripples launch at the skull's silhouette and run outward, shaped like it.
 float ripplePhase(vec2 p) {
-  float d = length(p);
+  float d = max(outline(p), 0.0);
   float s = 0.0;
   for (int i = 0; i < 8; i++) {
     float x = (d - u_ripples[i].x) / RIPPLE_WIDTH;
