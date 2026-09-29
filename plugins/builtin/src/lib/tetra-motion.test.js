@@ -1,6 +1,21 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createFollower, createSpring, createTumble, quarterStats, tetraVertices } from "./tetra-motion.js";
+import {
+  createBalls,
+  createFollower,
+  createSpring,
+  createTumble,
+  DEFAULT_BOUNCE,
+  DEFAULT_TUMBLE,
+  effectiveMotion,
+  MAX_DIST,
+  MIN_DIST,
+  quarterStats,
+  R_MAX,
+  R_MIN,
+  REST_DIST,
+  tetraVertices,
+} from "./tetra-motion.js";
 
 describe("quarterStats", () => {
   it("splits the waveform into four consecutive quarters: RMS and absolute peak of each", () => {
@@ -177,5 +192,105 @@ describe("createTumble", () => {
     const det =
       m[0] * (m[4] * m[8] - m[7] * m[5]) - m[3] * (m[1] * m[8] - m[7] * m[2]) + m[6] * (m[1] * m[5] - m[4] * m[2]);
     expect(det).toBeCloseTo(1, 5);
+  });
+});
+
+describe("createBalls", () => {
+  /** A waveform with a sine of amplitude amps[b] in quarter b (optionally a spike in one). */
+  const wave = (/** @type {number[]} */ amps, spikeIn = -1, n = 2048) => {
+    const w = new Float32Array(n);
+    const q = n >> 2;
+    for (let i = 0; i < n; i++) w[i] = amps[Math.min(3, Math.floor(i / q))] * Math.sin(i * 0.3);
+    if (spikeIn >= 0) w[spikeIn * q + 7] = 0.95;
+    return w;
+  };
+
+  it("sizes each ball by its quarter's energy, within R_MIN..R_MAX", () => {
+    const b = createBalls();
+    const w = wave([0.05, 0.2, 0.4, 0.1]);
+    for (let i = 0; i < 120; i++) b.step(w, 1 / 60, 1, 1, false, 0);
+    const r = [...b.radius];
+    expect(r[2]).toBeGreaterThan(r[1]);
+    expect(r[1]).toBeGreaterThan(r[3]);
+    expect(r[3]).toBeGreaterThan(r[0]);
+    for (const x of r) {
+      expect(x).toBeGreaterThanOrEqual(R_MIN - 1e-6);
+      expect(x).toBeLessThanOrEqual(R_MAX + 1e-6);
+    }
+    const quiet = createBalls();
+    const z = new Float32Array(2048);
+    for (let i = 0; i < 120; i++) quiet.step(z, 1 / 60, 1, 1, false, 0);
+    for (const x of quiet.radius) expect(x).toBeCloseTo(R_MIN, 3);
+    const calm = createBalls(); // reactivity 0: sizes stay put
+    for (let i = 0; i < 120; i++) calm.step(w, 1 / 60, 0, 1, false, 0);
+    for (const x of calm.radius) expect(x).toBeCloseTo(R_MIN, 6);
+  });
+
+  it("bursts a ball away from the centroid on a transient in its quarter, then pulls it back", () => {
+    const b = createBalls();
+    const steady = wave([0.1, 0.1, 0.1, 0.1]);
+    const hit = wave([0.1, 0.1, 0.1, 0.1], 2);
+    for (let i = 0; i < 180; i++) b.step(steady, 1 / 60, 1, 1, false, 0);
+    const rest = [...b.dist];
+    for (const d of rest) expect(d).toBeCloseTo(REST_DIST, 2);
+    for (let i = 0; i < 3; i++) b.step(hit, 1 / 60, 1, 1, i === 0, 1);
+    let top = 0;
+    let other = 0;
+    for (let i = 0; i < 30; i++) {
+      b.step(steady, 1 / 60, 1, 1, false, 0);
+      top = Math.max(top, b.dist[2]);
+      other = Math.max(other, b.dist[0]);
+    }
+    expect(top).toBeGreaterThan(REST_DIST + 0.25); // burst apart
+    expect(top - REST_DIST).toBeGreaterThan(2 * (other - REST_DIST)); // mostly that ball
+    for (let i = 0; i < 240; i++) b.step(steady, 1 / 60, 1, 1, false, 0);
+    expect(b.dist[2]).toBeCloseTo(REST_DIST, 2); // springs pulled it back
+  });
+
+  it("stays bounded under any input; bounce 0 keeps the shape at rest; 60 and 120 Hz agree", () => {
+    const b = createBalls();
+    const loud = wave([1, 1, 1, 1], 1);
+    const noisy = new Float32Array(2048).map((_, i) => (i % 3 ? 1 : -1));
+    for (let i = 0; i < 600; i++) {
+      b.step(i % 7 ? loud : noisy, 1 / 60, 2, 2, i % 4 === 0, 1);
+      for (let k = 0; k < 4; k++) {
+        expect(b.dist[k]).toBeGreaterThanOrEqual(MIN_DIST - 1e-6); // Float32 storage
+        expect(b.dist[k]).toBeLessThanOrEqual(MAX_DIST + 1e-6);
+        expect(b.radius[k]).toBeLessThanOrEqual(R_MAX + 1e-6);
+      }
+    }
+    const still = createBalls();
+    for (let i = 0; i < 200; i++) still.step(i % 30 ? loud : wave([1, 1, 1, 1], i % 4), 1 / 60, 1, 0, i % 30 === 0, 1);
+    for (const d of still.dist) expect(d).toBeCloseTo(REST_DIST, 6);
+
+    const a60 = createBalls();
+    const a120 = createBalls();
+    const hit = wave([0.1, 0.1, 0.3, 0.1], 2);
+    const soft = wave([0.1, 0.1, 0.1, 0.1]);
+    for (let f = 0; f < 120; f++) {
+      const w = f === 30 ? hit : soft;
+      a60.step(w, 1 / 60, 1, 1, false, 0);
+      a120.step(w, 1 / 120, 1, 1, false, 0);
+      a120.step(w, 1 / 120, 1, 1, false, 0);
+    }
+    for (let k = 0; k < 4; k++) {
+      expect(a60.dist[k]).toBeCloseTo(a120.dist[k], 2);
+      expect(a60.radius[k]).toBeCloseTo(a120.radius[k], 2);
+    }
+  });
+});
+
+describe("effectiveMotion", () => {
+  it("Reduce motion calms tumble and bounce while they're at their defaults; explicit values win", () => {
+    const out = { tumble: 0, bounce: 0 };
+    effectiveMotion(DEFAULT_TUMBLE, DEFAULT_BOUNCE, false, out);
+    expect(out).toEqual({ tumble: DEFAULT_TUMBLE, bounce: DEFAULT_BOUNCE });
+    effectiveMotion(DEFAULT_TUMBLE, DEFAULT_BOUNCE, true, out);
+    expect(out.tumble).toBeLessThan(DEFAULT_TUMBLE * 0.5);
+    expect(out.tumble).toBeGreaterThan(0);
+    expect(out.bounce).toBeLessThan(DEFAULT_BOUNCE * 0.6);
+    expect(out.bounce).toBeGreaterThan(0);
+    effectiveMotion(1.5, 2, true, out);
+    expect(out).toEqual({ tumble: 1.5, bounce: 2 });
   });
 });

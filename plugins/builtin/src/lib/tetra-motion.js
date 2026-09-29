@@ -201,3 +201,89 @@ export function createTumble() {
     },
   };
 }
+
+/** Ball-centre distance from the centroid at rest (fused: the edge is under bridgeDistance). */
+export const REST_DIST = 0.45;
+/** Largest outward (and inward) spring offset. */
+export const OFF_MAX = 1;
+export const MAX_DIST = REST_DIST + OFF_MAX;
+export const MIN_DIST = 0.2;
+/** Ball radius range (before the Size param scales the whole scene). */
+export const R_MIN = 0.3;
+export const R_MAX = 0.52;
+/** Auto-gain floors (waveform units), so silence doesn't get amplified into motion. */
+const RMS_FLOOR = 0.04;
+/** Spring pull per unit transient at bounce 1, and the velocity kick an onset adds. */
+const PULL = 0.45;
+const KICK = 3.2;
+
+/**
+ * Per-ball size and bounce from the waveform's four quarters.
+ * Size: each quarter's RMS, auto-gained against a slow reference (the loudest quarter over the last
+ * few seconds), through an attack/release follower → radius in R_MIN..R_MAX.
+ * Bounce: each quarter's peak above its own recent average is a transient; it pulls that ball's
+ * underdamped spring outward (and an onset kicks it), so hits burst the shape apart and the
+ * springs pull it back together with a little rebound.
+ */
+export function createBalls() {
+  const radius = new Float32Array(4).fill(R_MIN);
+  const dist = new Float32Array(4).fill(REST_DIST);
+  const rms = new Float32Array(4);
+  const peak = new Float32Array(4);
+  const trans = new Float32Array(4);
+  const level = [0, 1, 2, 3].map(() => createFollower(0.04, 0.25));
+  const slowPeak = [0, 1, 2, 3].map(() => createFollower(0.15, 0.6));
+  const hold = [0, 1, 2, 3].map(() => createFollower(0.005, 0.12));
+  const spring = [0, 1, 2, 3].map(() => createSpring(2.2, 0.35, OFF_MAX));
+  const ref = createFollower(0.3, 5, Infinity);
+
+  return {
+    radius,
+    dist,
+    /**
+     * @param {Float32Array} wave newest waveform
+     * @param {number} dt
+     * @param {number} reactivity 0–2: how much the audio moves sizes and bounces
+     * @param {number} bounce 0–2: bounce amount
+     * @param {boolean} onset
+     * @param {number} onsetStrength 0–1
+     */
+    step(wave, dt, reactivity, bounce, onset, onsetStrength) {
+      quarterStats(wave, rms, peak);
+      let loud = 0;
+      for (let b = 0; b < 4; b++) if (rms[b] > loud) loud = rms[b];
+      const r = Math.max(RMS_FLOOR, ref.step(loud, dt));
+      const pr = r * Math.SQRT2; // peak of a sine at the reference RMS
+      const kick = onset ? KICK * bounce * Math.min(1, Math.max(0, onsetStrength)) : 0;
+      for (let b = 0; b < 4; b++) {
+        const lv = level[b].step((0.8 * reactivity * rms[b]) / r, dt);
+        radius[b] = R_MIN + (R_MAX - R_MIN) * lv;
+        const avg = slowPeak[b].step(peak[b], dt);
+        trans[b] = hold[b].step((reactivity * (peak[b] - avg)) / pr, dt);
+        if (kick > 0) spring[b].kick(kick * trans[b]);
+        const off = spring[b].step(PULL * bounce * trans[b], dt);
+        dist[b] = Math.max(MIN_DIST, Math.min(MAX_DIST, REST_DIST + off));
+      }
+    },
+  };
+}
+
+/** Manifest defaults for Tumble speed (rad/s) and Bounce, and their Reduce-motion stand-ins. */
+export const DEFAULT_TUMBLE = 0.35;
+export const DEFAULT_BOUNCE = 1;
+const REDUCED_TUMBLE = 0.12;
+const REDUCED_BOUNCE = 0.45;
+
+/**
+ * Reduce motion calms the tumble and the bounce while they're at their defaults; a value the user
+ * chose explicitly is kept.
+ * @param {number} tumble
+ * @param {number} bounce
+ * @param {boolean} reduceMotion
+ * @param {{ tumble: number, bounce: number }} out
+ */
+export function effectiveMotion(tumble, bounce, reduceMotion, out) {
+  out.tumble = reduceMotion && tumble === DEFAULT_TUMBLE ? REDUCED_TUMBLE : tumble;
+  out.bounce = reduceMotion && bounce === DEFAULT_BOUNCE ? REDUCED_BOUNCE : bounce;
+  return out;
+}
