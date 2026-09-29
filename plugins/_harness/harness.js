@@ -16,6 +16,8 @@
  *   nocanvas=1  hide the canvas (screenshot the backdrop alone)
  *   silent=1  the synth outputs silence (all-zero frames, silent: true)
  *   still=N   deterministic: seeded Math.random, fixed 1/60 s steps, stop after N frames
+ *   gain=G    scale the audio's level (waveform, rms, peak, spectrum, bands) by G, e.g. 0.05 for a
+ *             quiet passage
  */
 import { createDrums, createMelody, createMusic, createProtoDemo, createSynth, createTones } from "./synth.js";
 
@@ -29,6 +31,14 @@ const rep = Number(q.get("rep") ?? 1);
 const base = `/plugins/${repo}/`;
 const w = /** @type {any} */ (window);
 const still = Number(q.get("still") ?? 0);
+const gain = Number(q.get("gain") ?? 1);
+
+/** Scale a frame's level in place (the synth rebuilds it every update). @param {any} a @param {number} g */
+function applyGain(a, g) {
+  for (const k of ["waveform", "spectrum", "bands", "left", "right"]) if (a[k]) for (let i = 0; i < a[k].length; i++) a[k][i] *= g;
+  a.rms *= g;
+  a.peak *= g;
+}
 
 const bgEl = /** @type {HTMLElement} */ (document.getElementById("bg"));
 if (q.get("bg") === "light") {
@@ -206,6 +216,7 @@ async function main() {
     time.dt = frames === 0 ? 1 / 60 : dt;
     time.frame = frames++;
     const audio = synth.update(time.now, time.dt);
+    if (gain !== 1) applyGain(audio, gain);
     const t0 = performance.now();
     try {
       for (let r = 0; r < rep; r++) {

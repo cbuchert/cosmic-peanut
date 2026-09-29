@@ -28,6 +28,7 @@ VIZ = {
     "darksun": "builtin",
     "eclipse": "builtin",
     "marbling": "builtin",
+    "laminar": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }

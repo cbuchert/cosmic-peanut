@@ -17,7 +17,9 @@ analytic, noise-free spectrum — for spectrogram views such as Radar), `audio=t
 WebKit clamps `performance.now()` to 1 ms, so divide a longer span; raising N until fps drops also
 bounds GPU time), `finish=1`, `lum=1` (record mean luminance), `p.<param>=value`, `bg=light` (a
 bright, busy backdrop behind the transparent canvas; default black like the shell), `nocanvas=1`,
-`still=N` (seeded `Math.random`, fixed 60 Hz steps, stop after N frames: deterministic stills).
+`still=N` (seeded `Math.random`, fixed 60 Hz steps, stop after N frames: deterministic stills),
+`gain=G` (scale the audio's level — waveform, rms, peak, spectrum, bands — e.g. `gain=0.05` for a
+quiet passage).
 Contexts use the SDK's options (`alpha: true, premultipliedAlpha: true`, three clear alpha 0).
 
 `run.py` writes screenshots and `results-<browser>.json` to `out/` (git-ignored). For each
