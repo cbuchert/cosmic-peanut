@@ -36,3 +36,63 @@ export function createBandWidths() {
     },
   };
 }
+
+/**
+ * @typedef {object} SpinInput
+ * @property {number} twist the Twist param (turns of spiral across the radius)
+ * @property {number} speed the Speed param (motion multiplier)
+ * @property {number} bassAtt `audio.bassAtt`
+ * @property {number} reactivity the Reactivity param
+ * @property {boolean} reduceMotion `ctx.reduceMotion`
+ */
+
+/** Manifest default of the Speed param. */
+export const DEFAULT_SPEED = 1;
+/** What Reduce motion uses instead of the default Speed, and how much slower the twist then follows. */
+export const REDUCED_SPEED = 0.4;
+const REDUCED_TWIST_SLOWDOWN = 3;
+/** Rotation (turns/s at Speed 1): a slow drift plus a bass-driven part. */
+const BASE_RATE = 0.02;
+const BASS_RATE = 0.025;
+/** Most the bass can tighten (or loosen) the twist, as a fraction of the Twist param. */
+export const TWIST_DEPTH = 0.35;
+/** Smoothing time constants (s): the twist runs through two such stages, the rate one. */
+const TWIST_TAU = 0.4;
+const RATE_TAU = 0.5;
+
+/**
+ * Spiral twist and rotation from the bass. Heavier bass (bassAtt > 1) tightens the twist and
+ * speeds the rotation. The twist follows its target through two one-pole stages (so its rate of
+ * change is continuous too) and the rate through one, so neither jerks.
+ */
+export function createSpin() {
+  let rate = NaN;
+  let twistMid = NaN;
+  const s = {
+    /** Current twist, turns across the unit radius. */
+    twist: NaN,
+    /** Unwrapped rotation, turns. */
+    turns: 0,
+    /** @param {number} dt @param {SpinInput} o */
+    step(dt, o) {
+      // Reduce motion: gentler defaults; a Speed the user picked is respected.
+      const gentle = o.reduceMotion && o.speed === DEFAULT_SPEED;
+      const speed = gentle ? REDUCED_SPEED : o.speed;
+      const bass = Math.max(-1, Math.min(1, o.bassAtt - 1));
+      const react = Math.max(0, Math.min(2, o.reactivity)) / 2;
+      const twist = o.twist * (1 + TWIST_DEPTH * react * bass);
+      const target = speed * (BASE_RATE + BASS_RATE * react * (1 + bass));
+      if (Number.isNaN(s.twist)) {
+        s.twist = twistMid = twist;
+        rate = target;
+      }
+      const kt = 1 - Math.exp(-dt / (gentle ? TWIST_TAU * REDUCED_TWIST_SLOWDOWN : TWIST_TAU));
+      twistMid += (twist - twistMid) * kt;
+      s.twist += (twistMid - s.twist) * kt;
+      rate += (target - rate) * (1 - Math.exp(-dt / RATE_TAU));
+      s.turns += rate * dt;
+      return s;
+    },
+  };
+  return s;
+}
