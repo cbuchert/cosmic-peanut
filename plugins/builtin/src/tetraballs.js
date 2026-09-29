@@ -27,7 +27,7 @@ const K = 0.5;
 /** Raymarch budgets and volume-pass resolution per Quality. */
 const QUALITY = {
   low: { steps: 56, vsteps: 44, vscale: 0.4 },
-  medium: { steps: 88, vsteps: 64, vscale: 0.5 },
+  medium: { steps: 88, vsteps: 56, vscale: 0.5 },
   high: { steps: 128, vsteps: 88, vscale: 0.6 },
 };
 const FIRE = MATERIALS.indexOf("fire");

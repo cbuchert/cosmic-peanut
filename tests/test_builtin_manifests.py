@@ -41,6 +41,7 @@ def test_builtin_renderers():
         "blaze": ("webgl2", []),
         "cascade": ("webgl2", []),
         "radar": ("webgl2", []),
+        "tetraballs": ("webgl2", []),
     }
 
 
@@ -263,3 +264,46 @@ def test_radar_manifest():
     assert "contacts" not in params
     for f in ("fullscreen.vert", "paint.frag", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/radar" / f).is_file(), f
+
+
+def test_tetraballs_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "tetraballs"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Tetraballs",
+        "src/tetraballs.js",
+        "webgl2",
+        "thumbs/tetraballs.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "material",
+        "reactivity",
+        "size",
+        "bounce",
+        "tumble",
+        "background",
+        "quality",
+        "tint",
+    ]
+    # Order matches lib/tetra-material.js MATERIALS (after "auto").
+    assert params["material"]["options"] == [
+        "auto",
+        "chrome",
+        "soap",
+        "jade",
+        "brushed",
+        "velvet",
+        "glass",
+        "water",
+        "fire",
+        "smoke",
+    ]
+    assert params["material"]["default"] == "chrome"
+    assert params["background"]["options"] == ["studio", "none"]
+    assert params["background"]["default"] == "studio"
+    assert params["quality"]["options"] == ["low", "medium", "high"]
+    # lib/tetra-motion.js DEFAULT_TUMBLE / DEFAULT_BOUNCE: Reduce motion calms them at these values.
+    assert params["tumble"]["default"] == 0.35
+    assert params["bounce"]["default"] == 1
+    for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
+        assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()

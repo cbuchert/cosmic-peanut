@@ -7,7 +7,7 @@
 // emission colour is a blackbody ramp (Planck's law sampled at three wavelengths, normalised),
 // accumulated additively with light absorption. Smoke: billowing fbm density pushed off the balls
 // and drifting up into wisps, single-scattered key light with self-shadowing from a short
-// light march (4 steps), plus ambient light from the room.
+// light march (3 steps, cheaper two-octave density), plus ambient light from the room.
 uniform vec4 u_vbound;     // march volume: centre xyz, radius w (the blob's bound, raised)
 uniform float u_fire;      // weight of fire in this pass
 uniform float u_smoke;     // weight of smoke
@@ -49,7 +49,7 @@ vec2 fire(vec3 p) {
   // Flames are thin reaction sheets: heat lives in a shell around the displaced surface, and the
   // shell's folds give the fire its streaky inner structure.
   float heat = smoothstep(0.14, 0.0, de) * smoothstep(-0.42, -0.03, de);
-  float temp = heat * (1.0 - 0.6 * clamp(top / 1.3, 0.0, 1.0)) * (0.6 + 0.6 * n);
+  float temp = heat * (1.0 - 0.6 * clamp(top / 1.3, 0.0, 1.0)) * clamp(0.25 + 1.0 * n * n + 0.25 * n, 0.0, 1.0);
   // Fade out before the top of the frame (y ≈ 2.1 at the centroid plane).
   return vec2(heat, temp) * smoothstep(1.6 * R, 0.5 * R, hy) * smoothstep(2.0, 1.3, p.y);
 }
@@ -66,10 +66,23 @@ float smokeDensity(vec3 p, float d) {
   float de = d - reach * n * n * 1.8;
   float body = smoothstep(0.06, -0.2, de) * (0.25 + 0.9 * n) * smoothstep(-0.9, -0.1, d - reach);
   // ... and thin wisps rising off the top, stretched upward and drifting faster.
-  vec3 w = vec3(p.x * 3.2, p.y * 1.1 - u_time * 0.7, p.z * 3.2) + 0.8 * vec3(n, 0.0, n);
-  float wisp = smoothstep(0.6, 0.75, fbm(w)) * smoothstep(wispLen + 0.1, 0.0, d) * step(0.0, d);
+  float wisp = 0.0;
+  if (d > 0.0 && d < wispLen + 0.1) {
+    vec3 w = vec3(p.x * 3.2, p.y * 1.1 - u_time * 0.7, p.z * 3.2) + 0.8 * vec3(n, 0.0, n);
+    wisp = smoothstep(0.6, 0.75, fbm(w)) * smoothstep(wispLen + 0.1, 0.0, d);
+  }
   float top = u_bound.w * 2.4;
   return (body + 0.55 * wisp) * smoothstep(top, top * 0.3, p.y - u_bound.y);
+}
+
+// Cheaper smoke density for the light march (self-shadowing): the billows only, two octaves.
+float smokeShade(vec3 p) {
+  float d = map(p);
+  float reach = 0.08 + 0.3 * upness(p);
+  if (d > reach + 0.1) return 0.0;
+  vec3 q = p * 1.35 + vec3(0.0, -u_time * 0.32, 0.0);
+  float n = 0.667 * vnoise(q) + 0.333 * vnoise(q * 2.03 + 1.7);
+  return smoothstep(0.06, -0.2, d - reach * n * n * 1.8) * (0.25 + 0.9 * n);
 }
 
 void main() {
@@ -96,7 +109,7 @@ void main() {
       if (f.x > 0.0) {
         float K = 800.0 + 2400.0 * pow(f.y, 1.4);
         float dens = f.x * f.x * 6.0;
-        emit += trans * blackbody(K) * pow(f.y, 2.2) * dens * dt * 0.75 * u_fire * u_light;
+        emit += trans * blackbody(K) * pow(f.y, 2.2) * dens * dt * 1.05 * u_fire * u_light;
         trans *= exp(-dens * dt * 0.45 * u_fire);
       }
     }
@@ -104,11 +117,8 @@ void main() {
       float dens = smokeDensity(p, map(p)) * 5.0 * u_smoke;
       if (dens > 0.001) {
         float sh = 0.0;
-        for (int j = 1; j <= 4; j++) {
-          vec3 s = p + lk * (0.16 * float(j));
-          sh += smokeDensity(s, map(s));
-        }
-        float lit = exp(-sh * 0.16 * 5.0 * 2.2);
+        for (int j = 1; j <= 3; j++) sh += smokeShade(p + lk * (0.2 * float(j)));
+        float lit = exp(-sh * 0.2 * 5.0 * 2.2);
         vec3 light = vec3(3.4, 3.15, 2.85) * lit * u_light + amb;
         float a = 1.0 - exp(-dens * dt);
         scat += trans * a * light * vec3(0.55, 0.55, 0.57);
