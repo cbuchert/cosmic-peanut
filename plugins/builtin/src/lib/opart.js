@@ -17,7 +17,7 @@ export function stripe(v, w, t) {
 }
 
 /** Stripe frequency (radians of phase per unit of field) at Density 1. */
-export const BASE_K = 24;
+export const BASE_K = 32;
 /** Largest |field value| on screen, including warp (screen units, half the short side = 1). */
 export const FIELD_MAX = 2.8;
 /** Largest |∂field/∂flow| per unit of Warp (checked against the mirrored field in tests). */
@@ -219,7 +219,10 @@ export function createWaveBend(n) {
         const a = Math.floor((i * len) / n);
         const b = Math.max(a + 1, Math.floor(((i + 1) * len) / n));
         let sum = 0;
-        for (let j = a; j < b && j < len; j++) sum += waveform[j];
+        for (let j = a; j < b && j < len; j++) {
+          const x = waveform[j];
+          if (x > -2 && x < 2) sum += x; // skips NaN and wild values
+        }
         const target = clamp((len ? sum / (b - a) : 0) * 1.5, -1, 1);
         out[i] += clamp(target - out[i], -maxStep, maxStep);
       }
@@ -271,4 +274,83 @@ export function lookColors(acid, clock, out) {
     out[3 + i] = 0.6 + 0.4 * paper;
   }
   return out;
+}
+
+const fract = (/** @type {number} */ x) => x - Math.floor(x);
+
+/** opart.glsl hash12 (values differ slightly from the GPU's floats; only the bounds matter). */
+function hash12(/** @type {number} */ x, /** @type {number} */ y) {
+  let a = fract(x * 0.1031);
+  let b = fract(y * 0.1031);
+  let c = fract(x * 0.1031);
+  const d = a * (b + 33.33) + b * (c + 33.33) + c * (a + 33.33);
+  a += d;
+  b += d;
+  c += d;
+  return fract((a + b) * c);
+}
+
+function vnoise(/** @type {number} */ x, /** @type {number} */ y) {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uy = fy * fy * (3 - 2 * fy);
+  const a = hash12(ix, iy) + (hash12(ix + 1, iy) - hash12(ix, iy)) * ux;
+  const b = hash12(ix, iy + 1) + (hash12(ix + 1, iy + 1) - hash12(ix, iy + 1)) * ux;
+  return a + (b - a) * uy;
+}
+
+function fbm(/** @type {number} */ x, /** @type {number} */ y) {
+  let s = 0.5 * vnoise(x, y);
+  x = x * 2.03 + 1.7;
+  y = y * 2.03 + 9.2;
+  s += 0.25 * vnoise(x, y);
+  x = x * 2.03 + 1.7;
+  y = y * 2.03 + 9.2;
+  s += 0.125 * vnoise(x, y);
+  return s / 0.875;
+}
+
+function sdEllipse2(/** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ rx, /** @type {number} */ ry) {
+  const k0 = Math.hypot(x / rx, y / ry);
+  const k1 = Math.hypot(x / (rx * rx), y / (ry * ry));
+  return (k0 * (k0 - 1)) / Math.max(k1, 1e-4);
+}
+
+function smin(/** @type {number} */ a, /** @type {number} */ b, /** @type {number} */ k) {
+  const h = clamp(0.5 + (0.5 * (b - a)) / k, 0, 1);
+  return b + (a - b) * h - k * h * (1 - h);
+}
+
+/**
+ * The stripe field of shaders/skull/opart.glsl opField, in JS, for tests of its bounds (FIELD_MAX
+ * and FLOW_SENS, which the anti-strobe budget relies on). Keep the two in step.
+ * @param {number} x screen units, skull at the origin
+ * @param {number} y
+ * @param {number} flow warp clock
+ * @param {number} warp
+ * @param {number[]} outline [screen units per object unit, tilt, jaw drop] (u_outline)
+ */
+export function opField(x, y, flow, warp, outline) {
+  const ox = fbm(x * 0.8, y * 0.8 + 0.5 * flow);
+  const oy = fbm(x * 0.8 + 5.2 - 0.4 * flow, y * 0.8 + 1.3);
+  let qx = x + warp * 0.42 * (ox * 2 - 1);
+  let qy = y + warp * 0.42 * (oy * 2 - 1);
+  const r = Math.hypot(qx, qy);
+  const a = warp * 1.3 * Math.exp(-0.8 * r) * Math.sin(0.6 * flow + 1);
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  [qx, qy] = [c * qx - s * qy, s * qx + c * qy];
+  // outline(q)
+  const [k, tilt, drop] = outline;
+  const ct = Math.cos(-tilt);
+  const st = Math.sin(-tilt);
+  const px = (ct * qx - st * qy) / k;
+  const py = (st * qx + ct * qy) / k;
+  const cranium = sdEllipse2(px, py - 0.2, 0.95, 1.0);
+  const jaw = sdEllipse2(px, py + 0.72 + drop, 0.52, 0.34);
+  const line = smin(cranium, jaw, 0.3) * k;
+  return line + 0.25 * warp * (fbm(qx * 1.6 - 0.3 * flow, qy * 1.6) - 0.5);
 }

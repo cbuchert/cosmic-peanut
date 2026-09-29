@@ -1,6 +1,20 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createSkullMotion, DEFAULTS, effectiveDrive, createSpring, JAW_LIMIT, JAW_MAX, NOD_LIMIT, PULSE_LIMIT, TILT_LIMIT, TURN_LIMIT } from "./skull-motion.js";
+import {
+  createEyeSpin,
+  createSkullMotion,
+  createSpring,
+  DEFAULTS,
+  effectiveDrive,
+  EYE_ARMS,
+  JAW_LIMIT,
+  JAW_MAX,
+  NOD_LIMIT,
+  PULSE_LIMIT,
+  TILT_LIMIT,
+  TURN_LIMIT,
+  worldFromObject,
+} from "./skull-motion.js";
 
 /** Run a spring for `seconds` at `hz`, target 1 from rest, and record its trajectory. */
 /** @param {number} hz @param {number} seconds */
@@ -207,5 +221,42 @@ describe("effectiveDrive", () => {
     expect(out.warp).toBe(1.4);
     expect(out.nod).toBe(1);
     expect(out.ripple).toBe(1);
+  });
+});
+
+describe("createEyeSpin", () => {
+  it("spins faster with treble, never fast enough to invert a spiral arm more than 3 times a second", () => {
+    const slow = createEyeSpin();
+    const fast = createEyeSpin();
+    let a0 = 0;
+    let a1 = 0;
+    let prev = 0;
+    for (let f = 0; f < 600; f++) {
+      a0 = slow.step(0.2, 1, 1 / 60);
+      a1 = fast.step(f % 2 ? 5 : 0, 2, 1 / 60);
+      // Each π of a spiral with EYE_ARMS arms turning inverts a pixel once.
+      expect((Math.abs(a1 - prev) * 60 * EYE_ARMS) / Math.PI).toBeLessThanOrEqual(3);
+      prev = a1;
+    }
+    expect(Math.abs(a1)).toBeGreaterThan(1.5 * Math.abs(a0));
+    expect(Math.abs(a0)).toBeGreaterThan(0);
+  });
+});
+
+describe("worldFromObject", () => {
+  it("is a rotation (orthonormal) in which a positive pitch drops the chin and a positive yaw turns the face to +x", () => {
+    const m = new Float32Array(9);
+    worldFromObject(0.3, -0.2, 0.1, m);
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) {
+        const dot = m[3 * i] * m[3 * j] + m[3 * i + 1] * m[3 * j + 1] + m[3 * i + 2] * m[3 * j + 2];
+        expect(dot).toBeCloseTo(i === j ? 1 : 0, 5);
+      }
+    }
+    const apply = (/** @type {number[]} */ v) => [0, 1, 2].map((r) => m[3 * r] * v[0] + m[3 * r + 1] * v[1] + m[3 * r + 2] * v[2]);
+    worldFromObject(0, 0.2, 0, m);
+    expect(apply([0, 0, 1])[1]).toBeLessThan(0); // the face (+z) tips down
+    worldFromObject(0.2, 0, 0, m);
+    expect(apply([0, 0, 1])[0]).toBeGreaterThan(0);
   });
 });

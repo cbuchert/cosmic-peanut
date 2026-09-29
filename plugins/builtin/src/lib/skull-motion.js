@@ -148,3 +148,53 @@ export function effectiveDrive(params, reduceMotion, out) {
   out.reactivity = params.reactivity;
   return out;
 }
+
+/** Arms of the eye-socket spirals (shaders/skull/skull.frag eyeWhirl). */
+export const EYE_ARMS = 3;
+
+/** Fastest eye spin (rad/s): below π·3/EYE_ARMS so no pixel inverts more than 3 times a second. */
+export const EYE_SPIN_MAX = (0.9 * Math.PI * 3) / EYE_ARMS;
+
+/** The eye whirlpools' angle: a slow idle turn that speeds up with the treble (smoothed). */
+export function createEyeSpin() {
+  let rate = 0;
+  let angle = 0;
+  return {
+    /**
+     * @param {number} trebAtt `audio.trebAtt` (1 = average)
+     * @param {number} reactivity Reactivity param
+     * @param {number} dt seconds
+     * @returns {number} angle, radians (unbounded: wrap mod 2π for the shader)
+     */
+    step(trebAtt, reactivity, dt) {
+      const target = Math.min(EYE_SPIN_MAX, 0.35 + 1.1 * clamp(trebAtt || 0, 0, 2) * clamp(reactivity, 0, 2));
+      rate += (target - rate) * (1 - Math.exp(-Math.max(0, dt) / 0.4));
+      angle += rate * Math.max(0, dt);
+      return angle;
+    },
+  };
+}
+
+/**
+ * Row-major Ry(yaw)·Rx(pitch)·Rz(roll) into `out` (9 floats). Positive pitch drops the chin.
+ * @param {number} yaw @param {number} pitch @param {number} roll @param {Float32Array} out
+ */
+export function worldFromObject(yaw, pitch, roll, out) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  // Rx(pitch)·Rz(roll), with Rx: y' = y·cp − z·sp, z' = y·sp + z·cp.
+  const a00 = cr, a01 = -sr, a02 = 0;
+  const a10 = cp * sr, a11 = cp * cr, a12 = -sp;
+  const a20 = sp * sr, a21 = sp * cr, a22 = cp;
+  // Ry(yaw) on the left: x' = x·cy + z·sy, z' = −x·sy + z·cy.
+  out[0] = cy * a00 + sy * a20;
+  out[1] = cy * a01 + sy * a21;
+  out[2] = cy * a02 + sy * a22;
+  out[3] = a10;
+  out[4] = a11;
+  out[5] = a12;
+  out[6] = -sy * a00 + cy * a20;
+  out[7] = -sy * a01 + cy * a21;
+  out[8] = -sy * a02 + cy * a22;
+}

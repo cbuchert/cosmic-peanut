@@ -41,6 +41,7 @@ def test_builtin_renderers():
         "blaze": ("webgl2", []),
         "cascade": ("webgl2", []),
         "radar": ("webgl2", []),
+        "skull": ("webgl2", []),
     }
 
 
@@ -263,3 +264,36 @@ def test_radar_manifest():
     assert "contacts" not in params
     for f in ("fullscreen.vert", "paint.frag", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/radar" / f).is_file(), f
+
+
+def test_skull_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "skull"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Skull Trip",
+        "src/skull.js",
+        "webgl2",
+        "thumbs/skull.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "reactivity",
+        "density",
+        "warp",
+        "speed",
+        "jaw",
+        "mode",
+        "stripes",
+        "size",
+    ]
+    # lib/skull-motion.js DEFAULTS: Reduce motion calms flow, warp, nods and ripples only while
+    # these are at their defaults.
+    for pid in ("reactivity", "density", "warp", "speed", "jaw", "size"):
+        assert params[pid]["type"] == "number"
+        assert params[pid]["default"] == 1, pid
+    # lib/opart.js MODES / STRIPES.
+    assert params["mode"]["options"] == ["monochrome", "acid"]
+    assert params["mode"]["default"] == "monochrome"
+    assert params["stripes"]["options"] == ["black & white", "black only"]
+    assert params["stripes"]["default"] == "black & white"
+    for f in ("fullscreen.vert", "opart.glsl", "skull.frag", "composite.frag"):
+        assert (REPOS["builtin"] / "shaders/skull" / f).is_file(), f

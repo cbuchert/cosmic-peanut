@@ -12,6 +12,7 @@ import {
   FIELD_MAX,
   FLOW_SENS,
   lookColors,
+  opField,
   resolveLook,
   RIPPLE_SPEED,
   stripe,
@@ -259,5 +260,43 @@ describe("lookColors", () => {
       prev.set(c);
     }
     expect(moved).toBeGreaterThan(0.3);
+  });
+});
+
+describe("createWaveBend robustness", () => {
+  it("ignores non-finite samples instead of getting stuck on NaN", () => {
+    const b = createWaveBend(8);
+    const wave = new Float32Array(64).fill(0.3);
+    wave[3] = NaN;
+    wave[40] = Infinity;
+    let out = b.step(wave, 1 / 60);
+    for (let f = 0; f < 60; f++) out = b.step(wave, 1 / 60);
+    for (const v of out) expect(Number.isFinite(v)).toBe(true);
+  });
+});
+
+describe("opField (mirror of opart.glsl)", () => {
+  it("stays within FIELD_MAX on any screen and moves with the flow no faster than FLOW_SENS per unit of warp", () => {
+    let seed = 3;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const outline = [0.55 * 1.08, 0, 0.3]; // max skull size, a tilt of 0, jaw open
+    let worstSens = 0;
+    for (let i = 0; i < 4000; i++) {
+      // Half the short side is 1; the long side up to 21:9 (2.4), either way round.
+      const long = (rnd() * 2 - 1) * 2.4;
+      const short = rnd() * 2 - 1;
+      const [x, y] = i % 2 ? [long, short] : [short, long];
+      const warp = rnd() * 2;
+      const flow = rnd() * 1000;
+      const f = opField(x, y, flow, warp, outline);
+      expect(Math.abs(f)).toBeLessThanOrEqual(FIELD_MAX);
+      if (warp > 0.05) {
+        const h = 1e-4;
+        const sens = Math.abs(opField(x, y, flow + h, warp, outline) - f) / h / warp;
+        worstSens = Math.max(worstSens, sens);
+      }
+    }
+    expect(worstSens).toBeLessThanOrEqual(FLOW_SENS);
+    expect(worstSens).toBeGreaterThan(0.2 * FLOW_SENS); // the bound isn't wildly loose
   });
 });
