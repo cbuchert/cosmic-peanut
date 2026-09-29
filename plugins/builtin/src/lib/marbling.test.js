@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createMarbler, EV_DROP, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
+import { createMarbler, EV_DRAG, EV_DROP, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
 
 const out = new Float64Array(2);
 
@@ -268,6 +268,69 @@ describe("createMarbler", () => {
       return drops;
     };
     expect(poured(0.3)).toBeGreaterThan(1.8 * poured(0.02));
+  });
+
+  it("picks the ink by the region that hit: kick body, snare deep, hats light or clear", () => {
+    /** @param {number} lo @param {number} hi @param {number} seed → ink index of the first drop (-1 clear) */
+    const inkOf = (lo, hi, seed) => {
+      const m = createMarbler(seed);
+      m.step(audioFrame(), DT, PARAMS, ENV);
+      m.step(audioFrame({ onset: true, onsetStrength: 1, bands: bandsHit(lo, hi) }), DT, PARAMS, ENV);
+      for (let k = 0; k < 4; k++) if (m.evC[k] === 1) return k;
+      return -1;
+    };
+    const seeds = Array.from({ length: 40 }, (_, i) => i + 1);
+    expect(new Set(seeds.map((s) => inkOf(0, 6, s)))).toEqual(new Set([1]));
+    expect(new Set(seeds.map((s) => inkOf(20, 40, s)))).toEqual(new Set([3]));
+    const hats = seeds.map((s) => inkOf(48, 64, s));
+    expect(new Set(hats)).toEqual(new Set([2, -1]));
+    const clear = hats.filter((k) => k === -1).length;
+    expect(clear).toBeGreaterThan(4);
+    expect(clear).toBeLessThan(20);
+  });
+});
+
+describe("stylus", () => {
+  const RAKE = { ...PARAMS, rake: 1 };
+  it("rakes along a path whose height follows the spectral centroid, laying clear paper drops", () => {
+    const m = createMarbler(2);
+    const ys = [[], []];
+    let clear = 0;
+    let far = 0;
+    for (let f = 0; f < 720; f++) {
+      const half = f < 360 ? 0 : 1;
+      m.step(audioFrame({ rms: 0.2, peak: 0.4, centroid: half ? 0.35 : 0.04 }), DT, RAKE, ENV);
+      let sx = NaN;
+      let sy = NaN;
+      for (let i = 0; i < m.count; i++) {
+        if (m.evA[i * 4] === EV_DRAG) {
+          sx = m.evA[i * 4 + 1];
+          sy = m.evA[i * 4 + 2];
+          if (f % 360 > 180) ys[half].push(sy);
+        }
+      }
+      for (let i = 0; i < m.count; i++) {
+        const isClear = m.evA[i * 4] === EV_DROP && [0, 1, 2, 3].every((k) => m.evC[i * 4 + k] === 0);
+        if (!isClear) continue;
+        clear++;
+        if (Math.hypot(m.evA[i * 4 + 1] - sx, m.evA[i * 4 + 2] - sy) > 0.08) far++;
+      }
+    }
+    const mean = (/** @type {number[]} */ a) => a.reduce((x, y) => x + y, 0) / a.length;
+    expect(ys[0].length).toBeGreaterThan(100);
+    expect(mean(ys[1]) - mean(ys[0])).toBeGreaterThan(0.3);
+    expect(clear).toBeGreaterThan(20);
+    expect(far).toBeLessThan(clear * 0.1);
+  });
+
+  it("rests in silence and when Rake is 0", () => {
+    for (const [a, p] of [[audioFrame({ silent: true }), RAKE], [audioFrame({ rms: 0.2 }), PARAMS]]) {
+      const m = createMarbler(2);
+      for (let f = 0; f < 120; f++) {
+        m.step(a, DT, p, ENV);
+        for (let i = 0; i < m.count; i++) expect(m.evA[i * 4]).not.toBe(EV_DRAG);
+      }
+    }
   });
 });
 

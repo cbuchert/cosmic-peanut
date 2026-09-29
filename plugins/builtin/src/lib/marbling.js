@@ -255,12 +255,13 @@ export const EV_SHIFT = 3;
  * Per-region drop recipe (page units: the page is 1 tall). radius: base radius; rimT: thickness of
  * the vein-ink ring poured first (rimInk), so each cell ends up outlined; pour: seconds a drop
  * takes to spread; spread: fraction of the page its centre may land in; sat: chance of 1..maxSat
- * smaller satellite drops landing inside it just after (nested cells).
+ * smaller satellite drops landing inside it just after (nested cells); clear: chance the drop is
+ * clear (paper-coloured, no rim) — the cream specks.
  */
 const RECIPES = [
-  { radius: 0.075, ink: 1, rimInk: 0, rimT: 0.0035, pour: 0.3, spread: 0.7, sat: 0.85, maxSat: 3 }, // low: kicks, bass
-  { radius: 0.045, ink: 3, rimInk: 0, rimT: 0.006, pour: 0.2, spread: 0.85, sat: 0.5, maxSat: 2 }, // mid: snares
-  { radius: 0.017, ink: 2, rimInk: 0, rimT: 0.0018, pour: 0.1, spread: 1, sat: 0, maxSat: 0 }, // high: hats
+  { radius: 0.075, ink: 1, rimInk: 0, rimT: 0.0035, pour: 0.3, spread: 0.7, sat: 0.85, maxSat: 3, clear: 0 }, // low: kicks, bass
+  { radius: 0.045, ink: 3, rimInk: 0, rimT: 0.006, pour: 0.2, spread: 0.85, sat: 0.5, maxSat: 2, clear: 0 }, // mid: snares
+  { radius: 0.017, ink: 2, rimInk: 0, rimT: 0.0018, pour: 0.1, spread: 1, sat: 0, maxSat: 0, clear: 0.3 }, // high: hats
 ];
 
 /**
@@ -294,6 +295,13 @@ const RECIPES = [
 const RMS_FLOOR = 0.05;
 const RMS_LOUD = 0.2;
 
+/** Stylus: Gaussian drag width (σ = 0.012 page), how much of its motion the paint follows, how
+ * far it runs past the page edges before turning, and the spacing of its clear drops. */
+const STYLUS_INV_S2 = 1 / (0.012 * 0.012);
+const STYLUS_GRIP = 0.9;
+const STYLUS_MARGIN = 0.03;
+const STYLUS_SPACING = 0.02;
+
 /** @param {number} x */
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
@@ -301,6 +309,7 @@ const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
  * The pour scheduler. Each `step` rewrites evA–evD with this frame's events, oldest first:
  * - DROP  evA (1, x, y, R²)   evB (cellR², 0, 0, 0): a concentric slice of a drop being poured;
  *   inside √cellR² takes evC's ink, the ring out to R takes evD's (the rim, poured first).
+ * - DRAG  evA (2, sx, sy, 1/σ²) evB (vx, vy, 0, 0): the stylus step (see dragForward).
  * Inks are 4-vectors of ink amounts (one-hot; all zero = clear, i.e. paper).
  * @param {number} seed
  */
@@ -329,6 +338,15 @@ export function createMarbler(seed) {
   let rmsS = 0;
   let ref = RMS_FLOOR;
   let drizzle = 0;
+  // The stylus: position, direction of travel, distance travelled, last clear-drop deposit.
+  let sx = -1;
+  let sy = 0.5;
+  let dir = 1;
+  let travelled = 0;
+  let deposited = 0;
+  let centroidS = 0.1;
+  let peakS = 0;
+  const v = new Float64Array(2);
 
   /**
    * Queue a drop. Returns the slot, or -1 when every slot is busy (the drop is skipped: the cap).
@@ -367,7 +385,8 @@ export function createMarbler(seed) {
     const r = scale * rc.radius * params.size * (0.7 + 0.6 * params.reactivity * hit);
     const x = env.aspect * (0.5 + (rand() - 0.5) * rc.spread);
     const y = 0.5 + (rand() - 0.5) * rc.spread;
-    spawn(x, y, r, rc.rimT, rc.ink, rc.rimInk, rc.pour, 0);
+    if (rand() < rc.clear) spawn(x, y, r, 0, -1, -1, rc.pour, 0);
+    else spawn(x, y, r, rc.rimT, rc.ink, rc.rimInk, rc.pour, 0);
     if (scale === 1 && rand() < rc.sat) {
       const k = 1 + Math.floor(rand() * rc.maxSat);
       for (let j = 0; j < k; j++) {
@@ -434,10 +453,44 @@ export function createMarbler(seed) {
       }
       if (drizzle > 1) drizzle = 1;
       if (region >= 0) dropFrom(region, scale, audio, params, env);
+
+      let n = 0;
+      // The stylus rakes through the paint: height from the (smoothed) spectral centroid, a
+      // wobble from the waveform's peak, speed from the energy; it drips clear paper as it goes.
+      centroidS += (audio.centroid - centroidS) * (1 - Math.exp(-dt / 0.6));
+      peakS += ((audio.silent ? 0 : audio.peak) - peakS) * (1 - Math.exp(-dt / 0.3));
+      if (sx < 0) sx = env.aspect * 0.5;
+      const rake = params.rake;
+      if (rake > 0 && !audio.silent && energy > 0.02) {
+        const x0 = sx;
+        const y0 = sy;
+        sx += dir * rake * (0.04 + 0.16 * energy) * dt;
+        if (sx > env.aspect + STYLUS_MARGIN) dir = -1;
+        if (sx < -STYLUS_MARGIN) dir = 1;
+        const target = 0.12 + 0.76 * clamp01(centroidS * 2.5) + 0.07 * peakS * Math.sin(travelled * 11);
+        sy += (target - sy) * (1 - Math.exp(-dt / 0.35));
+        v[0] = (sx - x0) * STYLUS_GRIP;
+        v[1] = (sy - y0) * STYLUS_GRIP;
+        clampDrag(STYLUS_INV_S2, v);
+        evA[0] = EV_DRAG;
+        evA[1] = x0;
+        evA[2] = y0;
+        evA[3] = STYLUS_INV_S2;
+        evB[0] = v[0];
+        evB[1] = v[1];
+        evB[2] = 0;
+        evB[3] = 0;
+        n = 1;
+        travelled += Math.hypot(sx - x0, sy - y0);
+        if (travelled - deposited >= STYLUS_SPACING) {
+          deposited = travelled;
+          const r = 0.011 * (0.7 + 0.6 * energy) * Math.min(1.5, Math.sqrt(rake));
+          spawn(sx, sy, r, 0, -1, -1, 0.12, 0);
+        }
+      }
       for (let i = 0; i < 64; i++) prevBands[i] = bands[i] ?? 0;
 
       // Emit this frame's slice of every drop being poured.
-      let n = 0;
       for (let i = 0; i < MAX_POURS && n < MAX_EVENTS; i++) {
         const p = pours[i];
         if (p.state === 1) {
