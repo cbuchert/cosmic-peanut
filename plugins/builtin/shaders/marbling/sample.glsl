@@ -10,7 +10,7 @@
 // Outside the texture is clear paper (0).
 uniform sampler2D u_prev;
 uniform vec2 u_prevSize;   // texels
-uniform float u_sharp;     // anti-diffusion strength
+uniform float u_sharp;     // edge re-steepening strength (0 = plain Catmull-Rom)
 
 vec4 inkAt(ivec2 i) {
   if (any(lessThan(i, ivec2(0))) || any(greaterThanEqual(i, ivec2(u_prevSize)))) return vec4(0.0);

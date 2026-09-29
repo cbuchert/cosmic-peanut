@@ -167,7 +167,7 @@ const PARAMS = { pour: 1, size: 1, rake: 0, reactivity: 1, renew: 0 };
 const ENV = { aspect: 16 / 9, pxPerUnit: 1440, reduceFlashing: true, reduceMotion: false };
 const DT = 1 / 60;
 
-/** Squared radii of the DROP events of the marbler's current frame. */
+/** Squared radii of the DROP events of the marbler's current frame. @param {ReturnType<typeof createMarbler>} m */
 function dropsOf(m) {
   const out = [];
   for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === EV_DROP) out.push(m.evA[i * 4 + 3]);
@@ -297,11 +297,13 @@ describe("stylus", () => {
   const RAKE = { ...PARAMS, rake: 1 };
   it("rakes along a path whose height follows the spectral centroid, laying clear paper drops", () => {
     const m = createMarbler(2);
+    /** @type {number[][]} */
     const ys = [[], []];
     let clear = 0;
     let far = 0;
-    for (let f = 0; f < 720; f++) {
-      const half = f < 360 ? 0 : 1;
+    // Two 40 s halves, so the slow meander averages out.
+    for (let f = 0; f < 4800; f++) {
+      const half = f < 2400 ? 0 : 1;
       m.step(audioFrame({ rms: 0.2, peak: 0.4, centroid: half ? 0.35 : 0.04 }), DT, RAKE, ENV);
       let sx = NaN;
       let sy = NaN;
@@ -309,7 +311,7 @@ describe("stylus", () => {
         if (m.evA[i * 4] === EV_DRAG) {
           sx = m.evA[i * 4 + 1];
           sy = m.evA[i * 4 + 2];
-          if (f % 360 > 180) ys[half].push(sy);
+          if (f % 2400 > 300) ys[half].push(sy);
         }
       }
       for (let i = 0; i < m.count; i++) {
@@ -321,13 +323,18 @@ describe("stylus", () => {
     }
     const mean = (/** @type {number[]} */ a) => a.reduce((x, y) => x + y, 0) / a.length;
     expect(ys[0].length).toBeGreaterThan(100);
-    expect(mean(ys[1]) - mean(ys[0])).toBeGreaterThan(0.3);
+    expect(mean(ys[1]) - mean(ys[0])).toBeGreaterThan(0.25);
     expect(clear).toBeGreaterThan(20);
     expect(far).toBeLessThan(clear * 0.1);
   });
 
   it("rests in silence and when Rake is 0", () => {
-    for (const [a, p] of [[audioFrame({ silent: true }), RAKE], [audioFrame({ rms: 0.2 }), PARAMS]]) {
+    /** @type {[ReturnType<typeof audioFrame>, typeof PARAMS][]} */
+    const cases = [
+      [audioFrame({ silent: true }), RAKE],
+      [audioFrame({ rms: 0.2 }), PARAMS],
+    ];
+    for (const [a, p] of cases) {
       const m = createMarbler(2);
       for (let f = 0; f < 120; f++) {
         m.step(a, DT, p, ENV);

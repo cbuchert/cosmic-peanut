@@ -27,7 +27,11 @@ import {
   resizeMap,
 } from "./lib/marbling.js";
 
-/** Anti-diffusion strength of the sharp resampler (sample.glsl), tuned by measured edge width. */
+/**
+ * Edge re-steepening of the sharp resampler (sample.glsl), tuned on stills: with it, ink edges
+ * stay ~1.5 px wide (mean mixed run between two pure inks) after 2 minutes / ~700 bakes; without
+ * it they widen to ~3.7 px within 1 minute.
+ */
 const SHARP = 0.1;
 
 /** @type {import('../tidalviz').CreateVisualizer} */
@@ -116,16 +120,12 @@ export default async function create(ctx) {
     gl.disable(gl.BLEND);
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
     gl.viewport(0, 0, dst.w, dst.h);
-    bindPrev(sim, src.tex, src.w, src.h, sharpness());
+    bindPrev(sim, src.tex, src.w, src.h, SHARP);
     setEvents(sim);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     cur ^= 1;
     queue.clear();
-  }
-
-  function sharpness() {
-    return ctx.params._sharp !== undefined ? Number(ctx.params._sharp) : SHARP;
   }
 
   function resize() {

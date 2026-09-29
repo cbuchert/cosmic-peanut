@@ -41,6 +41,7 @@ def test_builtin_renderers():
         "blaze": ("webgl2", []),
         "cascade": ("webgl2", []),
         "radar": ("webgl2", []),
+        "marbling": ("webgl2", []),
     }
 
 
@@ -263,3 +264,34 @@ def test_radar_manifest():
     assert "contacts" not in params
     for f in ("fullscreen.vert", "paint.frag", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/radar" / f).is_file(), f
+
+
+def test_marbling_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "marbling"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Marbling",
+        "src/marbling.js",
+        "webgl2",
+        "thumbs/marbling.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["palette", "paper", "pour", "size", "rake", "reactivity", "renew"]
+    assert params["palette"]["options"] == ["beast", "indigo", "emerald", "gold"]
+    assert params["palette"]["default"] == "beast"
+    assert params["paper"]["options"] == ["cream", "none"]
+    assert params["paper"]["default"] == "cream"
+    # lib/marbling.js DEFAULTS: Reduce motion calms pour/rake/renew only while they sit here.
+    for pid in ("pour", "size", "rake", "reactivity", "renew"):
+        assert params[pid]["type"] == "number"
+        assert params[pid]["default"] == 1, pid
+    assert params["rake"]["min"] == 0
+    assert params["renew"]["min"] == 0
+    for f in (
+        "fullscreen.vert",
+        "sample.glsl",
+        "events.glsl",
+        "sim.frag",
+        "resample.frag",
+        "composite.frag",
+    ):
+        assert (REPOS["builtin"] / "shaders/marbling" / f).is_file(), f

@@ -561,7 +561,10 @@ export function createMarbler(seed) {
         sx += dir * rake * (0.04 + 0.16 * energy) * dt;
         if (sx > env.aspect + STYLUS_MARGIN) dir = -1;
         if (sx < -STYLUS_MARGIN) dir = 1;
-        const target = 0.12 + 0.76 * clamp01(centroidS * 2.5) + 0.07 * peakS * Math.sin(travelled * 11);
+        // Centroid sets the height; a slow meander carries the rivers over the whole page.
+        const meander = 0.5 + 0.5 * Math.sin(travelled * 2.1);
+        const target =
+          0.12 + 0.76 * (0.6 * clamp01(centroidS * 2.5) + 0.4 * meander) + 0.07 * peakS * Math.sin(travelled * 11);
         sy += (target - sy) * (1 - Math.exp(-dt / 0.35));
         v[0] = (sx - x0) * STYLUS_GRIP;
         v[1] = (sy - y0) * STYLUS_GRIP;
