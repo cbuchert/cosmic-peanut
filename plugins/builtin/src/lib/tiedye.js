@@ -203,3 +203,46 @@ export function createArmWarp() {
     },
   };
 }
+
+/** Pattern options, in shader-index order. */
+export const PATTERNS = ["spiral", "bullseye", "crumple", "shibori"];
+/** Fabric options: white cotton shows through, or undyed areas are transparent. */
+export const FABRICS = ["white", "none"];
+/** Palette options; each is a list of dye colors (sRGB hex) in band order. */
+export const PALETTES = ["rainbow", "sunset", "ocean", "neon"];
+/** @type {Record<string, number[]>} */
+const PALETTE_HEX = {
+  rainbow: [0xd7192a, 0xf26b1d, 0xf7c815, 0x1f9e48, 0x1560bd, 0x6a2c91],
+  sunset: [0xc2185b, 0xe53935, 0xfb8c00, 0xf9c80e, 0x7b1fa2],
+  ocean: [0x0d2c6b, 0x1565c0, 0x19b5c4, 0x00897b, 0x3949ab],
+  neon: [0xff1f8e, 0xff6a00, 0xffee00, 0x8cff1a, 0x00e5ff, 0x8a2cff],
+};
+
+/** @param {readonly string[]} options @param {unknown} name → index, 0 (the default) if unknown */
+const indexOr0 = (options, name) => Math.max(0, options.indexOf(String(name)));
+
+/** @param {unknown} name the Pattern param */
+export function patternIndex(name) {
+  return indexOr0(PATTERNS, name);
+}
+
+/** @param {unknown} name the Fabric param */
+export function fabricIndex(name) {
+  return indexOr0(FABRICS, name);
+}
+
+/**
+ * Write a palette's dye colors (0–1 sRGB, 3 floats each) into `out`; unknown names → rainbow.
+ * @param {unknown} name the Palette param
+ * @param {Float32Array} out length ≥ MAX_COLORS × 3
+ * @returns {number} how many colors
+ */
+export function paletteOf(name, out) {
+  const hex = PALETTE_HEX[PALETTES[indexOr0(PALETTES, name)]];
+  for (let i = 0; i < hex.length; i++) {
+    out[i * 3] = ((hex[i] >> 16) & 255) / 255;
+    out[i * 3 + 1] = ((hex[i] >> 8) & 255) / 255;
+    out[i * 3 + 2] = (hex[i] & 255) / 255;
+  }
+  return hex.length;
+}

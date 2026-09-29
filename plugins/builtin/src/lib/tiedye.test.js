@@ -1,6 +1,17 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { BLOOM_CAP, BLOOM_SPREAD, createArmWarp, WARP_N, createBandWidths, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH } from "./tiedye.js";
+import {
+  BLOOM_CAP,
+  BLOOM_SPREAD,
+  createArmWarp,
+  WARP_N,
+  PALETTES,
+  PATTERNS,
+  FABRICS,
+  paletteOf,
+  patternIndex,
+  fabricIndex,
+  MAX_COLORS, createBandWidths, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH } from "./tiedye.js";
 
 describe("createBandWidths", () => {
   it("gives even bands for a silent track", () => {
@@ -241,5 +252,35 @@ describe("createArmWarp", () => {
     // …while a sustained shape comes through within a fraction of a second.
     for (let f = 0; f < 15; f++) out = w.step(up, 1 / 60);
     expect(out[0]).toBeGreaterThan(0.6);
+  });
+});
+
+describe("selection", () => {
+  it("maps each pattern and fabric option to its shader index, unknown → the default", () => {
+    expect(PATTERNS).toEqual(["spiral", "bullseye", "crumple", "shibori"]);
+    PATTERNS.forEach((p, i) => expect(patternIndex(p)).toBe(i));
+    expect(patternIndex("paisley")).toBe(0);
+    expect(FABRICS).toEqual(["white", "none"]);
+    expect(fabricIndex("none")).toBe(1);
+    expect(fabricIndex(undefined)).toBe(0);
+  });
+
+  it("gives each palette 4–MAX_COLORS saturated, distinct dye colors; unknown → rainbow", () => {
+    expect(PALETTES).toEqual(["rainbow", "sunset", "ocean", "neon"]);
+    const out = new Float32Array(MAX_COLORS * 3);
+    /** @type {string[]} */
+    const seen = [];
+    for (const name of PALETTES) {
+      const n = paletteOf(name, out);
+      expect(n).toBeGreaterThanOrEqual(4);
+      expect(n).toBeLessThanOrEqual(MAX_COLORS);
+      for (let i = 0; i < n; i++) {
+        const c = [out[i * 3], out[i * 3 + 1], out[i * 3 + 2]];
+        expect(Math.max(...c) - Math.min(...c), `${name} ${i}`).toBeGreaterThan(0.35);
+      }
+      seen.push(out.slice(0, n * 3).join());
+    }
+    expect(new Set(seen).size).toBe(PALETTES.length);
+    expect(paletteOf("plaid", out)).toBe(paletteOf("rainbow", out));
   });
 });
