@@ -239,6 +239,24 @@
         { "id": "sky", "type": "select", "label": "Sky", "options": ["black", "none"], "default": "black" },
         { "id": "rotation", "type": "number", "label": "Rotation (rad/s)", "min": -0.3, "max": 0.3, "step": 0.005, "default": 0.03 }
       ]
+    },
+    {
+      "id": "marbling",
+      "name": "Marbling",
+      "description": "Live marbled paper poured by the music: beats drop paint that packs into cells with dark veins, nested with smaller drops, while a stylus following the melody rakes cream rivers through it.",
+      "author": "Tidalviz",
+      "entry": "src/marbling.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/marbling.jpg",
+      "params": [
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["beast", "indigo", "emerald", "gold"], "default": "beast" },
+        { "id": "paper", "type": "select", "label": "Paper", "options": ["cream", "none"], "default": "cream" },
+        { "id": "pour", "type": "number", "label": "Pour rate", "min": 0.2, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "size", "type": "number", "label": "Drop size", "min": 0.4, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "rake", "type": "number", "label": "Rake", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "renew", "type": "number", "label": "Renew speed", "min": 0, "max": 3, "step": 0.01, "default": 1 }
+      ]
     }
   ]
 }
