@@ -210,7 +210,8 @@ export function createDrums() {
     for (let i = 0; i < 64; i++) {
       const x = i / 63;
       let v = 0.1 + 0.08 * Math.exp(-(((x - 0.45) / 0.15) ** 2)); // quiet pad
-      if (x < 0.2) v += 0.85 * kick * (1 - x / 0.2);
+      // Kick centred near 60 Hz (band ≈ 0.11 on the 30 Hz–16 kHz log axis), like a real kick drum.
+      v += 0.85 * kick * Math.exp(-(((x - 0.11) / 0.06) ** 2));
       v += 0.75 * snare * Math.exp(-(((x - 0.5) / 0.12) ** 2));
       if (x > 0.8) v += 0.6 * hat * ((x - 0.8) / 0.2);
       bands[i] = Math.min(1, Math.max(0, v + (rnd() - 0.5) * 0.02));
@@ -469,10 +470,11 @@ export function createMelody() {
   /** @param {number} s */
   const voices = (s) => {
     const bar = Math.floor(s / 2);
-    const root = ROOTS[bar % 4];
+    // Non-negative modulo: the first frames' waveform reaches back before t = 0 (s < 0).
+    const root = ROOTS[((bar % 4) + 4) % 4];
     const eighth = Math.floor(s * 4);
     const ph = s * 4 - eighth;
-    const lead = root * 4 * STEPS[eighth % 16];
+    const lead = root * 4 * STEPS[((eighth % 16) + 16) % 16];
     return { root, lead, env: Math.exp(-ph * 3), eighth };
   };
   let clock = 0;

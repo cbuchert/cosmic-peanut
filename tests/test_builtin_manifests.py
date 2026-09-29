@@ -41,6 +41,14 @@ def test_builtin_renderers():
         "blaze": ("webgl2", []),
         "cascade": ("webgl2", []),
         "radar": ("webgl2", []),
+        "tentacube": ("three", ["three"]),
+        "tiedye": ("webgl2", []),
+        "skull": ("webgl2", []),
+        "darksun": ("webgl2", []),
+        "eclipse": ("webgl2", []),
+        "marbling": ("webgl2", []),
+        "laminar": ("webgl2", []),
+        "tetraballs": ("webgl2", []),
     }
 
 
@@ -263,3 +271,282 @@ def test_radar_manifest():
     assert "contacts" not in params
     for f in ("fullscreen.vert", "paint.frag", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/radar" / f).is_file(), f
+
+
+def test_tentacube_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "tentacube"]
+    assert (v["name"], v["entry"], v["renderer"], v["libs"], v["thumbnail"]) == (
+        "Tentacube",
+        "src/tentacube.js",
+        "three",
+        ["three"],
+        "thumbs/tentacube.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "length",
+        "segments",
+        "drag",
+        "twitch",
+        "pulse",
+        "morph",
+        "material",
+        "background",
+        "tiling",
+        "bloom",
+        "distance",
+    ]
+    assert params["morph"]["options"] == ["off", "slow", "fast"]
+    assert params["material"]["options"] == ["auto", "chrome", "iridescent", "emissive", "obsidian"]
+    assert params["material"]["default"] == "auto"
+    assert params["background"]["options"] == ["hyperbolic", "none"]
+    assert params["tiling"]["options"] == ["{7,3}", "{5,4}", "{4,5}"]
+    seg = params["segments"]
+    assert (seg["min"], seg["max"], seg["step"], seg["default"]) == (12, 48, 1, 24)
+    # The creature code keys "reduce motion" off the twitch default.
+    assert params["twitch"]["default"] == 1
+
+
+def test_tiedye_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "tiedye"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Tie-Dye",
+        "src/tiedye.js",
+        "webgl2",
+        "thumbs/tiedye.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "pattern",
+        "palette",
+        "fabric",
+        "twist",
+        "speed",
+        "bleed",
+        "reactivity",
+        "bloom",
+    ]
+    # Option order is the shader index order in lib/tiedye.js (PATTERNS, PALETTES, FABRICS).
+    assert params["pattern"]["options"] == ["spiral", "bullseye", "crumple", "shibori"]
+    assert params["pattern"]["default"] == "spiral"
+    assert params["palette"]["options"] == ["rainbow", "sunset", "ocean", "neon"]
+    assert params["palette"]["default"] == "rainbow"
+    assert params["fabric"]["options"] == ["white", "none"]
+    assert params["fabric"]["default"] == "white"
+    # lib/tiedye.js DEFAULT_SPEED: Reduce motion slows the spin only while Speed is at this default.
+    assert params["speed"]["default"] == 1
+    assert params["bloom"]["type"] == "boolean"
+    assert params["bloom"]["default"] is True
+    for f in ("fullscreen.vert", "tiedye.frag"):
+        assert (REPOS["builtin"] / "shaders/tiedye" / f).is_file(), f
+
+
+def test_skull_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "skull"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Skull Trip",
+        "src/skull.js",
+        "webgl2",
+        "thumbs/skull.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "reactivity",
+        "density",
+        "warp",
+        "speed",
+        "jaw",
+        "mode",
+        "stripes",
+        "size",
+    ]
+    # lib/skull-motion.js DEFAULTS: Reduce motion calms flow, warp, nods and ripples only while
+    # these are at their defaults.
+    for pid in ("reactivity", "density", "warp", "speed", "jaw", "size"):
+        assert params[pid]["type"] == "number"
+        assert params[pid]["default"] == 1, pid
+    # lib/opart.js MODES / STRIPES.
+    assert params["mode"]["options"] == ["monochrome", "acid"]
+    assert params["mode"]["default"] == "monochrome"
+    assert params["stripes"]["options"] == ["black & white", "black only"]
+    assert params["stripes"]["default"] == "black & white"
+    for f in ("fullscreen.vert", "opart.glsl", "skull.frag", "composite.frag"):
+        assert (REPOS["builtin"] / "shaders/skull" / f).is_file(), f
+
+
+def test_darksun_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "darksun"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Dark Sun",
+        "src/darksun.js",
+        "webgl2",
+        "thumbs/darksun.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "reactivity",
+        "rangeWidth",
+        "rangeDepth",
+        "beam",
+        "sunSize",
+        "palette",
+        "backdrop",
+    ]
+    # lib/darksun.js DEFAULTS / RANGES mirror these.
+    got = {
+        k: (p["min"], p["max"], p["default"]) for k, p in params.items() if p["type"] == "number"
+    }
+    assert got == {
+        "reactivity": (0, 2, 1),
+        "rangeWidth": (0.3, 0.7, 0.5),
+        "rangeDepth": (0.3, 2, 1),
+        "beam": (0, 2, 1),
+        "sunSize": (0.5, 1.6, 1),
+    }
+    assert params["palette"]["options"] == ["dusk", "ash", "teal", "gold"]
+    assert params["palette"]["default"] == "dusk"
+    assert params["backdrop"]["options"] == ["painted", "none"]
+    assert params["backdrop"]["default"] == "painted"
+    for f in ("fullscreen.vert", "darksun.frag"):
+        assert (REPOS["builtin"] / "shaders/darksun" / f).is_file(), f
+
+
+def test_eclipse_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "eclipse"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Eclipse",
+        "src/eclipse.js",
+        "webgl2",
+        "thumbs/eclipse.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "reactivity",
+        "reach",
+        "thickness",
+        "clouds",
+        "tint",
+        "sky",
+        "rotation",
+    ]
+    r = params["reactivity"]
+    assert (r["type"], r["min"], r["max"], r["default"]) == ("number", 0, 2, 1)
+    # lib/eclipse.js TINTS; tintGamma / skyAlpha fall back to the defaults for anything else.
+    assert params["tint"]["options"] == ["monochrome", "silver", "sepia", "cold blue"]
+    assert params["tint"]["default"] == "monochrome"
+    assert params["sky"]["options"] == ["black", "none"]
+    assert params["sky"]["default"] == "black"
+    # lib/eclipse.js DEFAULT_ROTATION: Reduce motion slows the drift only while it's at this default.
+    rot = params["rotation"]
+    assert rot["default"] == 0.03
+    assert rot["min"] < 0 < rot["max"]
+    for f in ("fullscreen.vert", "noise.glsl", "eclipse.frag", "clouds.frag"):
+        assert (REPOS["builtin"] / "shaders/eclipse" / f).is_file(), f
+
+
+def test_marbling_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "marbling"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Marbling",
+        "src/marbling.js",
+        "webgl2",
+        "thumbs/marbling.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["palette", "paper", "pour", "size", "rake", "reactivity", "renew"]
+    assert params["palette"]["options"] == ["beast", "indigo", "emerald", "gold"]
+    assert params["palette"]["default"] == "beast"
+    assert params["paper"]["options"] == ["cream", "none"]
+    assert params["paper"]["default"] == "cream"
+    # lib/marbling.js DEFAULTS: Reduce motion calms pour/rake/renew only while they sit here.
+    for pid in ("pour", "size", "rake", "reactivity", "renew"):
+        assert params[pid]["type"] == "number"
+        assert params[pid]["default"] == 1, pid
+    assert params["rake"]["min"] == 0
+    assert params["renew"]["min"] == 0
+    for f in (
+        "fullscreen.vert",
+        "sample.glsl",
+        "events.glsl",
+        "sim.frag",
+        "resample.frag",
+        "composite.frag",
+    ):
+        assert (REPOS["builtin"] / "shaders/marbling" / f).is_file(), f
+
+
+def test_laminar_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "laminar"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Laminar",
+        "src/laminar.js",
+        "webgl2",
+        "thumbs/laminar.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "reactivity",
+        "speed",
+        "turbulence",
+        "density",
+        "size",
+        "detail",
+        "trail",
+        "palette",
+        "backdrop",
+    ]
+    # lib/laminar.js MOTION_DEFAULTS: Reduce motion swaps these only while they're at the default.
+    for pid in ("reactivity", "speed", "turbulence"):
+        assert params[pid]["default"] == 1, pid
+    # lib/flow.js simGrid clamps Detail to 0.08-0.4.
+    assert (params["detail"]["min"], params["detail"]["max"]) == (0.08, 0.4)
+    assert params["trail"] == {"id": "trail", "type": "boolean", "label": "Trail", "default": True}
+    assert params["palette"]["options"] == ["currents", "sea glass", "sunset", "mono"]
+    assert params["palette"]["default"] == "currents"
+    assert params["backdrop"]["options"] == ["black", "none"]
+    assert params["backdrop"]["default"] == "black"
+    for f in ("common.glsl", "advect.frag", "correct.frag", "composite.frag"):
+        assert (REPOS["builtin"] / "shaders/laminar" / f).is_file()
+
+
+def test_tetraballs_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "tetraballs"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Tetraballs",
+        "src/tetraballs.js",
+        "webgl2",
+        "thumbs/tetraballs.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "material",
+        "reactivity",
+        "size",
+        "bounce",
+        "tumble",
+        "background",
+        "quality",
+        "tint",
+    ]
+    # Order matches lib/tetra-material.js MATERIALS (after "auto").
+    assert params["material"]["options"] == [
+        "auto",
+        "chrome",
+        "soap",
+        "jade",
+        "brushed",
+        "velvet",
+        "glass",
+        "water",
+        "fire",
+        "smoke",
+    ]
+    assert params["material"]["default"] == "chrome"
+    assert params["background"]["options"] == ["studio", "none"]
+    assert params["background"]["default"] == "studio"
+    assert params["quality"]["options"] == ["low", "medium", "high"]
+    # lib/tetra-motion.js DEFAULT_TUMBLE / DEFAULT_BOUNCE: Reduce motion calms them at these values.
+    assert params["tumble"]["default"] == 0.35
+    assert params["bounce"]["default"] == 1
+    for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
+        assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()

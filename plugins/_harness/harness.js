@@ -11,11 +11,15 @@
  *   audio=tones  sustained sine tones, loud/quiet pairs, on from 1 s (synth.js createTones)
  *   audio=melody a bass note per bar under a plucked arpeggio with harmonics (synth.js createMelody)
  *   finish=1  gl.finish() inside the timed region, so the number includes GPU work
+ *   sync=1    a 1-pixel gl.readPixels after each frame inside the timed region: WebKit's finish()
+ *             returns without waiting, a readback can't, so this is the one that includes GPU time
  *   lum=1     record mean frame luminance (for the flash-limiter check)
  *   bg=light  a bright, busy backdrop behind the transparent canvas (default black, like the shell)
  *   nocanvas=1  hide the canvas (screenshot the backdrop alone)
  *   silent=1  the synth outputs silence (all-zero frames, silent: true)
  *   still=N   deterministic: seeded Math.random, fixed 1/60 s steps, stop after N frames
+ *   gain=G    scale the audio's level (waveform, rms, peak, spectrum, bands) by G, e.g. 0.05 for a
+ *             quiet passage
  */
 import { createDrums, createMelody, createMusic, createProtoDemo, createSynth, createTones } from "./synth.js";
 
@@ -23,12 +27,22 @@ const q = new URLSearchParams(location.search);
 const repo = q.get("repo") ?? "builtin";
 const vizId = q.get("viz") ?? "bars";
 const finish = q.get("finish") === "1";
+const sync = q.get("sync") === "1";
+const px = new Uint8Array(4);
 const measureLum = q.get("lum") === "1";
 // WebKit coarsens performance.now() to 1 ms; rep=N runs frame() N times per rAF and divides.
 const rep = Number(q.get("rep") ?? 1);
 const base = `/plugins/${repo}/`;
 const w = /** @type {any} */ (window);
 const still = Number(q.get("still") ?? 0);
+const gain = Number(q.get("gain") ?? 1);
+
+/** Scale a frame's level in place (the synth rebuilds it every update). @param {any} a @param {number} g */
+function applyGain(a, g) {
+  for (const k of ["waveform", "spectrum", "bands", "left", "right"]) if (a[k]) for (let i = 0; i < a[k].length; i++) a[k][i] *= g;
+  a.rms *= g;
+  a.peak *= g;
+}
 
 const bgEl = /** @type {HTMLElement} */ (document.getElementById("bg"));
 if (q.get("bg") === "light") {
@@ -124,6 +138,7 @@ async function main() {
 
   const mod = await import(base + entry.entry);
   const viz = await mod.default(ctx);
+  w.__viz = viz; // for synchronous GPU benchmarks (readPixels after N frames)
 
   w.__resize = (/** @type {number} */ cw, /** @type {number} */ ch) => {
     setSize(cw, ch);
@@ -205,12 +220,14 @@ async function main() {
     time.dt = frames === 0 ? 1 / 60 : dt;
     time.frame = frames++;
     const audio = synth.update(time.now, time.dt);
+    if (gain !== 1) applyGain(audio, gain);
     const t0 = performance.now();
     try {
       for (let r = 0; r < rep; r++) {
         viz.frame(audio, time);
         if (ctx.three?.autoRender) ctx.three.renderer.render(ctx.three.scene, ctx.three.camera);
         if (finish && gl) gl.finish();
+        if (sync && gl) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
       }
     } catch (e) {
       errors.push(String(/** @type {any} */ (e)?.stack ?? e));

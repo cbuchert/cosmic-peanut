@@ -142,6 +142,160 @@
         { "id": "floor", "type": "number", "label": "Floor (dB)", "min": -80, "max": -30, "step": 1, "default": -60 },
         { "id": "maxFreq", "type": "select", "label": "Top frequency", "options": ["4k", "8k", "16k"], "default": "16k" }
       ]
+    },
+    {
+      "id": "tentacube",
+      "name": "Tentacube",
+      "description": "A tentacled cube that pulses, twists and twitches to the music, its tentacles dragging behind, adrift in hyperbolic space. Its skin morphs between chrome, oil slick, glowing and obsidian.",
+      "author": "Tidalviz",
+      "entry": "src/tentacube.js",
+      "renderer": "three",
+      "libs": ["three"],
+      "thumbnail": "thumbs/tentacube.jpg",
+      "params": [
+        { "id": "length", "type": "number", "label": "Tentacle length", "min": 0.4, "max": 1.8, "step": 0.01, "default": 1 },
+        { "id": "segments", "type": "number", "label": "Segments", "min": 12, "max": 48, "step": 1, "default": 24 },
+        { "id": "drag", "type": "number", "label": "Inertia", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
+        { "id": "twitch", "type": "number", "label": "Twitch", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "pulse", "type": "number", "label": "Pulse", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "morph", "type": "select", "label": "Morph", "options": ["off", "slow", "fast"], "default": "slow" },
+        { "id": "material", "type": "select", "label": "Material", "options": ["auto", "chrome", "iridescent", "emissive", "obsidian"], "default": "auto" },
+        { "id": "background", "type": "select", "label": "Background", "options": ["hyperbolic", "none"], "default": "hyperbolic" },
+        { "id": "tiling", "type": "select", "label": "Tiling", "options": ["{7,3}", "{5,4}", "{4,5}"], "default": "{7,3}" },
+        { "id": "bloom", "type": "number", "label": "Bloom", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "distance", "type": "number", "label": "Camera distance", "min": 5, "max": 14, "step": 0.1, "default": 7 }
+      ]
+    },
+    {
+      "id": "tiedye",
+      "name": "Tie-Dye",
+      "description": "Tie-dyed cotton that breathes with the music: bass winds the spiral, the mix sets each color's width, beats drop fresh dye.",
+      "author": "Tidalviz",
+      "entry": "src/tiedye.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/tiedye.jpg",
+      "params": [
+        { "id": "pattern", "type": "select", "label": "Pattern", "options": ["spiral", "bullseye", "crumple", "shibori"], "default": "spiral" },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["rainbow", "sunset", "ocean", "neon"], "default": "rainbow" },
+        { "id": "fabric", "type": "select", "label": "Fabric", "options": ["white", "none"], "default": "white" },
+        { "id": "twist", "type": "number", "label": "Twist", "min": 0, "max": 2, "step": 0.05, "default": 0.6 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 3, "step": 0.05, "default": 1 },
+        { "id": "bleed", "type": "number", "label": "Bleed", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "bloom", "type": "boolean", "label": "Dye blooms on beats", "default": true }
+      ]
+    },
+    {
+      "id": "skull",
+      "name": "Skull Trip",
+      "description": "A glossy candy-apple red metal skull in psychedelic op-art stripes: the jaw chomps on kicks, the head nods to the beat, the stripes breathe with the bass and ripple out on every hit.",
+      "author": "Tidalviz",
+      "entry": "src/skull.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/skull.jpg",
+      "params": [
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "density", "type": "number", "label": "Stripe density", "min": 0.5, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "warp", "type": "number", "label": "Warp", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "jaw", "type": "number", "label": "Jaw", "min": 0, "max": 1.5, "step": 0.01, "default": 1 },
+        { "id": "mode", "type": "select", "label": "Mode", "options": ["monochrome", "acid"], "default": "monochrome" },
+        { "id": "stripes", "type": "select", "label": "Stripes", "options": ["black & white", "black only"], "default": "black & white" },
+        { "id": "size", "type": "number", "label": "Skull size", "min": 0.5, "max": 1.5, "step": 0.01, "default": 1 }
+      ]
+    },
+    {
+      "id": "darksun",
+      "name": "Dark Sun",
+      "description": "After Mogwai's Every Country's Sun: a dark sun swells with the bass above an upside-down horizon, whose inverted mountain range is the live spectrum, with a beam of light falling from its heart on every beat.",
+      "author": "Tidalviz",
+      "entry": "src/darksun.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/darksun.jpg",
+      "params": [
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "rangeWidth", "type": "number", "label": "Range width", "min": 0.3, "max": 0.7, "step": 0.01, "default": 0.5 },
+        { "id": "rangeDepth", "type": "number", "label": "Range depth", "min": 0.3, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "beam", "type": "number", "label": "Beam", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "sunSize", "type": "number", "label": "Sun size", "min": 0.5, "max": 1.6, "step": 0.01, "default": 1 },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["dusk", "ash", "teal", "gold"], "default": "dusk" },
+        { "id": "backdrop", "type": "select", "label": "Backdrop", "options": ["painted", "none"], "default": "painted" }
+      ]
+    },
+    {
+      "id": "eclipse",
+      "name": "Eclipse",
+      "description": "A black sun in a blazing white ring, after The Sky's Gone Out: the spectrum wraps around the ring and each frequency's corona branches out as far as it is loud; bass swells the ring, beats send flares outward, marbled ink clouds drift.",
+      "author": "Tidalviz",
+      "entry": "src/eclipse.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/eclipse.jpg",
+      "params": [
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "reach", "type": "number", "label": "Corona reach", "min": 0.2, "max": 1.6, "step": 0.01, "default": 1 },
+        { "id": "thickness", "type": "number", "label": "Ring thickness", "min": 0.4, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "clouds", "type": "number", "label": "Clouds", "min": 0, "max": 1, "step": 0.01, "default": 0.45 },
+        { "id": "tint", "type": "select", "label": "Tint", "options": ["monochrome", "silver", "sepia", "cold blue"], "default": "monochrome" },
+        { "id": "sky", "type": "select", "label": "Sky", "options": ["black", "none"], "default": "black" },
+        { "id": "rotation", "type": "number", "label": "Rotation (rad/s)", "min": -0.3, "max": 0.3, "step": 0.005, "default": 0.03 }
+      ]
+    },
+    {
+      "id": "marbling",
+      "name": "Marbling",
+      "description": "Live marbled paper poured by the music: beats drop paint that packs into cells with dark veins, nested with smaller drops, while a stylus following the melody rakes cream rivers through it.",
+      "author": "Tidalviz",
+      "entry": "src/marbling.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/marbling.jpg",
+      "params": [
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["beast", "indigo", "emerald", "gold"], "default": "beast" },
+        { "id": "paper", "type": "select", "label": "Paper", "options": ["cream", "none"], "default": "cream" },
+        { "id": "pour", "type": "number", "label": "Pour rate", "min": 0.2, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "size", "type": "number", "label": "Drop size", "min": 0.4, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "rake", "type": "number", "label": "Rake", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "renew", "type": "number", "label": "Renew speed", "min": 0, "max": 3, "step": 0.01, "default": 1 }
+      ]
+    },
+    {
+      "id": "laminar",
+      "name": "Laminar",
+      "description": "Liquid lines stream past a chrome sphere, after Tame Impala's Currents: a real fluid sim where loud music turns the laminar flow turbulent.",
+      "author": "Tidalviz",
+      "entry": "src/laminar.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/laminar.jpg",
+      "params": [
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "speed", "type": "number", "label": "Flow speed", "min": 0.2, "max": 3, "step": 0.05, "default": 1 },
+        { "id": "turbulence", "type": "number", "label": "Turbulence", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "density", "type": "number", "label": "Line density", "min": 30, "max": 140, "step": 1, "default": 72 },
+        { "id": "size", "type": "number", "label": "Sphere size", "min": 0.5, "max": 1.6, "step": 0.01, "default": 1 },
+        { "id": "detail", "type": "number", "label": "Detail", "min": 0.08, "max": 0.4, "step": 0.01, "default": 0.2 },
+        { "id": "trail", "type": "boolean", "label": "Trail", "default": true },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["currents", "sea glass", "sunset", "mono"], "default": "currents" },
+        { "id": "backdrop", "type": "select", "label": "Backdrop", "options": ["black", "none"], "default": "black" }
+      ]
+    },
+    {
+      "id": "tetraballs",
+      "name": "Tetraballs",
+      "description": "Four metaballs on a tumbling tetrahedron: the waveform swells them and bursts them apart into droplets. Chrome, soap film, jade, brushed metal, velvet, glass, water, fire and smoke.",
+      "author": "Tidalviz",
+      "entry": "src/tetraballs.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/tetraballs.jpg",
+      "params": [
+        { "id": "material", "type": "select", "label": "Material", "options": ["auto", "chrome", "soap", "jade", "brushed", "velvet", "glass", "water", "fire", "smoke"], "default": "chrome" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "size", "type": "number", "label": "Size", "min": 0.5, "max": 1.4, "step": 0.01, "default": 1 },
+        { "id": "bounce", "type": "number", "label": "Bounce", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "tumble", "type": "number", "label": "Tumble speed (rad/s)", "min": 0, "max": 1.5, "step": 0.01, "default": 0.35 },
+        { "id": "background", "type": "select", "label": "Background", "options": ["studio", "none"], "default": "studio" },
+        { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "medium" },
+        { "id": "tint", "type": "color", "label": "Jade tint", "default": "#5fbf8a" }
+      ]
     }
   ]
 }
