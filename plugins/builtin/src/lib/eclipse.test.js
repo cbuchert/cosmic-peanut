@@ -42,6 +42,21 @@ describe("createCorona", () => {
     expect(lv[0]).toBe(0);
   });
 
+  it("a pure tone lights a small wedge (a few trees), falling off to either side", () => {
+    const corona = createCorona();
+    const spec = new Float32Array(1024);
+    spec[43] = 0.5;
+    for (let t = 0; t < 0.5; t += DT) corona.step(spec, SR, DT);
+    const lv = corona.levels;
+    let best = 0;
+    for (let i = 0; i < SECTORS / 2; i++) if (lv[i] > lv[best]) best = i;
+    for (const k of [-2, -1, 1, 2]) {
+      expect(lv[best + k]).toBeGreaterThan(0.4);
+      expect(lv[best + k]).toBeLessThan(lv[best]);
+    }
+    expect(lv[best + 6]).toBe(0);
+  });
+
   it("levels grow with a fast-ish attack and recede with a slower release, bounded 0–1", () => {
     const corona = createCorona();
     const spec = new Float32Array(1024);

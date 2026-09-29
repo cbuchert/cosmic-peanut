@@ -41,6 +41,7 @@ def test_builtin_renderers():
         "blaze": ("webgl2", []),
         "cascade": ("webgl2", []),
         "radar": ("webgl2", []),
+        "eclipse": ("webgl2", []),
     }
 
 
@@ -263,3 +264,36 @@ def test_radar_manifest():
     assert "contacts" not in params
     for f in ("fullscreen.vert", "paint.frag", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/radar" / f).is_file(), f
+
+
+def test_eclipse_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "eclipse"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Eclipse",
+        "src/eclipse.js",
+        "webgl2",
+        "thumbs/eclipse.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "reactivity",
+        "reach",
+        "thickness",
+        "clouds",
+        "tint",
+        "sky",
+        "rotation",
+    ]
+    r = params["reactivity"]
+    assert (r["type"], r["min"], r["max"], r["default"]) == ("number", 0, 2, 1)
+    # lib/eclipse.js TINTS; tintGamma / skyAlpha fall back to the defaults for anything else.
+    assert params["tint"]["options"] == ["monochrome", "silver", "sepia", "cold blue"]
+    assert params["tint"]["default"] == "monochrome"
+    assert params["sky"]["options"] == ["black", "none"]
+    assert params["sky"]["default"] == "black"
+    # lib/eclipse.js DEFAULT_ROTATION: Reduce motion slows the drift only while it's at this default.
+    rot = params["rotation"]
+    assert rot["default"] == 0.03
+    assert rot["min"] < 0 < rot["max"]
+    for f in ("fullscreen.vert", "noise.glsl", "eclipse.frag", "clouds.frag"):
+        assert (REPOS["builtin"] / "shaders/eclipse" / f).is_file(), f

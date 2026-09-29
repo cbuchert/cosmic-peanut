@@ -142,6 +142,24 @@
         { "id": "floor", "type": "number", "label": "Floor (dB)", "min": -80, "max": -30, "step": 1, "default": -60 },
         { "id": "maxFreq", "type": "select", "label": "Top frequency", "options": ["4k", "8k", "16k"], "default": "16k" }
       ]
+    },
+    {
+      "id": "eclipse",
+      "name": "Eclipse",
+      "description": "A black sun in a blazing white ring, after The Sky's Gone Out: the spectrum wraps around the ring and each frequency's corona branches out as far as it is loud; bass swells the ring, beats send flares outward, marbled ink clouds drift.",
+      "author": "Tidalviz",
+      "entry": "src/eclipse.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/eclipse.jpg",
+      "params": [
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "reach", "type": "number", "label": "Corona reach", "min": 0.2, "max": 1.6, "step": 0.01, "default": 1 },
+        { "id": "thickness", "type": "number", "label": "Ring thickness", "min": 0.4, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "clouds", "type": "number", "label": "Clouds", "min": 0, "max": 1, "step": 0.01, "default": 0.45 },
+        { "id": "tint", "type": "select", "label": "Tint", "options": ["monochrome", "silver", "sepia", "cold blue"], "default": "monochrome" },
+        { "id": "sky", "type": "select", "label": "Sky", "options": ["black", "none"], "default": "black" },
+        { "id": "rotation", "type": "number", "label": "Rotation (rad/s)", "min": -0.3, "max": 0.3, "step": 0.005, "default": 0.03 }
+      ]
     }
   ]
 }

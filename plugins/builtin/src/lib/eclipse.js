@@ -19,6 +19,9 @@ export const F_MAX = 16000;
 export const ATTACK = 0.05;
 export const RELEASE = 0.35;
 
+/** Sectors a level spreads to on each side (falling off linearly). */
+const SPREAD = 3;
+
 /**
  * The corona's circular spectrogram. Sector i sits at angle
  *   a = ((i + 0.5) / count − 0.5) · 2π   (0 = straight down, +π/2 = right, ±π = top),
@@ -32,6 +35,7 @@ export function createCorona(count = SECTORS) {
   const hi = new Float32Array(count);
   const mags = new Float32Array(count);
   const raw = new Float32Array(count);
+  const wide = new Float32Array(count);
   const levels = new Float32Array(count);
   logColumns("mirrored", F_MIN, F_MAX, lo, hi);
   const gain = createSpectroGain(count);
@@ -48,10 +52,23 @@ export function createCorona(count = SECTORS) {
     step(spectrum, sampleRate, dt) {
       resampleSpectrum(spectrum, sampleRate, lo, hi, mags);
       gain.step(mags, dt, raw);
+      // Dilate across neighbouring angles (max with a linear falloff), so a pure tone lights a
+      // small wedge — a few trees — rather than a single hairline.
+      for (let i = 0; i < count; i++) {
+        let v = raw[i];
+        for (let k = 1; k <= SPREAD; k++) {
+          const f = 1 - k / (SPREAD + 1);
+          const a = raw[(i + k) % count] * f;
+          const b = raw[(i - k + count) % count] * f;
+          if (a > v) v = a;
+          if (b > v) v = b;
+        }
+        wide[i] = v;
+      }
       const ka = 1 - Math.exp(-dt / ATTACK);
       const kr = 1 - Math.exp(-dt / RELEASE);
       for (let i = 0; i < count; i++) {
-        const d = raw[i] - levels[i];
+        const d = wide[i] - levels[i];
         levels[i] += d * (d > 0 ? ka : kr);
       }
     },
@@ -59,13 +76,13 @@ export function createCorona(count = SECTORS) {
 }
 
 /** Radius of the black disc at rest, in units of the composition radius (fitEclipse). */
-export const DISC = 0.3;
+export const DISC = 0.44;
 
 /** Annulus width at rest (Ring thickness 1). */
-export const RING = 0.12;
+export const RING = 0.18;
 /** At full bass the disc shrinks by this fraction and the annulus widens by this fraction. */
 const BASS_SHRINK = 0.06;
-const BASS_WIDEN = 0.35;
+export const BASS_WIDEN = 0.25;
 /** Bass envelope time constants (s): the sun pushes back smoothly, and relaxes slower. */
 const SWELL_ATTACK = 0.12;
 const SWELL_RELEASE = 0.4;
