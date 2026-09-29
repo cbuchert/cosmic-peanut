@@ -209,7 +209,9 @@ describe("createMarbler", () => {
     let cell = 0;
     let frames = 0;
     let first = true;
-    while (m.count > 0) {
+    const px = m.evA[1];
+    // Event 0 is the kick while it pours (satellites queue in later slots and land after it).
+    while (m.count > 0 && m.evA[1] === px) {
       const slice = m.evA[3];
       const cellPart = m.evB[0];
       if (first) expect(cellPart).toBeLessThan(slice); // the rim goes in first
@@ -223,6 +225,49 @@ describe("createMarbler", () => {
     }
     expect(frames).toBeGreaterThan(5); // it spreads, it doesn't pop
     expect(Math.sqrt(total) - Math.sqrt(cell)).toBeCloseTo(0.0035, 6);
+  });
+
+  it("follows a kick with smaller satellite drops inside it (nested cells)", () => {
+    let seen = 0;
+    for (let seed = 1; seed <= 10; seed++) {
+      const m = createMarbler(seed);
+      m.step(audioFrame(), DT, PARAMS, ENV);
+      m.step(audioFrame({ onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, PARAMS, ENV);
+      const px = m.evA[1];
+      const py = m.evA[2];
+      let parent2 = 0;
+      for (let f = 0; f < 60; f++) {
+        for (let i = 0; i < m.count; i++) {
+          const x = m.evA[i * 4 + 1];
+          const y = m.evA[i * 4 + 2];
+          if (x === px && y === py) {
+            parent2 += m.evA[i * 4 + 3];
+            continue;
+          }
+          seen++;
+          expect(Math.hypot(x - px, y - py)).toBeLessThan(0.5 * Math.sqrt(parent2));
+          expect(m.evC[i * 4 + 2] + m.evC[i * 4 + 3]).toBe(1); // light or deep ink
+        }
+        m.step(audioFrame(), DT, PARAMS, ENV);
+      }
+    }
+    expect(seen).toBeGreaterThan(10);
+  });
+
+  it("pours faster when the music is loud, and never emits more than MAX_EVENTS a frame", () => {
+    const poured = (/** @type {number} */ rms) => {
+      const m = createMarbler(5);
+      let drops = 0;
+      for (let f = 0; f < 600; f++) {
+        const onset = f % 6 === 0; // a flood of hits (10/s)
+        const lo = (f * 7) % 48;
+        m.step(audioFrame({ rms, onset, onsetStrength: 1, bands: bandsHit(lo, lo + 16) }), DT, PARAMS, ENV);
+        expect(m.count).toBeLessThanOrEqual(MAX_EVENTS);
+        for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === EV_DROP) drops++;
+      }
+      return drops;
+    };
+    expect(poured(0.3)).toBeGreaterThan(1.8 * poured(0.02));
   });
 });
 

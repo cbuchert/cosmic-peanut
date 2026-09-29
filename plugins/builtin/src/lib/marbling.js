@@ -220,6 +220,25 @@ export function paletteOf(name) {
   return (typeof name === "string" && Object.hasOwn(PALETTES, name) && PALETTES[name]) || PALETTES.beast;
 }
 
+/**
+ * The region with the highest mean band level right now.
+ * @param {ArrayLike<number>} bands
+ */
+function loudestRegion(bands) {
+  let best = 0;
+  let bestLevel = -1;
+  for (let r = 0; r < 3; r++) {
+    let sum = 0;
+    for (let i = REGIONS[r]; i < REGIONS[r + 1]; i++) sum += bands[i];
+    const level = sum / (REGIONS[r + 1] - REGIONS[r]);
+    if (level > bestLevel) {
+      bestLevel = level;
+      best = r;
+    }
+  }
+  return best;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Scheduler: turns audio into this frame's marbling events (at most MAX_EVENTS, constant cost)
 // ---------------------------------------------------------------------------------------------
@@ -235,12 +254,13 @@ export const EV_SHIFT = 3;
 /**
  * Per-region drop recipe (page units: the page is 1 tall). radius: base radius; rimT: thickness of
  * the vein-ink ring poured first (rimInk), so each cell ends up outlined; pour: seconds a drop
- * takes to spread; spread: fraction of the page its centre may land in.
+ * takes to spread; spread: fraction of the page its centre may land in; sat: chance of 1..maxSat
+ * smaller satellite drops landing inside it just after (nested cells).
  */
 const RECIPES = [
-  { radius: 0.075, ink: 1, rimInk: 0, rimT: 0.0035, pour: 0.3, spread: 0.7 }, // low: kicks, bass
-  { radius: 0.045, ink: 3, rimInk: 0, rimT: 0.006, pour: 0.2, spread: 0.85 }, // mid: snares
-  { radius: 0.017, ink: 2, rimInk: 0, rimT: 0.0018, pour: 0.1, spread: 1 }, // high: hats
+  { radius: 0.075, ink: 1, rimInk: 0, rimT: 0.0035, pour: 0.3, spread: 0.7, sat: 0.85, maxSat: 3 }, // low: kicks, bass
+  { radius: 0.045, ink: 3, rimInk: 0, rimT: 0.006, pour: 0.2, spread: 0.85, sat: 0.5, maxSat: 2 }, // mid: snares
+  { radius: 0.017, ink: 2, rimInk: 0, rimT: 0.0018, pour: 0.1, spread: 1, sat: 0, maxSat: 0 }, // high: hats
 ];
 
 /**
@@ -269,6 +289,10 @@ const RECIPES = [
  * @property {boolean} reduceFlashing
  * @property {boolean} reduceMotion
  */
+
+/** Loudness below which the auto-gain reference never falls, and the absolute "loud" level. */
+const RMS_FLOOR = 0.05;
+const RMS_LOUD = 0.2;
 
 /** @param {number} x */
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
@@ -302,6 +326,9 @@ export function createMarbler(seed) {
   }));
   let now = 0;
   let lastDrop = -1e9;
+  let rmsS = 0;
+  let ref = RMS_FLOOR;
+  let drizzle = 0;
 
   /**
    * Queue a drop. Returns the slot, or -1 when every slot is busy (the drop is skipped: the cap).
@@ -328,6 +355,40 @@ export function createMarbler(seed) {
     return -1;
   }
 
+  /**
+   * A drop (plus maybe satellites) for a hit in `region`, sized by the hit and the params.
+   * @param {number} region @param {number} scale @param {PourAudio} audio
+   * @param {PourParams} params @param {PourEnv} env
+   */
+  function dropFrom(region, scale, audio, params, env) {
+    lastDrop = now;
+    const rc = RECIPES[region];
+    const hit = clamp01(0.5 * audio.onsetStrength + 0.5 * (region === 0 ? audio.bassAtt / 2 : 0.5));
+    const r = scale * rc.radius * params.size * (0.7 + 0.6 * params.reactivity * hit);
+    const x = env.aspect * (0.5 + (rand() - 0.5) * rc.spread);
+    const y = 0.5 + (rand() - 0.5) * rc.spread;
+    spawn(x, y, r, rc.rimT, rc.ink, rc.rimInk, rc.pour, 0);
+    if (scale === 1 && rand() < rc.sat) {
+      const k = 1 + Math.floor(rand() * rc.maxSat);
+      for (let j = 0; j < k; j++) {
+        const a = rand() * 2 * Math.PI;
+        const d = 0.4 * r * Math.sqrt(rand());
+        const light = rand() < 0.55;
+        const sr = r * (0.2 + 0.3 * rand());
+        spawn(
+          x + d * Math.cos(a),
+          y + d * Math.sin(a),
+          sr,
+          0.0015,
+          light ? 2 : 3,
+          light ? 3 : 0,
+          rc.pour * 0.6,
+          0.15 + 0.3 * rand(),
+        );
+      }
+    }
+  }
+
   /** @param {Float32Array} arr @param {number} i @param {number} ink */
   function writeInk(arr, i, ink) {
     for (let k = 0; k < 4; k++) arr[i * 4 + k] = k === ink ? 1 : 0;
@@ -340,6 +401,8 @@ export function createMarbler(seed) {
     evD,
     /** Number of events this frame. */
     count: 0,
+    /** Smoothed loudness 0–1 that sets the pour rate. */
+    energy: 0,
     /**
      * @param {PourAudio} audio
      * @param {number} dt seconds
@@ -349,19 +412,28 @@ export function createMarbler(seed) {
     step(audio, dt, params, env) {
       now += dt;
       const bands = audio.bands;
-      if (audio.onset && !audio.silent) {
-        const region = strongestRegion(bands, prevBands);
-        const gap = 0.45 / Math.max(0.05, params.pour);
-        if (now - lastDrop >= gap) {
-          lastDrop = now;
-          const rc = RECIPES[region];
-          const hit = clamp01(0.5 * audio.onsetStrength + 0.5 * (region === 0 ? audio.bassAtt / 2 : 0.5));
-          const r = rc.radius * params.size * (0.7 + 0.6 * params.reactivity * hit);
-          const x = env.aspect * (0.5 + (rand() - 0.5) * rc.spread);
-          const y = 0.5 + (rand() - 0.5) * rc.spread;
-          spawn(x, y, r, rc.rimT, rc.ink, rc.rimInk, rc.pour, 0);
-        }
+      // Energy 0–1: half relative to the recent loudest (auto-gain), half absolute.
+      const rms = audio.silent ? 0 : audio.rms;
+      rmsS += (rms - rmsS) * (1 - Math.exp(-dt / 0.3));
+      ref = Math.max(RMS_FLOOR, rmsS, ref * Math.exp(-dt / 8));
+      const energy = clamp01(0.5 * (rmsS / ref) + 0.5 * (rmsS / RMS_LOUD));
+      m.energy = energy;
+      const pour = Math.max(0.05, params.pour);
+
+      let region = -1;
+      let scale = 1;
+      if (audio.onset && !audio.silent && now - lastDrop >= (0.5 - 0.38 * energy) / pour) {
+        region = strongestRegion(bands, prevBands);
       }
+      // Loud passages also drizzle smaller drops between the hits.
+      drizzle += dt * pour * (energy > 0.3 ? 2.5 * energy * energy : 0);
+      if (region < 0 && drizzle >= 1 && !audio.silent) {
+        drizzle -= 1;
+        region = loudestRegion(bands);
+        scale = 0.6;
+      }
+      if (drizzle > 1) drizzle = 1;
+      if (region >= 0) dropFrom(region, scale, audio, params, env);
       for (let i = 0; i < 64; i++) prevBands[i] = bands[i] ?? 0;
 
       // Emit this frame's slice of every drop being poured.
