@@ -39,29 +39,36 @@ vec4 hash4(vec2 p) {
   return fract((p4.xxyz + p4.yzzw) * p4.zywx);
 }
 
-// Coverage of a tapering limb that starts at (x0, r0) in (u, ρ), leans `s` u per unit ρ, is `l`
-// long and `w0` wide (units) at its root. `ku` = units per u at this radius, `px` = units per pixel.
-float limb(vec2 q, float x0, float r0, float s, float l, float w0, float ku, float px) {
+// A tapering limb that starts at (x0, r0) in (u, ρ), leans `s` u per unit ρ, is `l` long and `w0`
+// wide (units) at its root. `ku` = units per u at this radius, `px` = units per pixel.
+// Returns (anti-aliased coverage of the limb, a soft grey sheath around it — the frond's body).
+vec2 limb(vec2 q, float x0, float r0, float s, float l, float w0, float ku, float px) {
   float t = (q.y - r0) / l;
-  if (t < 0.0 || t > 1.0) return 0.0;
+  if (t < 0.0 || t > 1.0) return vec2(0.0);
   float sk = s * ku;
   float d = abs(q.x - x0 - s * (q.y - r0)) * ku * inversesqrt(1.0 + sk * sk);
   float w = w0 * pow(1.0 - t, 0.75);
-  return clamp((w - d) / px + 0.5, 0.0, 1.0) * clamp(2.0 * w / px, 0.0, 1.0);
+  float core = clamp((w - d) / px + 0.5, 0.0, 1.0) * clamp(2.0 * w / px, 0.0, 1.0);
+  float sw = 4.0 * w0 + 2.0 * px;
+  float sheath = exp(-d * d / (sw * sw)) * (1.0 - t) * min(1.0, t * 8.0 + 0.3);
+  return vec2(core, sheath);
 }
 
 // One tree rooted in cell `c` of `n` around the ring, reach `L`, root width `W`: a trunk with
 // `forks` branches alternating sides (longer near the root, like a frond), each with two twigs.
-float tree(vec2 q, float c, float n, float L, float W, float ku, float px, int forks) {
-  vec4 h = hash4(vec2(mod(c, n), n));
+// Trees clump: a slow noise around the ring makes neighbours grow long together, into fronds.
+vec2 tree(vec2 q, float c, float n, float L, float W, float ku, float px, int forks, float time) {
+  float cm = mod(c, n);
+  vec4 h = hash4(vec2(cm, n));
+  float clump = 0.4 + 0.8 * smoothstep(-0.3, 0.35, gnoise(vec2(cm / 6.0, 0.5 + time * 0.02), n / 6.0));
   float x0 = c + 0.5 + 0.5 * (h.x - 0.5);
-  float l0 = L * (0.3 + 0.7 * h.y);
+  float l0 = L * (0.3 + 0.7 * h.y) * clump;
   float s0 = (h.w - 0.5) * 1.5;
-  float w0 = W * (0.6 + 0.8 * h.z);
-  float v = limb(q, x0, 0.0, s0, l0, w0, ku, px);
+  float w0 = W * (0.6 + 0.8 * h.z) * (0.7 + 0.3 * clump);
+  vec2 v = limb(q, x0, 0.0, s0, l0, w0, ku, px);
   float side = h.x > 0.5 ? 1.0 : -1.0;
   for (int b = 0; b < forks; b++) {
-    vec4 g = hash4(vec2(mod(c, n) + 0.37 * float(b + 1), n + 1.0));
+    vec4 g = hash4(vec2(cm + 0.37 * float(b + 1), n + 1.0));
     float dir = side * (b % 2 == 0 ? 1.0 : -1.0);
     float f = (float(b) + 0.3 + 0.5 * g.x) / float(forks) * 0.75; // fork point along the trunk
     float rb = f * l0;
@@ -69,14 +76,14 @@ float tree(vec2 q, float c, float n, float L, float W, float ku, float px, int f
     float sb = s0 + dir * (2.5 + 5.0 * g.y);
     float lb = (1.0 - f) * l0 * (0.4 + 0.5 * g.z);
     float wb = w0 * pow(1.0 - f, 0.75) * 0.75;
-    v = max(v, 0.9 * limb(q, xb, rb, sb, lb, wb, ku, px));
+    v = max(v, vec2(0.88, 0.8) * limb(q, xb, rb, sb, lb, wb, ku, px));
     for (int k = 0; k < 2; k++) {
       float e = 0.2 + 0.3 * float(k) + 0.2 * fract(g.w * float(7 + 5 * k)); // twig fork along the branch
       float td = k == 0 ? -dir : dir;
       float rt = rb + e * lb;
       float xt = xb + sb * e * lb;
       float st = sb + td * (4.0 + 4.0 * g.x);
-      v = max(v, 0.78 * limb(q, xt, rt, st, (1.0 - e) * lb * 0.7, wb * pow(1.0 - e, 0.75) * 0.8, ku, px));
+      v = max(v, vec2(0.75, 0.6) * limb(q, xt, rt, st, (1.0 - e) * lb * 0.7, wb * pow(1.0 - e, 0.75) * 0.8, ku, px));
     }
   }
   return v;
@@ -120,13 +127,15 @@ void main() {
       float ku = TAU * r / N0; // units per cell at this radius
       float W = 0.0045 + 0.003 * lvl;
       float c0 = floor(q.x);
-      float fil = 0.0;
-      for (int j = -1; j <= 1; j++) fil = max(fil, tree(q, c0 + float(j), N0, L, W, ku, px, 4));
+      vec2 fil = vec2(0.0);
+      for (int j = -1; j <= 1; j++) fil = max(fil, tree(q, c0 + float(j), N0, L, W, ku, px, 4, u_time));
       // A finer fringe of short, forked hairs between the trees.
       vec2 q1 = vec2(q.x * 3.0, q.y);
       float c1 = floor(q1.x);
-      for (int j = -1; j <= 1; j++) fil = max(fil, 0.85 * tree(q1, c1 + float(j), 3.0 * N0, 0.02 + 0.3 * L, 0.6 * W, ku / 3.0, px, 1));
-      corona = fil * mix(1.0, 0.6, smoothstep(0.0, 1.0, t));
+      for (int j = -1; j <= 1; j++) {
+        fil = max(fil, vec2(0.85, 0.5) * tree(q1, c1 + float(j), 3.0 * N0, 0.02 + 0.3 * L, 0.6 * W, ku / 3.0, px, 1, u_time));
+      }
+      corona = max(fil.x, 0.3 * fil.y) * mix(1.0, 0.62, smoothstep(0.0, 1.0, t));
       // The white mass fused to the ring, with a torn edge.
       float fused = 1.0 - smoothstep(0.0, 0.003 + 0.004 * lvl, rho - 0.008 - 0.02 * lvl - 0.01 * warp.x - 0.005 * jit);
       corona = max(corona, fused);
@@ -159,7 +168,7 @@ void main() {
     }
 
     float glow = exp(-rho / (0.004 + 0.012 * u_swell)) * (0.45 + 0.4 * u_swell);
-    float haze = 0.2 * flare * (1.0 - smoothstep(0.0, 0.6, rho));
+    float haze = 0.14 * flare * (1.0 - smoothstep(0.0, 0.6, rho));
     v = max(max(corona, cloud), glow + haze);
     v *= step(outer - 0.02, r);
   }
