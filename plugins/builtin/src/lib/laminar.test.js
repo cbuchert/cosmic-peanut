@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createDrift, createLoudness, createPulse, DRIFT_REGION, flowDrive, PULSE_MAX, RE_MAX, RE_MIN } from "./laminar.js";
+import { BACKDROPS, MOTION_DEFAULTS, motion, REDUCED_MOTION, createGlow, GLOW_MAX, gapOpacity, PALETTES, palette, trailColor, TRAIL_OLD, createDrift, createKicks, createLoudness, createPulse, DRIFT_REGION, KICK_GAP, flowDrive, PULSE_MAX, RE_MAX, RE_MIN } from "./laminar.js";
 
 /** A minimal audio frame. @param {number} rms @param {Partial<Record<string, any>>} [more] */
 const frame = (rms, more = {}) => ({ rms, silent: rms === 0, bassAtt: 1, bass: 1, onset: false, onsetStrength: 0, ...more });
@@ -172,5 +172,135 @@ describe("createDrift", () => {
       d.step(f % 5 === 0, 1, 1 / 60, 2);
       expect(inside(d)).toBe(true);
     }
+  });
+});
+
+describe("createKicks", () => {
+  it("turns each beat into one vortex kick, delivered over a few sim steps, alternating sides", () => {
+    const k = createKicks();
+    const dt = 1 / 60;
+    /** @type {number[]} */ const totals = [];
+    let cur = 0;
+    for (let f = 0; f < 240; f++) {
+      k.trigger(f % 30 === 0, 0.8, 1);
+      const a = k.step(dt);
+      expect(Math.abs(a)).toBeLessThanOrEqual(1);
+      cur += a;
+      if (f % 30 === 29) {
+        totals.push(cur);
+        cur = 0;
+      }
+    }
+    expect(totals.length).toBe(8);
+    for (let i = 0; i < totals.length; i++) {
+      expect(Math.abs(totals[i])).toBeGreaterThan(0.3);
+      if (i > 0) expect(Math.sign(totals[i])).toBe(-Math.sign(totals[i - 1]));
+    }
+  });
+
+  it("skips beats closer than KICK_GAP, stays still at Reactivity 0, and delivers the same impulse at any step rate", () => {
+    /** @param {number} hz @param {number} every beat every N frames @param {number} r */
+    const total = (hz, every, r) => {
+      const k = createKicks();
+      let sum = 0;
+      for (let f = 0; f < hz; f++) {
+        k.trigger(f % every === 0, 1, r);
+        const a = k.step(1 / hz);
+        sum += Math.abs(a);
+      }
+      return sum;
+    };
+    // 20 beats/s asked, at most 1 / KICK_GAP kicks happen.
+    expect(total(60, 3, 1)).toBeLessThanOrEqual(Math.ceil(1 / KICK_GAP) + 1e-9);
+    expect(total(60, 3, 0)).toBe(0);
+    expect(total(120, 60, 1)).toBeCloseTo(total(60, 30, 1), 9);
+  });
+});
+
+describe("palettes and the trail ramp", () => {
+  it("offers currents (default), sea glass, sunset and mono; anything else is currents", () => {
+    expect(PALETTES).toEqual(["currents", "sea glass", "sunset", "mono"]);
+    expect(palette("nope")).toBe(palette("currents"));
+    for (const name of PALETTES) {
+      const p = palette(name);
+      for (const key of ["line", "hi", "shadow", "gap", "hot", "warm", "old"]) {
+        const c = /** @type {Float32Array} */ (/** @type {any} */ (p)[key]);
+        expect(c.length, `${name}.${key}`).toBe(3);
+        for (const v of c) expect(v >= 0 && v <= 1, `${name}.${key}`).toBe(true);
+      }
+    }
+    const c = palette("currents");
+    expect(c.line[2]).toBeGreaterThan(c.line[1]); // lilac: blue and red over green
+    expect(c.line[0]).toBeGreaterThan(c.line[1]);
+    expect(Math.max(...c.gap)).toBeLessThan(0.05); // on black
+  });
+
+  it("colours the trail by age since it passed the sphere: red when fresh, through orange, clamped when old", () => {
+    const p = palette("currents");
+    const out = new Float32Array(3);
+    trailColor(p, 0, out);
+    expect(out[0]).toBeGreaterThan(0.8);
+    expect(out[1]).toBeLessThan(0.3);
+    let prevG = -1;
+    for (let i = 0; i <= 20; i++) {
+      trailColor(p, (i / 20) * TRAIL_OLD, out);
+      expect(out[1]).toBeGreaterThanOrEqual(prevG); // red → orange: green rises
+      prevG = out[1];
+    }
+    expect(out[1]).toBeGreaterThan(0.4);
+    const old = Array.from(out);
+    trailColor(p, TRAIL_OLD * 5, out);
+    expect(Array.from(out)).toEqual(old);
+  });
+});
+
+describe("gapOpacity", () => {
+  it("paints the gaps opaque on the black backdrop and leaves them transparent with none (unknown → black)", () => {
+    expect(BACKDROPS).toEqual(["black", "none"]);
+    expect(gapOpacity("black")).toBe(1);
+    expect(gapOpacity("none")).toBe(0);
+    expect(gapOpacity("??")).toBe(1);
+  });
+});
+
+describe("createGlow", () => {
+  /** Rises (a new increase after a fall) per second under a 10 Hz strobe. @param {boolean} reduce */
+  const rises = (reduce) => {
+    const g = createGlow();
+    let prev = 1;
+    let falling = true;
+    let n = 0;
+    for (let f = 0; f < 60 * 4; f++) {
+      g.step(f % 6 === 0, 1, 1 / 60, reduce, 1);
+      expect(g.value).toBeGreaterThanOrEqual(1);
+      expect(g.value).toBeLessThanOrEqual(1 + GLOW_MAX);
+      if (g.value > prev + 1e-6 && falling) {
+        n++;
+        falling = false;
+      } else if (g.value < prev - 1e-6) falling = true;
+      prev = g.value;
+    }
+    return n / 4;
+  };
+
+  it("brightens the whole frame a little on beats, at most 3 times a second with reduceFlashing", () => {
+    expect(rises(false)).toBeGreaterThan(8);
+    expect(rises(true)).toBeLessThanOrEqual(3);
+    expect(rises(true)).toBeGreaterThan(1);
+  });
+});
+
+describe("motion", () => {
+  const out = { speed: 0, turbulence: 0, reactivity: 0 };
+  it("with Reduce motion, swaps params still at their defaults for calmer ones and respects the user's own values", () => {
+    motion({ ...MOTION_DEFAULTS }, false, out);
+    expect(out).toEqual(MOTION_DEFAULTS);
+    motion({ ...MOTION_DEFAULTS }, true, out);
+    expect(out).toEqual(REDUCED_MOTION);
+    for (const k of /** @type {const} */ (["speed", "turbulence", "reactivity"])) {
+      expect(REDUCED_MOTION[k]).toBeLessThan(MOTION_DEFAULTS[k]);
+    }
+    motion({ speed: 1.7, turbulence: 2, reactivity: 1 }, true, out);
+    expect(out).toEqual({ speed: 1.7, turbulence: 2, reactivity: REDUCED_MOTION.reactivity });
   });
 });

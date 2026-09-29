@@ -3,6 +3,7 @@
  * Pure, allocation-free music → motion logic for Laminar (the sim math lives in flow.js, the GPU
  * side in shaders/laminar/). Everything here runs on the CPU once per frame and is unit-tested.
  */
+import { createFlashLimiter } from "./flash.js";
 
 /** The loudness reference never drops below this (dBFS), so a quiet source stays calm. */
 export const REF_FLOOR_DB = -20;
@@ -197,4 +198,180 @@ export function createDrift() {
       acc = 0;
     },
   };
+}
+
+/** Beats closer than this (s) to the previous kick are ignored: the wake gets time to answer. */
+export const KICK_GAP = 0.15;
+/** A kick's impulse is spread over this long (s), so it lands the same at any step rate. */
+export const KICK_DURATION = 0.1;
+
+/**
+ * Beat → vortex kicks for the wake. `trigger` (once per frame) arms a kick on an onset:
+ * amplitude clamp((0.4 + 0.6·strength) · Reactivity, 0, 1), on the opposite side from the last
+ * one, so successive beats rock the wake back and forth and seed the shedding. `step(dt)` (once
+ * per sim step) returns the signed share of the kick delivered in that step — the total over a
+ * kick is its amplitude, spread evenly over KICK_DURATION — which the sim multiplies into a
+ * vortex pair just behind the sphere. Beats within KICK_GAP of the previous kick are skipped.
+ */
+export function createKicks() {
+  let left = 0; // signed impulse still to deliver
+  let rate = 0; // per second
+  let since = Infinity;
+  let side = 1;
+  return {
+    /** @param {boolean} onset @param {number} strength ≈0–1 @param {number} reactivity 0–2 */
+    trigger(onset, strength, reactivity) {
+      if (!onset || since < KICK_GAP) return;
+      const st = Number.isFinite(strength) ? (strength < 0 ? 0 : strength > 1 ? 1 : strength) : 0;
+      let a = (0.4 + 0.6 * st) * (reactivity > 0 ? reactivity : 0);
+      a = a > 1 ? 1 : a;
+      if (a <= 0) return;
+      side = -side;
+      left = side * a;
+      rate = a / KICK_DURATION;
+      since = 0;
+    },
+    /** @param {number} dt sim seconds @returns {number} signed impulse share for this step */
+    step(dt) {
+      since += dt;
+      if (left === 0) return 0;
+      const d = rate * dt;
+      if (d >= Math.abs(left)) {
+        const all = left;
+        left = 0;
+        return all;
+      }
+      const out = left > 0 ? d : -d;
+      left -= out;
+      return out;
+    },
+    reset() {
+      left = 0;
+      since = Infinity;
+      side = 1;
+    },
+  };
+}
+
+export const PALETTES = ["currents", "sea glass", "sunset", "mono"];
+
+/** @param {number[]} a */
+const rgb = (a) => new Float32Array(a);
+/**
+ * Per palette: the lines' base colour, highlight (ridge top, specular) and shadow (ridge flank),
+ * the gap colour between lines (over the "black" backdrop), and the trail's ramp from hot (just
+ * past the sphere) through warm to old.
+ */
+const TABLE = {
+  currents: {
+    line: rgb([0.74, 0.6, 0.95]), hi: rgb([0.98, 0.93, 1]), shadow: rgb([0.2, 0.07, 0.36]), gap: rgb([0, 0, 0.012]),
+    hot: rgb([1, 0.1, 0.3]), warm: rgb([1, 0.4, 0.12]), old: rgb([1, 0.72, 0.2]),
+  },
+  "sea glass": {
+    line: rgb([0.55, 0.88, 0.8]), hi: rgb([0.92, 1, 0.97]), shadow: rgb([0.04, 0.22, 0.28]), gap: rgb([0, 0.015, 0.025]),
+    hot: rgb([1, 0.3, 0.38]), warm: rgb([1, 0.55, 0.42]), old: rgb([1, 0.84, 0.62]),
+  },
+  sunset: {
+    line: rgb([1, 0.62, 0.48]), hi: rgb([1, 0.94, 0.82]), shadow: rgb([0.34, 0.07, 0.24]), gap: rgb([0.015, 0, 0.03]),
+    hot: rgb([0.95, 0.08, 0.4]), warm: rgb([1, 0.42, 0.1]), old: rgb([1, 0.82, 0.3]),
+  },
+  mono: {
+    line: rgb([0.76, 0.76, 0.79]), hi: rgb([1, 1, 1]), shadow: rgb([0.1, 0.1, 0.12]), gap: rgb([0, 0, 0]),
+    hot: rgb([1, 1, 1]), warm: rgb([0.85, 0.85, 0.88]), old: rgb([0.6, 0.6, 0.64]),
+  },
+};
+
+/** @typedef {typeof TABLE.currents} Palette */
+
+/** A palette by name; unknown names get "currents". @param {string} name @returns {Palette} */
+export function palette(name) {
+  return /** @type {Record<string, Palette>} */ (TABLE)[name] ?? TABLE.currents;
+}
+
+/** Trail age (s since the dye passed the sphere) at which it reaches its "old" colour. */
+export const TRAIL_OLD = 6;
+
+/**
+ * The trail's colour at `age` seconds past the sphere: hot → warm over the first half of
+ * TRAIL_OLD, warm → old over the second, then held. Mirrors trailRamp() in composite.frag.
+ * @param {Palette} p @param {number} age @param {Float32Array | number[]} out length ≥ 3
+ */
+export function trailColor(p, age, out) {
+  let u = age / TRAIL_OLD;
+  u = u > 0 ? (u < 1 ? u : 1) : 0;
+  const a = u < 0.5 ? p.hot : p.warm;
+  const b = u < 0.5 ? p.warm : p.old;
+  const f = u < 0.5 ? u * 2 : u * 2 - 1;
+  for (let c = 0; c < 3; c++) out[c] = a[c] + (b[c] - a[c]) * f;
+  return out;
+}
+
+export const BACKDROPS = ["black", "none"];
+
+/**
+ * Opacity of the gaps between the lines. "black" (default) fills them with the palette's gap
+ * colour, as on the album cover; "none" leaves them transparent, so the lines, sphere and trail
+ * float on whatever the shell shows behind the canvas (black, or the desktop).
+ * @param {string} backdrop
+ */
+export function gapOpacity(backdrop) {
+  return backdrop === "none" ? 0 : 1;
+}
+
+/** A beat brightens the whole frame by at most this fraction. */
+export const GLOW_MAX = 0.25;
+const GLOW_DECAY = 0.15; // s
+
+/**
+ * The frame's global brightness, `value` = 1 … 1 + GLOW_MAX: each beat (strength × Reactivity)
+ * lifts it and it decays over ~0.15 s. The lift goes through the photosensitivity limiter
+ * (lib/flash.js), so with reduceFlashing a new rise starts at most 3 times per second.
+ */
+export function createGlow() {
+  const limiter = createFlashLimiter();
+  let env = 0;
+  return {
+    value: 1,
+    /**
+     * @param {boolean} onset @param {number} strength ≈0–1 @param {number} dt seconds
+     * @param {boolean} reduceFlashing @param {number} reactivity 0–2
+     */
+    step(onset, strength, dt, reduceFlashing, reactivity) {
+      env *= Math.exp(-dt / GLOW_DECAY);
+      if (onset) {
+        const st = Number.isFinite(strength) ? (strength < 0 ? 0 : strength > 1 ? 1 : strength) : 0;
+        let h = (0.5 + 0.5 * st) * (reactivity > 0 ? reactivity : 0);
+        h = h > 1 ? 1 : h;
+        if (h > env) env = h;
+      }
+      this.value = 1 + GLOW_MAX * limiter.step(env, dt, reduceFlashing);
+    },
+    reset() {
+      env = 0;
+      limiter.reset();
+      this.value = 1;
+    },
+  };
+}
+
+/** Manifest defaults for the motion params (a test keeps tidalviz.json in step). */
+export const MOTION_DEFAULTS = { speed: 1, turbulence: 1, reactivity: 1 };
+/** What those defaults become under macOS "Reduce motion": a slower, calmer stream. */
+export const REDUCED_MOTION = { speed: 0.55, turbulence: 0.45, reactivity: 0.5 };
+
+/**
+ * Effective flow speed, turbulence and reactivity. With `reduceMotion`, a param still at its
+ * manifest default is swapped for the calmer value; a value the user chose is respected.
+ * @param {Record<string, unknown>} params live ctx.params
+ * @param {boolean} reduceMotion
+ * @param {{ speed: number, turbulence: number, reactivity: number }} out
+ */
+export function motion(params, reduceMotion, out) {
+  const s = Number(params.speed ?? MOTION_DEFAULTS.speed);
+  const t = Number(params.turbulence ?? MOTION_DEFAULTS.turbulence);
+  const r = Number(params.reactivity ?? MOTION_DEFAULTS.reactivity);
+  out.speed = reduceMotion && s === MOTION_DEFAULTS.speed ? REDUCED_MOTION.speed : s;
+  out.turbulence = reduceMotion && t === MOTION_DEFAULTS.turbulence ? REDUCED_MOTION.turbulence : t;
+  out.reactivity = reduceMotion && r === MOTION_DEFAULTS.reactivity ? REDUCED_MOTION.reactivity : r;
+  return out;
 }
