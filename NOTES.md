@@ -3,6 +3,35 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Visualizer batch: Tentacube, Tie-Dye, Skull Trip, Dark Sun, Eclipse, Marbling, Laminar, Tetraballs (2026-09-28)
+
+Built in parallel worktrees and merged one at a time. GPU times were measured on the M4 Pro at
+2560×1440 while up to seven agents were rendering, so treat them as rough upper bounds (the
+reference M1 Air is roughly 3–4× slower).
+
+| Visualizer | Technique | GPU (M4 Pro, loaded) |
+| --- | --- | --- |
+| Tentacube | three.js; verlet tentacle chains (CPU, ~0.05 ms); material morph; Poincaré-disk tiling | ≤ 2.2 ms |
+| Tie-Dye | half-res dye pass + full-res weave composite | 1.6–1.9 ms |
+| Skull Trip | raymarched SDF skull (half res) over AA op-art stripes | 2.0–2.2 ms |
+| Dark Sun | quarter-res watercolour washes + full-res sun/horizon; mirrored spectrum range | ~0.9 ms |
+| Eclipse | procedural branching corona trees (noise gave worms/specks); third-res clouds | ~2.3 ms |
+| Marbling | Jaffer drop/tine displacement, baked feedback with a 48-event queue | 1.4–2 ms |
+| Laminar | stable-fluids sim (MacCormack, obstacle, confinement in the wake cone) | 3–3.6 ms |
+| Tetraballs | raymarched metaballs; 9 materials (thin-film, Charlie sheen, dispersion…) | chrome ≤ 2.5; fire 3.5–10; smoke 4–9 |
+
+- **Fire/smoke in Tetraballs likely miss 60 fps on an M1 Air at medium quality**; the low
+  quality setting and auto render scale reduce them. To verify on the reference machine.
+- **Photosensitivity:** every visualizer routes global brightness swings through the flash
+  limiter. Skull Trip's check counts 4 changes/s at a 2% luminance threshold but 0 at 5%; WCAG's
+  general-flash threshold is ~10% opposing changes, so it isn't a flash by that definition.
+- **Harness:** the melody signal produced NaNs before t = 0 (negative modulo) and the drums kick
+  peaked at ~30 Hz; both fixed. Headless WebKit paints a transparent page's unstyled iframe
+  white, so backdrop colour in harness screenshots isn't reliable.
+- Merging: parallel agents each appended a manifest entry and a test; a conflict can split a
+  function in two, so the manifest test file is rebuilt from both sides rather than
+  "keep both".
+
 ## Host CPU (2026-09-27)
 
 Measured with `uv run python -m tools.cpu_budget` (headless host, WebSocket client in a separate
