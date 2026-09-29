@@ -26,6 +26,7 @@ VIZ = {
     "tiedye": "builtin",
     "skull": "builtin",
     "darksun": "builtin",
+    "eclipse": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }
