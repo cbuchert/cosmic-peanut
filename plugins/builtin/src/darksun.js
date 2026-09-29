@@ -10,8 +10,10 @@
  * bass and rms; beats flare the beam and the horizon (through the flash limiter) and the horizon
  * breathes with the mids.
  *
- * GPU: one full-screen pass (shaders/darksun/darksun.frag) plus one N × 1 R32F texture of the
- * range profile uploaded per frame. Pure logic lives in lib/horizon.js and lib/darksun.js and is
+ * GPU: the painted sky and ground washes (shaders/darksun/backdrop.frag) render at quarter
+ * resolution into their own target — they have no fine detail, and at full resolution they were
+ * most of the cost — then one full-screen pass (darksun.frag) draws everything else over them,
+ * reading one N × 1 R32F texture of the range profile uploaded per frame. Pure logic lives in lib/horizon.js and lib/darksun.js and is
  * tested there. Nothing is allocated per frame.
  */
 import {
@@ -26,22 +28,30 @@ import {
   palette,
   resolveParams,
 } from "./lib/darksun.js";
-import { createProgram } from "./lib/gl.js";
+import { createProgram, createTarget } from "./lib/gl.js";
 import { createHorizon } from "./lib/horizon.js";
 
 /** Columns across the range (half per side): the ridgeline's resolution. */
 const N = 64;
 /** Corona rotation (rad/s) at full motion. */
 const CORONA_RATE = 0.025;
+/** Backdrop target: full-resolution pixels per texel, each way. */
+const BG_DIV = 4;
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
   const gl = /** @type {WebGL2RenderingContext} */ (ctx.gl);
   const dir = "shaders/darksun/";
-  const [vs, fs] = await Promise.all([ctx.assets.text(dir + "fullscreen.vert"), ctx.assets.text(dir + "darksun.frag")]);
-  const prog = createProgram(gl, vs, fs, dir + "darksun.frag");
+  const [vs, noise, fs, bgFs] = await Promise.all(
+    ["fullscreen.vert", "noise.glsl", "darksun.frag", "backdrop.frag"].map((f) => ctx.assets.text(dir + f)),
+  );
+  const inc = (/** @type {string} */ src) => src.replace("// #include noise", noise);
+  const prog = createProgram(gl, vs, inc(fs), dir + "darksun.frag");
+  const bgProg = createProgram(gl, vs, inc(bgFs), dir + "backdrop.frag");
   const u = prog.u;
+  const ub = bgProg.u;
   const vao = gl.createVertexArray();
+  const bgTarget = createTarget(gl);
 
   const profTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, profTex);
@@ -79,19 +89,42 @@ export default async function create(ctx) {
       corona += CORONA_RATE * P.motion * (0.6 + 0.8 * sun.level) * dt;
       drift += P.motion * dt;
 
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.BLEND);
+      gl.bindVertexArray(vao);
+      const painted = isPainted(ctx.params.backdrop);
+
+      // 1. The painted washes, at quarter resolution.
+      if (painted) {
+        const tw = Math.max(1, Math.ceil(w / BG_DIV));
+        const th = Math.max(1, Math.ceil(h / BG_DIV));
+        if (bgTarget.width !== tw || bgTarget.height !== th) bgTarget.resize(tw, th);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, bgTarget.fbo);
+        gl.viewport(0, 0, tw, th);
+        gl.useProgram(bgProg.program);
+        gl.uniform2f(ub.u_res, w, h);
+        gl.uniform2f(ub.u_scale, w / tw, h / th);
+        gl.uniform1f(ub.u_unit, L.unit);
+        gl.uniform1f(ub.u_horizon, L.horizon);
+        gl.uniform1f(ub.u_time, drift);
+        gl.uniform3fv(ub.u_c, pal);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+
+      // 2. Everything else, over them.
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, profTex);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N, 1, gl.RED, gl.FLOAT, profile);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, bgTarget.tex);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, w, h);
-      gl.disable(gl.DEPTH_TEST);
-      gl.disable(gl.BLEND);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.useProgram(prog.program);
-      gl.bindVertexArray(vao);
       gl.uniform1i(u.u_prof, 0);
+      gl.uniform1i(u.u_bg, 1);
       gl.uniform1f(u.u_n, N);
       gl.uniform2f(u.u_res, w, h);
       gl.uniform1f(u.u_unit, L.unit);
@@ -106,13 +139,13 @@ export default async function create(ctx) {
       gl.uniform1f(u.u_diamond, diamond.angle);
       gl.uniform1f(u.u_corona, corona);
       gl.uniform1f(u.u_glow, glow.value);
-      gl.uniform1f(u.u_time, drift);
-      gl.uniform1f(u.u_painted, isPainted(ctx.params.backdrop) ? 1 : 0);
+      gl.uniform1f(u.u_painted, painted ? 1 : 0);
       gl.uniform3fv(u.u_c, pal);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.activeTexture(gl.TEXTURE0);
     },
 
-    // Layout is recomputed from ctx.size every frame.
+    // Layout (and the backdrop target's size) follow ctx.size every frame.
     resize() {},
 
     params(changed) {
@@ -121,6 +154,8 @@ export default async function create(ctx) {
 
     dispose() {
       gl.deleteTexture(profTex);
+      bgTarget.dispose();
+      gl.deleteProgram(bgProg.program);
       gl.deleteVertexArray(vao);
       gl.deleteProgram(prog.program);
     },

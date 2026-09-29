@@ -285,7 +285,9 @@ def test_darksun_manifest():
         "backdrop",
     ]
     # lib/darksun.js DEFAULTS / RANGES mirror these.
-    got = {k: (p["min"], p["max"], p["default"]) for k, p in params.items() if p["type"] == "number"}
+    got = {
+        k: (p["min"], p["max"], p["default"]) for k, p in params.items() if p["type"] == "number"
+    }
     assert got == {
         "reactivity": (0, 2, 1),
         "rangeWidth": (0.3, 0.7, 0.5),
