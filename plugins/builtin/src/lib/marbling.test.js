@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
+import { resizeMap, toOldPage, DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
 
 const out = new Float64Array(2);
 
@@ -439,6 +439,54 @@ describe("effectiveParams", () => {
     expect(out.size).toBe(1);
     effectiveParams({ ...DEFAULTS, rake: 1.4 }, true, out);
     expect(out.rake).toBe(1.4); // a value the user picked is respected
+  });
+});
+
+describe("resize", () => {
+  const map = new Float64Array(5);
+  const p = new Float64Array(2);
+
+  it("keeps the page as is when the aspect is unchanged (any pixel size)", () => {
+    resizeMap(16 / 9, 16 / 9, map);
+    toOldPage(map, 0.3, 0.7, p);
+    expect(p[0]).toBeCloseTo(0.3, 12);
+    expect(p[1]).toBeCloseTo(0.7, 12);
+  });
+
+  it("crops the sides, unscaled, when the window gets narrower", () => {
+    resizeMap(16 / 9, 4 / 3, map);
+    toOldPage(map, 0, 0, p);
+    expect(p[0]).toBeCloseTo((16 / 9 - 4 / 3) / 2, 12);
+    expect(p[1]).toBeCloseTo(0, 12);
+  });
+
+  it("scales the paint up (cells stay round) to cover a wider window", () => {
+    resizeMap(16 / 9, 21 / 9, map);
+    toOldPage(map, 0, 0, p);
+    expect(p[0]).toBeCloseTo(0, 12);
+    expect(p[1]).toBeGreaterThan(0);
+    toOldPage(map, 21 / 9, 1, p);
+    expect(p[0]).toBeCloseTo(16 / 9, 12);
+    expect(p[1]).toBeLessThan(1);
+    const q = new Float64Array(2);
+    toOldPage(map, 1, 0.5, p);
+    toOldPage(map, 1.1, 0.5, q);
+    expect((q[0] - p[0]) / 0.1).toBeCloseTo(16 / 21, 9) // scale 21/16;
+  });
+
+  it("moves drops still being poured along with the paint", () => {
+    const m = createMarbler(3);
+    m.step(audioFrame(), DT, PARAMS, ENV);
+    m.step(audioFrame({ onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, PARAMS, ENV);
+    const [x, y, r2] = [m.evA[1], m.evA[2], m.evA[3]];
+    resizeMap(16 / 9, 21 / 9, map);
+    m.remap(map);
+    m.step(audioFrame(), DT, PARAMS, { ...ENV, aspect: 21 / 9 });
+    const k = 21 / 16;
+    expect(m.evA[1]).toBeCloseTo((x - 8 / 9) * k + 21 / 18, 5);
+    expect(m.evA[2]).toBeCloseTo((y - 0.5) * k + 0.5, 5);
+    expect(m.evA[3]).toBeGreaterThan(0);
+    expect(m.evA[3]).toBeLessThan(r2 * k * k);
   });
 });
 

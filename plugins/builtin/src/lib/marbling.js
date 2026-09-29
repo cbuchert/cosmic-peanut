@@ -440,6 +440,22 @@ export function createMarbler(seed) {
     /** 0–1 sheen pulse on hits (≤ 3 rises/s under reduceFlashing). */
     sheen: 0,
     /**
+     * The page was resized: carry drops being poured, and the stylus, along with the paint.
+     * @param {Float64Array | Float32Array} map from {@link resizeMap}
+     */
+    remap(map) {
+      const k = map[0];
+      for (const p of pours) {
+        p.x = (p.x - map[1]) * k + map[3];
+        p.y = (p.y - map[2]) * k + map[4];
+        p.total *= k * k;
+        p.done *= k * k;
+        p.rim2 *= k * k;
+      }
+      if (sx >= 0) sx = (sx - map[1]) * k + map[3];
+      sy = (sy - map[2]) * k + map[4];
+    },
+    /**
      * @param {PourAudio} audio
      * @param {number} dt seconds
      * @param {PourParams} params
@@ -601,5 +617,35 @@ export function effectiveParams(params, reduceMotion, out) {
     if (out.rake === DEFAULTS.rake) out.rake = REDUCED.rake;
     if (out.renew === DEFAULTS.renew) out.renew = REDUCED.renew;
   }
+  return out;
+}
+
+/**
+ * How existing paint maps onto a resized page (page units, height 1): centred, never stretched —
+ * a narrower window crops the sides; a wider one scales the paint up by k to cover it. Fills
+ * `out` = [k, old centre x, y, new centre x, y]; resample.frag mirrors {@link toOldPage}.
+ * @param {number} oldAspect
+ * @param {number} newAspect
+ * @param {Float64Array | Float32Array} out length 5
+ */
+export function resizeMap(oldAspect, newAspect, out) {
+  out[0] = Math.max(1, newAspect / oldAspect);
+  out[1] = oldAspect / 2;
+  out[2] = 0.5;
+  out[3] = newAspect / 2;
+  out[4] = 0.5;
+  return out;
+}
+
+/**
+ * Where a point of the new page was on the old one: (p − cNew)/k + cOld.
+ * @param {Float64Array | Float32Array} map from {@link resizeMap}
+ * @param {number} x
+ * @param {number} y
+ * @param {Float64Array | number[]} out
+ */
+export function toOldPage(map, x, y, out) {
+  out[0] = (x - map[3]) / map[0] + map[1];
+  out[1] = (y - map[4]) / map[0] + map[2];
   return out;
 }
