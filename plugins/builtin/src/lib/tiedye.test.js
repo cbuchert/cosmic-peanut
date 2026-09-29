@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createBandWidths, createSpin, DEFAULT_SPEED, TWIST_DEPTH } from "./tiedye.js";
+import { BLOOM_CAP, BLOOM_SPREAD, createBandWidths, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH } from "./tiedye.js";
 
 describe("createBandWidths", () => {
   it("gives even bands for a silent track", () => {
@@ -123,5 +123,77 @@ describe("createSpin", () => {
     expect(reduced.twist).toBeLessThan(normal.twist * 0.6);
     // A Speed the user picked is respected.
     expect(run(true, 1.7).turns).toBeCloseTo(run(false, 1.7).turns, 6);
+  });
+});
+
+describe("createBlooms", () => {
+  /** Active blooms: those with amount > 0. */
+  const active = (/** @type {ReturnType<typeof createBlooms>} */ b) => {
+    let n = 0;
+    for (let i = 0; i < BLOOM_CAP; i++) if (b.data[i * 4 + 3] > 0) n++;
+    return n;
+  };
+
+  it("drops a bloom on an onset, and none without", () => {
+    const b = createBlooms(1);
+    for (let f = 0; f < 30; f++) b.step(false, 0, 1 / 60);
+    expect(active(b)).toBe(0);
+    b.step(true, 1, 1 / 60);
+    b.step(false, 0, 1 / 60);
+    expect(active(b)).toBe(1);
+  });
+
+  /** Positions of the first `n` blooms, one onset every 0.5 s. */
+  const spots = (/** @type {number} */ seed, n = 4) => {
+    const b = createBlooms(seed);
+    /** @type {number[]} */
+    const out = [];
+    for (let k = 0; k < n; k++) {
+      b.step(true, 1, 1 / 60);
+      out.push(b.data[k * 4], b.data[k * 4 + 1]);
+      for (let f = 0; f < 30; f++) b.step(false, 0, 1 / 60);
+    }
+    return out;
+  };
+
+  it("places blooms deterministically from the seed, inside the spread disc", () => {
+    expect(spots(7)).toEqual(spots(7));
+    expect(spots(7)).not.toEqual(spots(8));
+    const p = spots(3, 8);
+    for (let k = 0; k < 8; k++) expect(Math.hypot(p[2 * k], p[2 * k + 1])).toBeLessThanOrEqual(BLOOM_SPREAD);
+    expect(new Set(p).size).toBe(16);
+  });
+
+  it("caps the pool, recycling the oldest bloom", () => {
+    const b = createBlooms(1);
+    for (let k = 0; k < 20; k++) {
+      b.step(true, 1, 1 / 60);
+      b.step(false, 0, 1 / 60);
+    }
+    expect(b.data.length).toBe(BLOOM_CAP * 4);
+    expect(active(b)).toBe(BLOOM_CAP);
+    // Slot 20 % CAP holds the oldest (spawned 2 × CAP frames ago); the next onset replaces it.
+    const oldest = (20 % BLOOM_CAP) * 4;
+    const before = b.data[oldest + 2];
+    b.step(true, 1, 1 / 60);
+    expect(b.data[oldest + 2]).toBeLessThan(before);
+  });
+
+  it("bleeds outward (radius grows) and fades out within ~2 s", () => {
+    const b = createBlooms(1);
+    b.step(true, 1, 1 / 60);
+    let r = b.data[2];
+    let peak = 0;
+    for (let f = 1; f < 150; f++) {
+      b.step(false, 0, 1 / 60);
+      expect(b.data[2] === 0 || b.data[2] >= r).toBe(true);
+      if (b.data[2] > 0) r = b.data[2];
+      peak = Math.max(peak, b.data[3]);
+      if (f === 30) expect(b.data[3]).toBeGreaterThan(0.5);
+    }
+    expect(r).toBeGreaterThan(0.05);
+    expect(peak).toBeLessThanOrEqual(1);
+    expect(b.data[3]).toBe(0);
+    expect(active(b)).toBe(0);
   });
 });

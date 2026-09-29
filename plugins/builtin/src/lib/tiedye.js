@@ -96,3 +96,80 @@ export function createSpin() {
   };
   return s;
 }
+
+/** Dye blooms in the pool (uniform array size in the shader). */
+export const BLOOM_CAP = 8;
+/** Seconds a bloom lives: it bleeds outward, then fades into the pattern. */
+export const BLOOM_LIFE = 1.8;
+/** Blooms land within this radius (unit = half the shorter screen side). */
+export const BLOOM_SPREAD = 0.75;
+const BLOOM_GROW_TAU = 0.45;
+const BLOOM_FADE_IN = 0.08;
+const BLOOM_FADE_FROM = 0.7;
+
+/** mulberry32: a tiny seeded PRNG, 0 ≤ x < 1. @param {number} seed */
+export function prng(seed) {
+  let t0 = seed | 0;
+  return () => {
+    t0 = (t0 + 0x6d2b79f5) | 0;
+    let t = Math.imul(t0 ^ (t0 >>> 15), 1 | t0);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * A fixed pool of dye blooms. Each onset drops one at a seeded pseudo-random spot (recycling the
+ * oldest when the pool is full); it bleeds outward quickly, then slows, and fades out over
+ * BLOOM_LIFE seconds. `data` holds x, y, radius, amount per bloom and `color` a 0–1 palette
+ * position, ready for uniform4fv / uniform1fv. Nothing is allocated per step.
+ * @param {number} seed
+ */
+export function createBlooms(seed) {
+  const rand = prng(seed);
+  const age = new Float32Array(BLOOM_CAP).fill(Infinity);
+  const size = new Float32Array(BLOOM_CAP);
+  const strength = new Float32Array(BLOOM_CAP);
+  let next = 0;
+  const b = {
+    /** Per bloom: x, y (unit-radius coordinates), radius, amount 0–1. */
+    data: new Float32Array(BLOOM_CAP * 4),
+    /** Per bloom: palette position 0–1. */
+    color: new Float32Array(BLOOM_CAP),
+    /**
+     * @param {boolean} onset `audio.onset`
+     * @param {number} onsetStrength `audio.onsetStrength`
+     * @param {number} dt seconds
+     */
+    step(onset, onsetStrength, dt) {
+      for (let i = 0; i < BLOOM_CAP; i++) age[i] += dt;
+      if (onset) {
+        const i = next;
+        next = (next + 1) % BLOOM_CAP;
+        const r = BLOOM_SPREAD * Math.sqrt(rand());
+        const a = 2 * Math.PI * rand();
+        b.data[i * 4] = r * Math.cos(a);
+        b.data[i * 4 + 1] = r * Math.sin(a);
+        b.color[i] = rand();
+        const st = Math.min(1, 0.5 + Math.max(0, onsetStrength));
+        strength[i] = st;
+        size[i] = (0.1 + 0.12 * rand()) * (0.6 + 0.4 * st);
+        age[i] = 0;
+      }
+      for (let i = 0; i < BLOOM_CAP; i++) {
+        const t = age[i];
+        if (!(t < BLOOM_LIFE)) {
+          b.data[i * 4 + 2] = 0;
+          b.data[i * 4 + 3] = 0;
+          continue;
+        }
+        b.data[i * 4 + 2] = size[i] * (1 - Math.exp(-(t + dt) / BLOOM_GROW_TAU));
+        const fadeIn = Math.min(1, (t + dt) / BLOOM_FADE_IN);
+        const u = Math.max(0, (t - BLOOM_FADE_FROM) / (BLOOM_LIFE - BLOOM_FADE_FROM));
+        b.data[i * 4 + 3] = strength[i] * fadeIn * (1 - u * u * (3 - 2 * u));
+      }
+      return b;
+    },
+  };
+  return b;
+}
