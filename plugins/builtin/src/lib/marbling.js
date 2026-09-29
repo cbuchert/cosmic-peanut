@@ -575,3 +575,31 @@ export function createMarbler(seed) {
   };
   return m;
 }
+
+/** Manifest defaults of the numeric params (tests/test_builtin_manifests.py pins them). */
+export const DEFAULTS = Object.freeze({ pour: 1, size: 1, rake: 1, reactivity: 1, renew: 1 });
+/** What Reduce motion uses instead of a default: a calmer pour, a gentler rake, slower renewal. */
+const REDUCED = { pour: 0.6, rake: 0.4, renew: 0.5 };
+const PARAM_KEYS = /** @type {(keyof PourParams)[]} */ (Object.keys(DEFAULTS));
+
+/**
+ * Copy the live numeric params into `out` (defaults for anything missing or not a number). Under
+ * Reduce motion, pour/rake/renew that sit at their defaults take the calmer REDUCED values.
+ * Allocation-free (called every frame).
+ * @param {Readonly<Record<string, unknown>>} params `ctx.params`
+ * @param {boolean} reduceMotion
+ * @param {PourParams} out
+ */
+export function effectiveParams(params, reduceMotion, out) {
+  for (let i = 0; i < PARAM_KEYS.length; i++) {
+    const k = PARAM_KEYS[i];
+    const v = params[k];
+    out[k] = typeof v === "number" && Number.isFinite(v) ? v : DEFAULTS[k];
+  }
+  if (reduceMotion) {
+    if (out.pour === DEFAULTS.pour) out.pour = REDUCED.pour;
+    if (out.rake === DEFAULTS.rake) out.rake = REDUCED.rake;
+    if (out.renew === DEFAULTS.renew) out.renew = REDUCED.renew;
+  }
+  return out;
+}

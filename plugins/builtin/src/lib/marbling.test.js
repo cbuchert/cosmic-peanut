@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
+import { DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
 
 const out = new Float64Array(2);
 
@@ -419,6 +419,26 @@ describe("determinism and brightness", () => {
     expect(Math.max(...limited)).toBeLessThanOrEqual(1);
     expect(risesPerSecond(limited)).toBeLessThanOrEqual(3);
     expect(risesPerSecond(run(1, false).sheen)).toBeGreaterThan(3);
+  });
+});
+
+describe("effectiveParams", () => {
+  it("reads the live params, falling back to the defaults", () => {
+    const out = { ...DEFAULTS };
+    effectiveParams({ pour: 1.5, size: "x" }, false, out);
+    expect(out).toEqual({ ...DEFAULTS, pour: 1.5 });
+    expect(DEFAULTS).toEqual({ pour: 1, size: 1, rake: 1, reactivity: 1, renew: 1 });
+  });
+
+  it("calms pour, rake and renew under Reduce motion while they sit at their defaults", () => {
+    const out = { ...DEFAULTS };
+    effectiveParams({ ...DEFAULTS }, true, out);
+    expect(out.pour).toBeLessThan(0.7);
+    expect(out.rake).toBeLessThan(0.5);
+    expect(out.renew).toBeLessThan(0.6);
+    expect(out.size).toBe(1);
+    effectiveParams({ ...DEFAULTS, rake: 1.4 }, true, out);
+    expect(out.rake).toBe(1.4); // a value the user picked is respected
   });
 });
 
