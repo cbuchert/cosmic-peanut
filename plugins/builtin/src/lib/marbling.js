@@ -183,8 +183,8 @@ export const PALETTES = {
     inks: [
       [0.05, 0.03, 0.03],
       [0.8, 0.22, 0.15],
-      [0.9, 0.42, 0.26],
-      [0.6, 0.12, 0.09],
+      [0.88, 0.36, 0.22],
+      [0.68, 0.16, 0.11],
     ],
   },
   indigo: {
@@ -260,9 +260,9 @@ export const EV_SHIFT = 3;
  * clear (paper-coloured, no rim) — the cream specks.
  */
 const RECIPES = [
-  { radius: 0.075, ink: 1, rimInk: 0, rimT: 0.0035, pour: 0.3, spread: 0.7, sat: 0.85, maxSat: 3, clear: 0 }, // low: kicks, bass
-  { radius: 0.045, ink: 3, rimInk: 0, rimT: 0.006, pour: 0.2, spread: 0.85, sat: 0.5, maxSat: 2, clear: 0 }, // mid: snares
-  { radius: 0.017, ink: 2, rimInk: 0, rimT: 0.0018, pour: 0.1, spread: 1, sat: 0, maxSat: 0, clear: 0.3 }, // high: hats
+  { radius: 0.06, ink: 1, rimInk: 0, rimT: 0.003, pour: 0.3, spread: 0.7, sat: 0.85, maxSat: 3, clear: 0 }, // low: kicks, bass
+  { radius: 0.038, ink: 3, rimInk: 0, rimT: 0.005, pour: 0.2, spread: 0.85, sat: 0.5, maxSat: 2, clear: 0 }, // mid: snares
+  { radius: 0.015, ink: 2, rimInk: 0, rimT: 0.0018, pour: 0.1, spread: 1, sat: 0, maxSat: 0, clear: 0.3 }, // high: hats
 ];
 
 /**
@@ -301,13 +301,15 @@ const RMS_LOUD = 0.2;
 const STYLUS_INV_S2 = 1 / (0.012 * 0.012);
 const STYLUS_GRIP = 0.9;
 const STYLUS_MARGIN = 0.03;
-const STYLUS_SPACING = 0.02;
+const STYLUS_SPACING = 0.012;
 
 /** Renew: drift speed (page heights/s at Renew 1), mean seconds between large clear drops at
  * Renew 1 (scaled 0.6× when quiet … 1.4× when loud), and how long one takes to bloom open. */
 const DRIFT_SPEED = 0.003;
 const CLEAR_EVERY = 30;
 const CLEAR_POUR = 2.5;
+/** Seconds a ground (vein-ink) drop takes to bloom. */
+const GROUND_POUR = 1.2;
 
 /** @param {number} x */
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
@@ -346,6 +348,7 @@ export function createMarbler(seed) {
   let rmsS = 0;
   let ref = RMS_FLOOR;
   let drizzle = 0;
+  let ground = 0.9; // the first ground drop comes soon after the music starts
   // The stylus: position, direction of travel, distance travelled, last clear-drop deposit.
   let sx = -1;
   let sy = 0.5;
@@ -413,7 +416,7 @@ export function createMarbler(seed) {
         const u = rand();
         const sxj = x + d * Math.cos(a);
         const syj = y + d * Math.sin(a);
-        if (u < 0.35) spawn(sxj, syj, sr * 1.3, 0, 0, 0, 0.12, 0);
+        if (u < 0.45) spawn(sxj, syj, sr * 1.3, 0, 0, 0, 0.12, 0);
         else spawn(sxj, syj, sr, 0.0015, u < 0.6 ? 1 : u < 0.8 ? 2 : 3, 0, 0.12, 0);
       }
     }
@@ -493,7 +496,7 @@ export function createMarbler(seed) {
         region = strongestRegion(bands, prevBands);
       }
       // Loud passages also drizzle smaller drops between the hits.
-      drizzle += dt * pour * (energy > 0.3 ? 2.5 * energy * energy : 0);
+      drizzle += dt * pour * (energy > 0.2 ? 4 * energy * energy : 0);
       if (region < 0 && drizzle >= 1 && !audio.silent) {
         drizzle -= 1;
         region = loudestRegion(bands);
@@ -501,6 +504,16 @@ export function createMarbler(seed) {
       }
       if (drizzle > 1) drizzle = 1;
       if (region >= 0) dropFrom(region, scale, audio, params, env);
+
+      // The dark ground: now and then a large vein-ink drop blooms, and the cells poured into it
+      // squeeze it into the black veins and gaps between them.
+      if (!audio.silent && energy > 0.05) ground += dt * pour * (0.05 + 0.15 * energy);
+      if (ground >= 1) {
+        ground -= 1;
+        const gx = env.aspect * (0.1 + 0.8 * rand());
+        const gy = 0.15 + 0.7 * rand();
+        spawn(gx, gy, (0.1 + 0.05 * rand()) * params.size, 0, 0, 0, GROUND_POUR, 0);
+      }
 
       // A wet sheen on each hit (the composite brightens the page a little): flash-limited.
       kick = audio.onset && !audio.silent ? clamp01(audio.onsetStrength * params.reactivity) : kick * Math.exp(-dt * 5);
@@ -532,7 +545,7 @@ export function createMarbler(seed) {
           nextClear = clearClock + CLEAR_EVERY * (0.6 + 0.8 * energy) * (0.7 + 0.6 * rand());
           const x = env.aspect * (0.15 + 0.7 * rand());
           const y = 0.2 + 0.6 * rand();
-          spawn(x, y, 0.1 + 0.08 * rand(), 0, -1, -1, CLEAR_POUR, 0);
+          spawn(x, y, 0.08 + 0.06 * rand(), 0, -1, -1, CLEAR_POUR, 0);
         }
       }
 
@@ -565,7 +578,7 @@ export function createMarbler(seed) {
         travelled += Math.hypot(sx - x0, sy - y0);
         if (travelled - deposited >= STYLUS_SPACING) {
           deposited = travelled;
-          const r = 0.011 * (0.7 + 0.6 * energy) * Math.min(1.5, Math.sqrt(rake));
+          const r = 0.0075 * (0.7 + 0.6 * energy) * Math.min(1.5, Math.sqrt(rake));
           spawn(sx, sy, r, 0, -1, -1, 0.12, 0);
         }
       }

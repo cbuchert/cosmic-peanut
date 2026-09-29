@@ -224,7 +224,7 @@ describe("createMarbler", () => {
       m.step(audioFrame(), DT, PARAMS, ENV);
     }
     expect(frames).toBeGreaterThan(5); // it spreads, it doesn't pop
-    expect(Math.sqrt(total) - Math.sqrt(cell)).toBeCloseTo(0.0035, 6);
+    expect(Math.sqrt(total) - Math.sqrt(cell)).toBeCloseTo(0.003, 6);
   });
 
   it("follows a kick with smaller satellite drops inside it (nested cells)", () => {
@@ -363,7 +363,7 @@ describe("renew", () => {
         clear.set(key, (clear.get(key) ?? 0) + m.evA[i * 4 + 3]);
       }
     }
-    const big = [...clear.values()].filter((r2) => Math.sqrt(r2) >= 0.1).length;
+    const big = [...clear.values()].filter((r2) => Math.sqrt(r2) >= 0.08).length;
     return { big, shiftPx, maxSlice };
   };
 
@@ -531,6 +531,31 @@ describe("createEventQueue", () => {
     q.clear();
     expect(q.count).toBe(0);
     expect(q.fits(MAX_EVENTS)).toBe(true);
+  });
+});
+
+describe("ground", () => {
+  /** Count large vein-ink drops (the dark ground the cells float in) over 60 s at a loudness. */
+  const grounds = (/** @type {number} */ rms) => {
+    const m = createMarbler(6);
+    /** @type {Map<string, number>} */
+    const r2 = new Map();
+    for (let f = 0; f < 3600; f++) {
+      m.step(audioFrame({ rms }), DT, PARAMS, ENV);
+      for (let i = 0; i < m.count; i++) {
+        if (m.evA[i * 4] !== EV_DROP || m.evC[i * 4] !== 1) continue;
+        const key = `${m.evA[i * 4 + 1]},${m.evA[i * 4 + 2]}`;
+        r2.set(key, (r2.get(key) ?? 0) + m.evA[i * 4 + 3]);
+      }
+    }
+    return [...r2.values()].filter((v) => Math.sqrt(v) >= 0.09).length;
+  };
+
+  it("lays a dark ground of large vein-ink drops, faster when loud, none in silence", () => {
+    const loud = grounds(0.25);
+    expect(loud).toBeGreaterThan(5);
+    expect(loud).toBeGreaterThan(1.5 * grounds(0.03));
+    expect(grounds(0)).toBe(0);
   });
 });
 
