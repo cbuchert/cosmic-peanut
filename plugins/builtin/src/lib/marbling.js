@@ -122,3 +122,281 @@ export function clampDrag(invS2, v) {
   }
   return v;
 }
+
+/**
+ * Seeded PRNG (mulberry32): drop positions and choices are deterministic given the audio and time.
+ * @param {number} seed
+ * @returns {() => number} uniform in [0, 1)
+ */
+export function createRng(seed) {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Band-index edges of the three spectral regions over the host's 64 log bands (30 Hz – 16 kHz):
+ * low [0, 17) below ~150 Hz (kicks, bass), mid [17, 43) to ~2 kHz (snares, voice), high above.
+ */
+export const REGIONS = [0, 17, 43, 64];
+
+/**
+ * Which region hit hardest: the largest mean rise of its bands since the previous frame.
+ * @param {ArrayLike<number>} bands this frame's `audio.bands`
+ * @param {ArrayLike<number>} prev last frame's copy
+ * @returns {number} 0 low, 1 mid, 2 high
+ */
+export function strongestRegion(bands, prev) {
+  let best = 0;
+  let bestRise = -1;
+  for (let r = 0; r < 3; r++) {
+    let rise = 0;
+    for (let i = REGIONS[r]; i < REGIONS[r + 1]; i++) {
+      const d = bands[i] - prev[i];
+      if (d > 0) rise += d;
+    }
+    rise /= REGIONS[r + 1] - REGIONS[r];
+    if (rise > bestRise) {
+      bestRise = rise;
+      best = r;
+    }
+  }
+  return best;
+}
+
+/**
+ * @typedef {object} Palette
+ * @property {number[]} paper cream paper (sRGB 0–1), shown where no ink lies (Paper "cream")
+ * @property {number[][]} inks 0 veins (dark), 1 body (main cells), 2 light (hats, nested cells),
+ *   3 deep (snares, nested cells). The sim texture stores the amount of each ink per pixel.
+ */
+
+/** @type {Record<string, Palette>} */
+export const PALETTES = {
+  beast: {
+    paper: [0.94, 0.9, 0.8],
+    inks: [
+      [0.05, 0.03, 0.03],
+      [0.8, 0.22, 0.15],
+      [0.9, 0.42, 0.26],
+      [0.6, 0.12, 0.09],
+    ],
+  },
+  indigo: {
+    paper: [0.93, 0.91, 0.86],
+    inks: [
+      [0.03, 0.04, 0.1],
+      [0.17, 0.25, 0.58],
+      [0.42, 0.55, 0.82],
+      [0.1, 0.14, 0.38],
+    ],
+  },
+  emerald: {
+    paper: [0.94, 0.92, 0.84],
+    inks: [
+      [0.02, 0.06, 0.04],
+      [0.1, 0.47, 0.31],
+      [0.35, 0.7, 0.5],
+      [0.05, 0.3, 0.2],
+    ],
+  },
+  gold: {
+    paper: [0.95, 0.92, 0.83],
+    inks: [
+      [0.06, 0.04, 0.02],
+      [0.8, 0.58, 0.14],
+      [0.93, 0.79, 0.4],
+      [0.58, 0.38, 0.08],
+    ],
+  },
+};
+
+/** @param {unknown} name */
+export function paletteOf(name) {
+  return (typeof name === "string" && Object.hasOwn(PALETTES, name) && PALETTES[name]) || PALETTES.beast;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Scheduler: turns audio into this frame's marbling events (at most MAX_EVENTS, constant cost)
+// ---------------------------------------------------------------------------------------------
+
+/** Events applied per frame (uniform array length in sim.frag). */
+export const MAX_EVENTS = 16;
+/** Drops being poured at once (each emits one DROP slice per frame). */
+export const MAX_POURS = 12;
+export const EV_DROP = 1;
+export const EV_DRAG = 2;
+export const EV_SHIFT = 3;
+
+/**
+ * Per-region drop recipe (page units: the page is 1 tall). radius: base radius; rimT: thickness of
+ * the vein-ink ring poured first (rimInk), so each cell ends up outlined; pour: seconds a drop
+ * takes to spread; spread: fraction of the page its centre may land in.
+ */
+const RECIPES = [
+  { radius: 0.075, ink: 1, rimInk: 0, rimT: 0.0035, pour: 0.3, spread: 0.7 }, // low: kicks, bass
+  { radius: 0.045, ink: 3, rimInk: 0, rimT: 0.006, pour: 0.2, spread: 0.85 }, // mid: snares
+  { radius: 0.017, ink: 2, rimInk: 0, rimT: 0.0018, pour: 0.1, spread: 1 }, // high: hats
+];
+
+/**
+ * @typedef {object} PourAudio The fields of `audio` the scheduler reads.
+ * @property {boolean} onset
+ * @property {number} onsetStrength
+ * @property {ArrayLike<number>} bands
+ * @property {number} bassAtt
+ * @property {number} rms
+ * @property {number} peak
+ * @property {number} centroid
+ * @property {boolean} silent
+ */
+/**
+ * @typedef {object} PourParams
+ * @property {number} pour pour-rate multiplier
+ * @property {number} size drop-size multiplier
+ * @property {number} rake stylus (stroke) amount
+ * @property {number} reactivity how strongly hits scale drops
+ * @property {number} renew renew-speed multiplier
+ */
+/**
+ * @typedef {object} PourEnv
+ * @property {number} aspect page width / height
+ * @property {number} pxPerUnit sim texture height in pixels (drift moves whole pixels)
+ * @property {boolean} reduceFlashing
+ * @property {boolean} reduceMotion
+ */
+
+/** @param {number} x */
+const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+
+/**
+ * The pour scheduler. Each `step` rewrites evA–evD with this frame's events, oldest first:
+ * - DROP  evA (1, x, y, R²)   evB (cellR², 0, 0, 0): a concentric slice of a drop being poured;
+ *   inside √cellR² takes evC's ink, the ring out to R takes evD's (the rim, poured first).
+ * Inks are 4-vectors of ink amounts (one-hot; all zero = clear, i.e. paper).
+ * @param {number} seed
+ */
+export function createMarbler(seed) {
+  const rand = createRng(seed);
+  const evA = new Float32Array(MAX_EVENTS * 4);
+  const evB = new Float32Array(MAX_EVENTS * 4);
+  const evC = new Float32Array(MAX_EVENTS * 4);
+  const evD = new Float32Array(MAX_EVENTS * 4);
+  const prevBands = new Float32Array(64);
+  const pours = Array.from({ length: MAX_POURS }, () => ({
+    state: 0, // 0 free, 1 waiting (delay), 2 pouring
+    delay: 0,
+    x: 0,
+    y: 0,
+    total: 0,
+    done: 0,
+    rim2: 0,
+    ink: -1,
+    rimInk: -1,
+    dur: 0,
+    t: 0,
+  }));
+  let now = 0;
+  let lastDrop = -1e9;
+
+  /**
+   * Queue a drop. Returns the slot, or -1 when every slot is busy (the drop is skipped: the cap).
+   * @param {number} x @param {number} y @param {number} r @param {number} rimT
+   * @param {number} ink @param {number} rimInk @param {number} dur @param {number} delay
+   */
+  function spawn(x, y, r, rimT, ink, rimInk, dur, delay) {
+    for (let i = 0; i < MAX_POURS; i++) {
+      const p = pours[i];
+      if (p.state !== 0) continue;
+      p.state = delay > 0 ? 1 : 2;
+      p.delay = delay;
+      p.x = x;
+      p.y = y;
+      p.rim2 = rimT > 0 ? 2 * r * rimT + rimT * rimT : 0;
+      p.total = r * r + p.rim2;
+      p.done = 0;
+      p.ink = ink;
+      p.rimInk = rimInk;
+      p.dur = Math.max(1e-3, dur);
+      p.t = 0;
+      return i;
+    }
+    return -1;
+  }
+
+  /** @param {Float32Array} arr @param {number} i @param {number} ink */
+  function writeInk(arr, i, ink) {
+    for (let k = 0; k < 4; k++) arr[i * 4 + k] = k === ink ? 1 : 0;
+  }
+
+  const m = {
+    evA,
+    evB,
+    evC,
+    evD,
+    /** Number of events this frame. */
+    count: 0,
+    /**
+     * @param {PourAudio} audio
+     * @param {number} dt seconds
+     * @param {PourParams} params
+     * @param {PourEnv} env
+     */
+    step(audio, dt, params, env) {
+      now += dt;
+      const bands = audio.bands;
+      if (audio.onset && !audio.silent) {
+        const region = strongestRegion(bands, prevBands);
+        const gap = 0.45 / Math.max(0.05, params.pour);
+        if (now - lastDrop >= gap) {
+          lastDrop = now;
+          const rc = RECIPES[region];
+          const hit = clamp01(0.5 * audio.onsetStrength + 0.5 * (region === 0 ? audio.bassAtt / 2 : 0.5));
+          const r = rc.radius * params.size * (0.7 + 0.6 * params.reactivity * hit);
+          const x = env.aspect * (0.5 + (rand() - 0.5) * rc.spread);
+          const y = 0.5 + (rand() - 0.5) * rc.spread;
+          spawn(x, y, r, rc.rimT, rc.ink, rc.rimInk, rc.pour, 0);
+        }
+      }
+      for (let i = 0; i < 64; i++) prevBands[i] = bands[i] ?? 0;
+
+      // Emit this frame's slice of every drop being poured.
+      let n = 0;
+      for (let i = 0; i < MAX_POURS && n < MAX_EVENTS; i++) {
+        const p = pours[i];
+        if (p.state === 1) {
+          p.delay -= dt;
+          if (p.delay > 0) continue;
+          p.state = 2;
+        }
+        if (p.state !== 2) continue;
+        p.t += dt;
+        const u = clamp01(p.t / p.dur);
+        const done = p.total * (1 - (1 - u) * (1 - u));
+        const slice = done - p.done;
+        if (slice > 0) {
+          const rimPart = Math.max(0, Math.min(done, p.rim2) - p.done);
+          evA[n * 4] = EV_DROP;
+          evA[n * 4 + 1] = p.x;
+          evA[n * 4 + 2] = p.y;
+          evA[n * 4 + 3] = slice;
+          evB[n * 4] = slice - rimPart;
+          evB[n * 4 + 1] = 0;
+          evB[n * 4 + 2] = 0;
+          evB[n * 4 + 3] = 0;
+          writeInk(evC, n, p.ink);
+          writeInk(evD, n, p.rimInk);
+          n++;
+        }
+        p.done = done;
+        if (u >= 1) p.state = 0;
+      }
+      m.count = n;
+    },
+  };
+  return m;
+}

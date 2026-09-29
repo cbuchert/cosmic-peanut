@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { clampDrag, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
+import { createMarbler, EV_DROP, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
 
 const out = new Float64Array(2);
 
@@ -73,6 +73,156 @@ describe("stylus drag", () => {
     const v = new Float64Array([0.001, 0]);
     clampDrag(invS2, v);
     expect(v[0]).toBe(0.001);
+  });
+});
+
+
+describe("createRng", () => {
+  it("is a deterministic 0–1 stream per seed", () => {
+    const a = createRng(7);
+    const b = createRng(7);
+    const c = createRng(8);
+    const xs = Array.from({ length: 50 }, () => a());
+    expect(xs).toEqual(Array.from({ length: 50 }, () => b()));
+    expect(xs).not.toEqual(Array.from({ length: 50 }, () => c()));
+    for (const x of xs) expect(x >= 0 && x < 1).toBe(true);
+  });
+});
+
+describe("strongestRegion", () => {
+  /** @param {number} lo @param {number} hi @param {number} v */
+  const hit = (lo, hi, v) => {
+    const b = new Float32Array(64).fill(0.2);
+    for (let i = lo; i < hi; i++) b[i] += v;
+    return b;
+  };
+  const prev = new Float32Array(64).fill(0.2);
+
+  it("splits the 64 log bands into low (<150 Hz), mid and high (>2 kHz)", () => {
+    expect(REGIONS).toEqual([0, 17, 43, 64]);
+  });
+
+  it("picks the region whose bands rose most since the last frame", () => {
+    expect(strongestRegion(hit(0, 6, 0.5), prev)).toBe(0); // kick
+    expect(strongestRegion(hit(20, 40, 0.3), prev)).toBe(1); // snare body
+    expect(strongestRegion(hit(48, 64, 0.2), prev)).toBe(2); // hats
+  });
+
+  it("measures the rise per band, so a narrow kick beats a wide faint wash", () => {
+    const b = hit(0, 4, 0.6);
+    for (let i = 43; i < 64; i++) b[i] += 0.05;
+    expect(strongestRegion(b, prev)).toBe(0);
+  });
+});
+
+describe("palettes", () => {
+  /** @param {number[]} c */
+  const lum = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+
+  it("offers beast (default), indigo, emerald and gold, each a paper and four inks", () => {
+    expect(Object.keys(PALETTES)).toEqual(["beast", "indigo", "emerald", "gold"]);
+    for (const p of Object.values(PALETTES)) {
+      expect(p.paper).toHaveLength(3);
+      expect(p.inks).toHaveLength(4);
+      expect(lum(p.paper)).toBeGreaterThan(0.75); // cream paper
+      expect(lum(p.inks[0])).toBeLessThan(0.08); // ink 0: the dark veins
+      for (const c of p.inks) for (const v of c) expect(v >= 0 && v <= 1).toBe(true);
+    }
+  });
+
+  it("beast is vermilion cells on black veins", () => {
+    const [, body, light, deep] = PALETTES.beast.inks;
+    for (const c of [body, light, deep]) expect(c[0]).toBeGreaterThan(2 * Math.max(c[1], c[2]) - 0.05);
+    expect(lum(light)).toBeGreaterThan(lum(body));
+    expect(lum(deep)).toBeLessThan(lum(body));
+  });
+
+  it("falls back to beast for an unknown name", () => {
+    expect(paletteOf("nope")).toBe(PALETTES.beast);
+    expect(paletteOf("gold")).toBe(PALETTES.gold);
+  });
+});
+
+/** A quiet, silent-ish audio frame; override fields per test. */
+function audioFrame(o = {}) {
+  return {
+    onset: false,
+    onsetStrength: 0,
+    bands: new Float32Array(64),
+    bassAtt: 1,
+    rms: 0,
+    peak: 0,
+    centroid: 0.1,
+    silent: false,
+    ...o,
+  };
+}
+/** @param {number} lo @param {number} hi */
+function bandsHit(lo, hi) {
+  const b = new Float32Array(64);
+  for (let i = lo; i < hi; i++) b[i] = 0.8;
+  return b;
+}
+const PARAMS = { pour: 1, size: 1, rake: 0, reactivity: 1, renew: 0 };
+const ENV = { aspect: 16 / 9, pxPerUnit: 1440, reduceFlashing: true, reduceMotion: false };
+const DT = 1 / 60;
+
+/** Squared radii of the DROP events of the marbler's current frame. */
+function dropsOf(m) {
+  const out = [];
+  for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === EV_DROP) out.push(m.evA[i * 4 + 3]);
+  return out;
+}
+
+describe("createMarbler", () => {
+  it("pours nothing into a silent bath", () => {
+    const m = createMarbler(1);
+    for (let i = 0; i < 120; i++) m.step(audioFrame({ silent: true }), DT, PARAMS, ENV);
+    expect(m.count).toBe(0);
+  });
+
+  it("drops paint on an onset; a kick leaves a bigger drop than a hat", () => {
+    const total = (/** @type {number} */ lo, /** @type {number} */ hi) => {
+      const m = createMarbler(1);
+      m.step(audioFrame(), DT, PARAMS, ENV);
+      m.step(audioFrame({ onset: true, onsetStrength: 1, bands: bandsHit(lo, hi) }), DT, PARAMS, ENV);
+      let r2 = 0;
+      for (let i = 0; i < 30; i++) {
+        r2 += dropsOf(m).reduce((a, b) => a + b, 0);
+        m.step(audioFrame(), DT, PARAMS, ENV);
+      }
+      return r2;
+    };
+    const kick = total(0, 6);
+    const hat = total(48, 64);
+    expect(kick).toBeGreaterThan(0);
+    expect(hat).toBeGreaterThan(0);
+    expect(kick).toBeGreaterThan(4 * hat);
+    expect(MAX_EVENTS).toBe(16);
+  });
+
+  it("pours a drop over several frames as concentric slices: vein rim first, then the cell", () => {
+    const m = createMarbler(3);
+    m.step(audioFrame(), DT, PARAMS, ENV);
+    m.step(audioFrame({ onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, PARAMS, ENV);
+    let total = 0;
+    let cell = 0;
+    let frames = 0;
+    let first = true;
+    while (m.count > 0) {
+      const slice = m.evA[3];
+      const cellPart = m.evB[0];
+      if (first) expect(cellPart).toBeLessThan(slice); // the rim goes in first
+      first = false;
+      expect(m.evD[0]).toBe(1); // rim ink 0 = veins
+      expect(m.evC[1]).toBe(1); // kick cells are ink 1, the body colour
+      total += slice;
+      cell += cellPart;
+      frames++;
+      m.step(audioFrame(), DT, PARAMS, ENV);
+    }
+    expect(frames).toBeGreaterThan(5); // it spreads, it doesn't pop
+    expect(Math.sqrt(total) - Math.sqrt(cell)).toBeCloseTo(0.0035, 6);
   });
 });
 
