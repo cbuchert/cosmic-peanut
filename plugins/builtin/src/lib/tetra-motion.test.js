@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createFollower, createSpring, quarterStats } from "./tetra-motion.js";
+import { createFollower, createSpring, createTumble, quarterStats, tetraVertices } from "./tetra-motion.js";
 
 describe("quarterStats", () => {
   it("splits the waveform into four consecutive quarters: RMS and absolute peak of each", () => {
@@ -105,5 +105,77 @@ describe("createSpring", () => {
       expect(Math.abs(s.value)).toBeLessThanOrEqual(1);
       expect(Number.isFinite(s.velocity)).toBe(true);
     }
+  });
+});
+
+describe("tetraVertices", () => {
+  it("is a regular tetrahedron: unit circumradius, centroid at the origin, six equal edges", () => {
+    const v = tetraVertices(new Float32Array(12));
+    const c = [0, 0, 0];
+    for (let i = 0; i < 4; i++) {
+      expect(Math.hypot(v[i * 3], v[i * 3 + 1], v[i * 3 + 2])).toBeCloseTo(1, 6);
+      for (let k = 0; k < 3; k++) c[k] += v[i * 3 + k] / 4;
+    }
+    for (const x of c) expect(x).toBeCloseTo(0, 6);
+    /** @type {number[]} */
+    const edges = [];
+    for (let i = 0; i < 4; i++)
+      for (let j = i + 1; j < 4; j++)
+        edges.push(Math.hypot(v[i * 3] - v[j * 3], v[i * 3 + 1] - v[j * 3 + 1], v[i * 3 + 2] - v[j * 3 + 2]));
+    expect(edges).toHaveLength(6);
+    for (const e of edges) expect(e).toBeCloseTo(Math.sqrt(8 / 3), 5);
+  });
+});
+
+describe("createTumble", () => {
+  /** Rotation angle between two unit quaternions. */
+  const angle = (/** @type {ArrayLike<number>} */ a, /** @type {ArrayLike<number>} */ b) =>
+    2 * Math.acos(Math.min(1, Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3])));
+
+  it("stays a unit quaternion and turns smoothly at the requested rate (rad/s)", () => {
+    const t = createTumble();
+    const prev = new Float64Array(4);
+    let total = 0;
+    for (let i = 0; i < 60 * 60; i++) {
+      prev.set(t.q);
+      t.step(1 / 60, 0.4, false, 0);
+      const q = t.q;
+      expect(Math.hypot(q[0], q[1], q[2], q[3])).toBeCloseTo(1, 9);
+      const a = angle(prev, q);
+      expect(a).toBeLessThanOrEqual(0.4 / 60 + 1e-6); // no jumps
+      total += a;
+    }
+    expect(total).toBeGreaterThan(0.4 * 60 * 0.9);
+    const still = createTumble();
+    for (let i = 0; i < 100; i++) still.step(1 / 60, 0, false, 0);
+    expect(angle(still.q, [0, 0, 0, 1])).toBeCloseTo(0, 9);
+  });
+
+  it("a beat kicks the spin up briefly; it springs back to the base rate", () => {
+    const t = createTumble();
+    for (let i = 0; i < 60; i++) t.step(1 / 60, 0.3, false, 0);
+    expect(t.rate).toBeCloseTo(0.3, 6);
+    t.step(1 / 60, 0.3, true, 1);
+    let top = 0;
+    for (let i = 0; i < 30; i++) top = Math.max(top, t.step(1 / 60, 0.3, false, 0));
+    expect(top).toBeGreaterThan(0.45);
+    expect(top).toBeLessThan(0.3 + 2); // bounded kick
+    for (let i = 0; i < 180; i++) t.step(1 / 60, 0.3, false, 0);
+    expect(t.rate).toBeCloseTo(0.3, 2);
+  });
+
+  it("writes a column-major orthonormal 3x3 rotation matrix", () => {
+    const t = createTumble();
+    for (let i = 0; i < 97; i++) t.step(1 / 60, 1.3, i % 20 === 0, 0.8);
+    const m = t.matrix(new Float32Array(9));
+    for (let c = 0; c < 3; c++) {
+      expect(Math.hypot(m[c * 3], m[c * 3 + 1], m[c * 3 + 2])).toBeCloseTo(1, 5);
+      const d = (c + 1) % 3;
+      expect(m[c * 3] * m[d * 3] + m[c * 3 + 1] * m[d * 3 + 1] + m[c * 3 + 2] * m[d * 3 + 2]).toBeCloseTo(0, 5);
+    }
+    // det = +1: a rotation, not a reflection
+    const det =
+      m[0] * (m[4] * m[8] - m[7] * m[5]) - m[3] * (m[1] * m[8] - m[7] * m[2]) + m[6] * (m[1] * m[5] - m[4] * m[2]);
+    expect(det).toBeCloseTo(1, 5);
   });
 });
