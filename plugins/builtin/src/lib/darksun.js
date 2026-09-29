@@ -137,3 +137,133 @@ export function createSurge() {
     },
   };
 }
+
+/**
+ * @typedef {object} Layout drawing-buffer pixels, y down from the top
+ * @property {number} horizon y of the horizon line
+ * @property {number} sunX
+ * @property {number} sunY
+ * @property {number} sunR disc radius
+ * @property {number} rangeHalf half-width of the inverted range
+ * @property {number} rangeDepth depth of a full-level peak below the horizon
+ * @property {number} beamWidth the beam's base half-width
+ * @property {number} unit min(w, h)
+ */
+
+/**
+ * The cover's composition, scaled by min(w, h) so it holds in landscape, portrait and small
+ * windows: horizon at half height; the sun centred at 22 % from the top (lower if its corona would
+ * clip the top edge); the range centred, `rangeWidth` of the width across, hanging up to
+ * 0.16 · min(w, h) · rangeDepth (never more than 80 % of the way to the bottom).
+ * @param {number} w
+ * @param {number} h
+ * @param {{ sunSize: number, rangeWidth: number, rangeDepth: number }} o
+ * @param {Layout} out
+ * @returns {Layout}
+ */
+export function layout(w, h, o, out) {
+  const unit = Math.min(w, h);
+  const horizon = 0.5 * h;
+  const r = 0.085 * unit * o.sunSize;
+  out.unit = unit;
+  out.horizon = horizon;
+  out.sunX = 0.5 * w;
+  out.sunR = r;
+  out.sunY = Math.max(0.22 * h, 1.2 * r);
+  out.rangeHalf = 0.5 * o.rangeWidth * w;
+  out.rangeDepth = Math.min(0.16 * unit * o.rangeDepth, 0.8 * (h - horizon));
+  out.beamWidth = 0.004 * unit;
+  return out;
+}
+
+/** Manifest defaults and ranges of the number params (tests/test_builtin_manifests.py pins them). */
+export const DEFAULTS = { reactivity: 1, rangeWidth: 0.5, rangeDepth: 1, beam: 1, sunSize: 1 };
+/** @type {Record<keyof typeof DEFAULTS, [number, number]>} */
+export const RANGES = {
+  reactivity: [0, 2],
+  rangeWidth: [0.3, 0.7],
+  rangeDepth: [0.3, 2],
+  beam: [0, 2],
+  sunSize: [0.5, 1.6],
+};
+/** Under Reduce motion: drift/rotation scale, and the reactivity used while it's at its default. */
+export const REDUCED_MOTION = 0.4;
+export const REDUCED_REACTIVITY = 0.6;
+
+/**
+ * @typedef {object} Resolved
+ * @property {number} reactivity
+ * @property {number} rangeWidth
+ * @property {number} rangeDepth
+ * @property {number} beam
+ * @property {number} sunSize
+ * @property {number} motion scale for every slow drift and rotation
+ */
+
+/**
+ * Number params clamped to their ranges (NaN → default), plus a motion scale. Reduce motion slows
+ * all drift and, while Reactivity sits at its default, softens it; a value the user chose stays.
+ * @param {Readonly<Record<string, unknown>>} p `ctx.params`
+ * @param {boolean} reduceMotion
+ * @param {Resolved} out
+ */
+export function resolveParams(p, reduceMotion, out) {
+  for (const k of /** @type {(keyof typeof DEFAULTS)[]} */ (Object.keys(DEFAULTS))) {
+    const v = Number(p[k]);
+    const [lo, hi] = RANGES[k];
+    out[k] = Number.isFinite(v) ? (v < lo ? lo : v > hi ? hi : v) : DEFAULTS[k];
+  }
+  out.motion = reduceMotion ? REDUCED_MOTION : 1;
+  if (reduceMotion && out.reactivity === DEFAULTS.reactivity) out.reactivity = REDUCED_REACTIVITY;
+  return out;
+}
+
+/** Colour slots of a palette (vec3 each), in order. */
+const SLOTS = ["SKY_TOP", "SKY_LOW", "GROUND", "WASH", "GLOW", "RIM", "DISC", "CORONA"];
+/** @type {Record<string, number[][]>} same order as SLOTS */
+const TABLE = {
+  // The cover: ash-grey sky over salmon, dark mauve-brown ground, near-white light.
+  dusk: [
+    [0.3, 0.3, 0.32],
+    [0.93, 0.5, 0.52],
+    [0.16, 0.115, 0.115],
+    [0.34, 0.25, 0.25],
+    [1, 0.93, 0.92],
+    [1, 0.88, 0.86],
+    [0.07, 0.06, 0.065],
+    [0.85, 0.36, 0.36],
+  ],
+  ash: [[0.29, 0.29, 0.29], [0.72, 0.72, 0.72], [0.12, 0.12, 0.12], [0.26, 0.26, 0.26], [0.97, 0.97, 0.97], [0.95, 0.95, 0.95], [0.06, 0.06, 0.06], [0.6, 0.6, 0.6]],
+  teal: [[0.16, 0.22, 0.26], [0.45, 0.78, 0.78], [0.06, 0.12, 0.13], [0.14, 0.26, 0.27], [0.88, 1, 0.98], [0.85, 1, 0.97], [0.04, 0.07, 0.08], [0.3, 0.7, 0.7]],
+  gold: [[0.3, 0.26, 0.22], [0.96, 0.7, 0.4], [0.16, 0.11, 0.07], [0.33, 0.23, 0.15], [1, 0.95, 0.84], [1, 0.92, 0.75], [0.07, 0.05, 0.04], [0.9, 0.55, 0.25]],
+};
+
+/** Palette names (manifest order) and slot indices (vec3 index into a palette buffer). */
+export const PALETTES = {
+  names: Object.keys(TABLE),
+  SIZE: SLOTS.length * 3,
+  SKY_TOP: 0,
+  SKY_LOW: 1,
+  GROUND: 2,
+  WASH: 3,
+  GLOW: 4,
+  RIM: 5,
+  DISC: 6,
+  CORONA: 7,
+};
+
+/**
+ * Fill `out` (PALETTES.SIZE floats, 0–1) with a palette's colours; unknown names → dusk.
+ * @param {unknown} name
+ * @param {Float32Array} out
+ */
+export function palette(name, out) {
+  const t = TABLE[typeof name === "string" && Object.hasOwn(TABLE, name) ? name : "dusk"];
+  for (let i = 0; i < t.length; i++) for (let c = 0; c < 3; c++) out[i * 3 + c] = t[i][c];
+  return out;
+}
+
+/** Backdrop "none" leaves sky and ground transparent; anything else paints them. @param {unknown} b */
+export function isPainted(b) {
+  return b !== "none";
+}

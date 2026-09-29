@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { BEAM_BRIGHT, BEAM_WIDTH, createBeam, createDiamond, createSun, createSurge, DIAMOND_RATE, REACH_MAX, REACH_MIN, RIM_MAX, RIM_MIN } from "./darksun.js";
+import { DEFAULTS, isPainted, layout, PALETTES, palette, resolveParams, BEAM_BRIGHT, BEAM_WIDTH, createBeam, createDiamond, createSun, createSurge, DIAMOND_RATE, REACH_MAX, REACH_MIN, RIM_MAX, RIM_MIN } from "./darksun.js";
 
 describe("createSun: bass swells the rim and the corona's reach", () => {
   it("is bounded and smooth under violent kicks, and grows with the bass", () => {
@@ -116,5 +116,104 @@ describe("createSurge: beats flare the beam and the horizon, flash-limited", () 
   it("with reduceFlashing, a 10 Hz strobe of onsets starts at most 3 flares per second", () => {
     expect(risesPerSecond(false)).toBeGreaterThan(8);
     expect(risesPerSecond(true)).toBeLessThanOrEqual(3);
+  });
+});
+
+describe("layout", () => {
+  const sizes = [
+    [2560, 1440],
+    [1440, 2560],
+    [3440, 1440],
+    [400, 300],
+    [300, 900],
+    [1000, 1000],
+  ];
+  const opts = { sunSize: 1, rangeWidth: 0.5, rangeDepth: 1 };
+
+  it("puts the horizon at half height and the sun top-middle, clear of the edge and the horizon", () => {
+    for (const [w, h] of sizes) {
+      for (const sunSize of [0.5, 1, 1.6]) {
+        const L = layout(w, h, { ...opts, sunSize }, /** @type {any} */ ({}));
+        const tag = `${w}x${h} sun ${sunSize}`;
+        expect(L.horizon, tag).toBeCloseTo(h / 2, 6);
+        expect(L.sunX, tag).toBeCloseTo(w / 2, 6);
+        expect(L.sunY, tag).toBeGreaterThanOrEqual(0.18 * h);
+        expect(L.sunY - 1.2 * L.sunR, tag).toBeGreaterThanOrEqual(0); // rim clear of the top
+        expect(L.sunY + 1.3 * L.sunR, tag).toBeLessThanOrEqual(L.horizon); // well above the horizon
+        expect(L.sunR, tag).toBeGreaterThan(0.02 * Math.min(w, h));
+      }
+    }
+  });
+
+  it("centres the range on the requested width; its depth and the beam scale with min(w, h)", () => {
+    for (const [w, h] of sizes) {
+      const L = layout(w, h, opts, /** @type {any} */ ({}));
+      const tag = `${w}x${h}`;
+      expect(L.rangeHalf, tag).toBeCloseTo(0.25 * w, 6);
+      expect(L.rangeDepth, tag).toBeGreaterThan(0.1 * Math.min(w, h));
+      expect(L.rangeDepth, tag).toBeLessThanOrEqual(0.8 * (h - L.horizon)); // never reaches the bottom
+      expect(L.beamWidth, tag).toBeGreaterThan(0);
+      expect(L.beamWidth, tag).toBeLessThan(0.03 * Math.min(w, h));
+      const big = layout(2 * w, 2 * h, opts, /** @type {any} */ ({}));
+      for (const k of /** @type {const} */ (["horizon", "sunX", "sunY", "sunR", "rangeHalf", "rangeDepth", "beamWidth"]))
+        expect(big[k], `${tag} ${k}`).toBeCloseTo(2 * L[k], 4);
+      const deep = layout(w, h, { ...opts, rangeDepth: 2 }, /** @type {any} */ ({}));
+      expect(deep.rangeDepth, tag).toBeGreaterThan(L.rangeDepth);
+      expect(deep.rangeDepth, tag).toBeLessThanOrEqual(0.8 * (h - L.horizon));
+    }
+  });
+});
+
+describe("palette and backdrop", () => {
+  const colors = (/** @type {unknown} */ name) => palette(name, new Float32Array(PALETTES.SIZE));
+  const sat = (/** @type {Float32Array} */ c, /** @type {number} */ i) =>
+    Math.max(c[i], c[i + 1], c[i + 2]) - Math.min(c[i], c[i + 1], c[i + 2]);
+
+  it("offers dusk (default), ash, teal and gold; anything else is dusk", () => {
+    expect(PALETTES.names).toEqual(["dusk", "ash", "teal", "gold"]);
+    const all = PALETTES.names.map(colors);
+    for (const c of all) for (const v of c) expect(v >= 0 && v <= 1).toBe(true);
+    for (let a = 0; a < all.length; a++)
+      for (let b = a + 1; b < all.length; b++) expect(Array.from(all[a])).not.toEqual(Array.from(all[b]));
+    expect(Array.from(colors("nope"))).toEqual(Array.from(all[0]));
+    expect(Array.from(colors(undefined))).toEqual(Array.from(all[0]));
+    expect(Array.from(colors("constructor"))).toEqual(Array.from(all[0]));
+  });
+
+  it("dusk is the cover's ash-grey sky over a salmon-pink horizon; ash is monochrome", () => {
+    const d = colors("dusk");
+    const top = PALETTES.SKY_TOP * 3;
+    const low = PALETTES.SKY_LOW * 3;
+    expect(sat(d, top)).toBeLessThan(0.12); // ash grey
+    expect(d[low]).toBeGreaterThan(d[low + 1] + 0.2); // salmon: red well over green ...
+    expect(d[low + 2]).toBeGreaterThan(d[low + 1] - 0.05); // ... with a touch of blue, not orange
+    const ash = colors("ash");
+    for (let i = 0; i < PALETTES.SIZE; i += 3) expect(sat(ash, i), `colour ${i / 3}`).toBeLessThan(1e-6);
+  });
+
+  it("paints the sky and ground unless the backdrop is none", () => {
+    expect(isPainted("painted")).toBe(true);
+    expect(isPainted("none")).toBe(false);
+    expect(isPainted(undefined)).toBe(true);
+  });
+});
+
+describe("resolveParams", () => {
+  const base = { reactivity: 1, rangeWidth: 0.5, rangeDepth: 1, beam: 1, sunSize: 1, palette: "dusk", backdrop: "painted" };
+
+  it("passes the params through, clamped, with full motion", () => {
+    const r = resolveParams({ ...base, reactivity: 1.4, rangeWidth: 9, sunSize: NaN }, false, /** @type {any} */ ({}));
+    expect(r.reactivity).toBe(1.4);
+    expect(r.rangeWidth).toBe(0.7);
+    expect(r.sunSize).toBe(DEFAULTS.sunSize);
+    expect(r.motion).toBe(1);
+  });
+
+  it("Reduce motion calms the defaults (slower drift, softer reactivity) but keeps what the user chose", () => {
+    const calm = resolveParams(base, true, /** @type {any} */ ({}));
+    expect(calm.motion).toBeLessThan(0.6);
+    expect(calm.reactivity).toBeLessThan(DEFAULTS.reactivity);
+    const chosen = resolveParams({ ...base, reactivity: 1.5 }, true, /** @type {any} */ ({}));
+    expect(chosen.reactivity).toBe(1.5);
   });
 });
