@@ -148,7 +148,7 @@ void main() {
 
   float v = 0.0;
   if (r > outer - 0.02) {
-    // ---- Corona: radially stretched, domain-warped ridged noise, gated by the level per angle.
+    // ---- Corona: domain-warped dendrite trees (tree()), as long as the level at this angle.
     float L = 0.055 + u_reach * pow(lvl, 0.8) + 0.22 * flare * (0.4 + lvl);
     float t = rho / L;
     float corona = 0.0;

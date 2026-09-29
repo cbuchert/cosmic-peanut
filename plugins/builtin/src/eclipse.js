@@ -12,8 +12,11 @@
  * ring's edges; bass swells the ring and shrinks the disc; onsets launch flares that travel out
  * through the corona. The swell and flares go through the flash limiter together.
  *
- * GPU: one full-screen pass in polar coordinates (shaders/eclipse/eclipse.frag) plus a 256 × 2
- * R16F texture (row 0 levels, row 1 ripple) uploaded each frame.
+ * GPU: a 256 × 2 R16F texture (row 0 levels, row 1 ripple) uploaded each frame; the marbled
+ * clouds' smooth fields at a third of the resolution (shaders/eclipse/clouds.frag; at full res the
+ * clouds tripled the frame's GPU time); then one full-screen pass in polar coordinates
+ * (shaders/eclipse/eclipse.frag) draws the disc, ring, dendrite corona (procedural branching trees
+ * in a domain-warped space) and cuts the clouds' crisp edges and streaks from the fields.
  */
 import {
   SECTORS,
