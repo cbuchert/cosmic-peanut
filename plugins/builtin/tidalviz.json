@@ -203,6 +203,24 @@
         { "id": "stripes", "type": "select", "label": "Stripes", "options": ["black & white", "black only"], "default": "black & white" },
         { "id": "size", "type": "number", "label": "Skull size", "min": 0.5, "max": 1.5, "step": 0.01, "default": 1 }
       ]
+    },
+    {
+      "id": "darksun",
+      "name": "Dark Sun",
+      "description": "After Mogwai's Every Country's Sun: a dark sun swells with the bass above an upside-down horizon, whose inverted mountain range is the live spectrum, with a beam of light falling from its heart on every beat.",
+      "author": "Tidalviz",
+      "entry": "src/darksun.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/darksun.jpg",
+      "params": [
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "rangeWidth", "type": "number", "label": "Range width", "min": 0.3, "max": 0.7, "step": 0.01, "default": 0.5 },
+        { "id": "rangeDepth", "type": "number", "label": "Range depth", "min": 0.3, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "beam", "type": "number", "label": "Beam", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "sunSize", "type": "number", "label": "Sun size", "min": 0.5, "max": 1.6, "step": 0.01, "default": 1 },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["dusk", "ash", "teal", "gold"], "default": "dusk" },
+        { "id": "backdrop", "type": "select", "label": "Backdrop", "options": ["painted", "none"], "default": "painted" }
+      ]
     }
   ]
 }

@@ -25,6 +25,7 @@ VIZ = {
     "tentacube": "builtin",
     "tiedye": "builtin",
     "skull": "builtin",
+    "darksun": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }

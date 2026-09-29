@@ -44,6 +44,7 @@ def test_builtin_renderers():
         "tentacube": ("three", ["three"]),
         "tiedye": ("webgl2", []),
         "skull": ("webgl2", []),
+        "darksun": ("webgl2", []),
     }
 
 
@@ -367,3 +368,40 @@ def test_skull_manifest():
     assert params["stripes"]["default"] == "black & white"
     for f in ("fullscreen.vert", "opart.glsl", "skull.frag", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/skull" / f).is_file(), f
+
+
+def test_darksun_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "darksun"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Dark Sun",
+        "src/darksun.js",
+        "webgl2",
+        "thumbs/darksun.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "reactivity",
+        "rangeWidth",
+        "rangeDepth",
+        "beam",
+        "sunSize",
+        "palette",
+        "backdrop",
+    ]
+    # lib/darksun.js DEFAULTS / RANGES mirror these.
+    got = {
+        k: (p["min"], p["max"], p["default"]) for k, p in params.items() if p["type"] == "number"
+    }
+    assert got == {
+        "reactivity": (0, 2, 1),
+        "rangeWidth": (0.3, 0.7, 0.5),
+        "rangeDepth": (0.3, 2, 1),
+        "beam": (0, 2, 1),
+        "sunSize": (0.5, 1.6, 1),
+    }
+    assert params["palette"]["options"] == ["dusk", "ash", "teal", "gold"]
+    assert params["palette"]["default"] == "dusk"
+    assert params["backdrop"]["options"] == ["painted", "none"]
+    assert params["backdrop"]["default"] == "painted"
+    for f in ("fullscreen.vert", "darksun.frag"):
+        assert (REPOS["builtin"] / "shaders/darksun" / f).is_file(), f
