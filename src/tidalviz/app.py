@@ -51,10 +51,17 @@ def main(argv: list[str] | None = None) -> None:
     import webview  # type: ignore[import-untyped]
 
     from tidalviz.host import Host
-    from tidalviz.window import PyWebviewWindow
+
+    if sys.platform == "darwin":
+        from tidalviz.window import PyWebviewWindow as Window
+    else:
+        from tidalviz.window_gtk import GtkWindow as Window
+        from tidalviz.window_gtk import configure_gl_environment
+
+        configure_gl_environment()  # before GTK/WebKit start; the web process inherits it
 
     dev = args.dev is not None
-    window = PyWebviewWindow()
+    window = Window()
     host = Host(
         root=args.home or default_root(),
         builtin_dirs=builtin_dirs(),
