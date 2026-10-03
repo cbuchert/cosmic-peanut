@@ -9,6 +9,7 @@ import contextlib
 import logging
 import struct
 import subprocess
+import sys
 import time
 from collections import deque
 from collections.abc import Callable, Coroutine, Sequence
@@ -21,10 +22,10 @@ import psutil
 from tidalviz.bench import BenchRecorder
 from tidalviz.capture import (
     AudioSource,
-    CatapAppSource,
-    CatapSystemSource,
     SyntheticSource,
+    app_source,
     list_audio_apps,
+    system_source,
 )
 from tidalviz.pipeline import AudioPipeline
 from tidalviz.plugins import DevFolderWatcher, ManifestError, PluginRegistry
@@ -42,7 +43,12 @@ CLICK_INTERVAL_S = 2.0
 RECOVER_INTERVAL_S = 60.0  # a web view that keeps failing after a reload must not loop
 STATS_INTERVAL_S = 1.0
 # System Settings → Privacy & Security → Screen & System Audio Recording (process taps).
-PERMISSIONS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+# Linux has no such permission (PipeWire capture is unrestricted), so there is nothing to open.
+PERMISSIONS_URL: str | None = (
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+    if sys.platform == "darwin"
+    else None
+)
 # Settings the shell owns; anything else in a `settings` message is ignored.
 SHELL_SETTINGS = (
     "quality",
@@ -71,11 +77,11 @@ def open_url(url: str) -> None:
 def make_source(source_id: str) -> AudioSource:
     """`system`, `app:<pid>` or `synthetic:<kind>` → a capture source."""
     if source_id == "system":
-        return CatapSystemSource()
+        return system_source()
     if source_id.startswith("app:"):
         pid = int(source_id.removeprefix("app:"))
         app = next(a for a in list_audio_apps() if a.pid == pid)
-        return CatapAppSource(app.name)
+        return app_source(app)
     if source_id.startswith("synthetic:"):
         return SyntheticSource(source_id.removeprefix("synthetic:"))
     raise ValueError(f"unknown source {source_id!r}")
@@ -319,7 +325,8 @@ class Host:
             case "remove":
                 self._spawn(self._registry_op("Remove", self.registry.remove, msg["repo"]))
             case "openPermissions":
-                self._open_url(PERMISSIONS_URL)
+                if PERMISSIONS_URL is not None:
+                    self._open_url(PERMISSIONS_URL)
             case "addFolder":
                 self._spawn(self._add_folder(msg.get("path")))
             case "window":

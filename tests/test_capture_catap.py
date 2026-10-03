@@ -1,4 +1,5 @@
 import os
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -6,6 +7,9 @@ from typing import Any
 
 import numpy as np
 import pytest
+
+if sys.platform != "darwin":
+    pytest.skip("catap (Core Audio taps) is macOS-only", allow_module_level=True)
 
 from tidalviz.capture import catap_source
 from tidalviz.capture.catap_source import CatapSystemSource

@@ -76,7 +76,11 @@ class AudioSource(Protocol):
 OnSamples = Callable[[NDArray[float32], float], None]
 #   samples: shape (n, channels) float32, only valid during the call (copy once, into the ring)
 #   t: host time.monotonic() of the LAST sample in the block
-# Implementations: CatapSystemSource, CatapAppSource(name), FileSource(wav), SyntheticSource(kind)
+# Implementations: CatapSystemSource, CatapAppSource(name)            (macOS)
+#                  PipeWireSystemSource, PipeWireAppSource(app)       (Linux)
+#                  FileSource(wav), SyntheticSource(kind)             (everywhere)
+# `tidalviz.capture` exports the platform's pair as system_source() / app_source(app) and
+# list_audio_apps() -> AudioApp(id "app:<pid>", name, pid); the host never names a backend.
 # Failures: sources expose `failed: threading.Event`; the pipeline restarts them with backoff.
 
 # tidalviz/analysis
@@ -94,10 +98,11 @@ class FrameHub:                                      # lives on the asyncio loop
     def publish(self, data: bytes) -> None           # keeps only the newest; never queues
 ```
 
-Threads: catap worker → `on_samples` copies into the ring and returns. The analysis thread wakes
-each hop (512 samples), runs the `Analyzer`, encodes, and calls
-`loop.call_soon_threadsafe(hub.publish, data)`. The hub sends the newest frame to each client whose
-previous send has completed and drops the rest. Analysis pauses while no renderer is connected.
+Threads: catap worker (Linux: the `pw-record` reader thread) → `on_samples` copies into the ring
+and returns. The analysis thread wakes each hop (512 samples), runs the `Analyzer`, encodes, and
+calls `loop.call_soon_threadsafe(hub.publish, data)`. The hub sends the newest frame to each client
+whose previous send has completed and drops the rest. Analysis pauses while no renderer is
+connected.
 
 ## 3. HTTP servers
 
@@ -195,7 +200,7 @@ Shell → host:
 | `update` / `rollback` / `remove` | `repo` |
 | `enable` | `key` — re-enable a disabled visualizer |
 | `window` | `action: "fullscreen" \| "floatOnTop" \| "borderless" \| "quit"` |
-| `openPermissions` | — user pressed the permission-help button; host opens System Settings at the audio-capture privacy pane |
+| `openPermissions` | — user pressed the permission-help button; on macOS the host opens System Settings at the audio-capture privacy pane (Linux capture needs no permission: ignored) |
 
 ## 5. Shell ⇄ plugin iframe
 

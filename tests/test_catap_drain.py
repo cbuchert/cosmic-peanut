@@ -1,5 +1,9 @@
 """catap's drain thread polls its native ring every 1 ms; DrainPacer lets it sleep between chunks."""
 
+import sys
+
+import pytest
+
 from tidalviz.capture.catap_drain import DrainPacer
 
 P = 512 / 48000  # catap delivers one 512-frame chunk every ~10.7 ms
@@ -134,6 +138,7 @@ def test_install_leaves_a_recorder_without_the_hook_alone():
     assert not cd.install(type("Other", (), {}))
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="catap is macOS-only")
 def test_catap_source_paces_the_installed_catap():
     import catap.recorder
 

@@ -36,7 +36,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--bench", metavar="KEY", help="benchmark a visualizer and write a report")
     p.add_argument("--seconds", type=int, default=60, help="benchmark length")
     p.add_argument("--out", type=Path, default=Path("bench.json"), help="benchmark report path")
-    p.add_argument("--home", type=Path, help="data dir (default: ~/Library/Application Support)")
+    p.add_argument(
+        "--home",
+        type=Path,
+        help="data dir (default: ~/Library/Application Support; Linux: $XDG_DATA_HOME or ~/.local/share)",
+    )
     return p.parse_args(argv)
 
 
