@@ -59,8 +59,24 @@ _THREAD_IDENTIFIER_INFO, _THREAD_EXTENDED_INFO = 4, 5
 _libc: Any = None
 
 
+def _thread_cpu_proc() -> dict[int, ThreadCpu]:
+    """Linux: psutil reads /proc/self/task/<tid>/stat; the name is the kernel's `comm`."""
+    import psutil
+
+    out: dict[int, ThreadCpu] = {}
+    for t in psutil.Process().threads():
+        try:
+            name = Path(f"/proc/self/task/{t.id}/comm").read_text().strip()
+        except OSError:  # the thread exited between the two reads
+            continue
+        out[t.id] = ThreadCpu(t.id, name, t.user_time + t.system_time)
+    return out
+
+
 def thread_cpu() -> dict[int, ThreadCpu]:
     """CPU time of every thread in this process (Python and native), keyed by thread id."""
+    if sys.platform != "darwin":
+        return _thread_cpu_proc()
     global _libc
     if _libc is None:
         _libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
