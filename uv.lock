@@ -105,9 +105,9 @@ name = "catap"
 version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-coreaudio", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+    { name = "pyobjc-framework-coreaudio" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7c/03/43f3b7cc44c68723409ce92387160e257b0f8747be837e1801ee14cce64d/catap-0.6.0.tar.gz", hash = "sha256:e7c057d799c883a4b93a0f0b2e1e081992c356280d6bf2088d94c2a41504cc58", size = 159165, upload-time = "2026-08-25T19:02:01.703Z" }
 wheels = [
@@ -419,6 +419,12 @@ wheels = [
 ]
 
 [[package]]
+name = "pycairo"
+version = "1.29.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/26/7c/ab4637b028d9ee12280ab9342f28310e613d5ca30c4d72d2aebeaa6a4969/pycairo-1.29.1.tar.gz", hash = "sha256:4fbd26b4af24c9787d84cf5448e34eb8dca064b732479aaecd03109520eebd5f", size = 666272, upload-time = "2026-08-07T08:45:50.095Z" }
+
+[[package]]
 name = "pycparser"
 version = "3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -447,6 +453,15 @@ sdist = { url = "https://files.pythonhosted.org/packages/49/2e/ced460408999b33da
 wheels = [
     { url = "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl", hash = "sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9", size = 1250147, upload-time = "2026-08-17T08:02:44.912Z" },
 ]
+
+[[package]]
+name = "pygobject"
+version = "3.58.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pycairo" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a3/9b/473a5234ec86bce978d3583adc62441c84cc57181c4ea8a8978997c7f0c1/pygobject-3.58.0.tar.gz", hash = "sha256:45068697de3ffe46840ca369705f23118b34db4f7deb63f6eff079a6734ddcca", size = 1408568, upload-time = "2026-08-28T06:50:27.22Z" }
 
 [[package]]
 name = "pyinstaller"
@@ -761,13 +776,18 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
-    { name = "catap" },
+    { name = "catap", marker = "sys_platform == 'darwin'" },
     { name = "dulwich" },
     { name = "jsonschema" },
     { name = "numpy" },
     { name = "psutil" },
     { name = "pywebview" },
     { name = "watchfiles" },
+]
+
+[package.optional-dependencies]
+gtk = [
+    { name = "pygobject", marker = "sys_platform == 'linux'" },
 ]
 
 [package.dev-dependencies]
@@ -786,14 +806,16 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.14.3" },
-    { name = "catap", specifier = "~=0.6.0" },
+    { name = "catap", marker = "sys_platform == 'darwin'", specifier = "~=0.6.0" },
     { name = "dulwich", specifier = ">=1.2.15" },
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "numpy", specifier = ">=2.5.3" },
     { name = "psutil", specifier = ">=7.2.2" },
+    { name = "pygobject", marker = "sys_platform == 'linux' and extra == 'gtk'", specifier = ">=3.50" },
     { name = "pywebview", specifier = ">=6.2.1" },
     { name = "watchfiles", specifier = ">=1.3.0" },
 ]
+provides-extras = ["gtk"]
 
 [package.metadata.requires-dev]
 build = [{ name = "pyinstaller", specifier = ">=6.22.3" }]

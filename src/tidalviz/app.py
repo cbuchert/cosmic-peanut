@@ -36,7 +36,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--bench", metavar="KEY", help="benchmark a visualizer and write a report")
     p.add_argument("--seconds", type=int, default=60, help="benchmark length")
     p.add_argument("--out", type=Path, default=Path("bench.json"), help="benchmark report path")
-    p.add_argument("--home", type=Path, help="data dir (default: ~/Library/Application Support)")
+    p.add_argument(
+        "--home",
+        type=Path,
+        help="data dir (default: ~/Library/Application Support; Linux: $XDG_DATA_HOME or ~/.local/share)",
+    )
     return p.parse_args(argv)
 
 
@@ -47,10 +51,17 @@ def main(argv: list[str] | None = None) -> None:
     import webview  # type: ignore[import-untyped]
 
     from tidalviz.host import Host
-    from tidalviz.window import PyWebviewWindow
+
+    if sys.platform == "darwin":
+        from tidalviz.window import PyWebviewWindow as Window
+    else:
+        from tidalviz.window_gtk import GtkWindow as Window
+        from tidalviz.window_gtk import configure_gl_environment
+
+        configure_gl_environment()  # before GTK/WebKit start; the web process inherits it
 
     dev = args.dev is not None
-    window = PyWebviewWindow()
+    window = Window()
     host = Host(
         root=args.home or default_root(),
         builtin_dirs=builtin_dirs(),

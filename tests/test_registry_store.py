@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,9 +12,23 @@ from tidalviz.paths import AppPaths, default_root
 from tidalviz.plugins.store import RegistryFile, RepoRecord, atomic_write_json
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="Application Support is macOS-only")
 def test_default_root_is_application_support(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TIDALVIZ_HOME", raising=False)
     assert default_root() == Path.home() / "Library" / "Application Support" / "Tidalviz"
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="XDG data dir is the non-macOS default")
+def test_default_root_follows_xdg_data_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("TIDALVIZ_HOME", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    assert default_root() == tmp_path / "data" / "Tidalviz"
+    monkeypatch.delenv("XDG_DATA_HOME")
+    assert default_root() == Path.home() / ".local" / "share" / "Tidalviz"
+    monkeypatch.setenv("XDG_DATA_HOME", "relative/dir")  # the XDG spec: relative paths are ignored
+    assert default_root() == Path.home() / ".local" / "share" / "Tidalviz"
 
 
 def test_root_can_be_overridden_by_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

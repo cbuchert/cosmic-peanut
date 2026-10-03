@@ -1,0 +1,7 @@
+{
+  "include": ["src/tidalviz"],
+  "exclude": ["src/tidalviz/capture/catap_source.py"],
+  "strict": ["src/tidalviz"],
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Linux"
+}

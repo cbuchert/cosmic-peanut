@@ -3,6 +3,50 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Linux support (2026-10-02)
+
+**Machine (not the M4 Pro above):** Linux 7.2 (CachyOS), i9-12900KF, RTX 4090 (driver 615.71),
+PipeWire 1.6, WebKitGTK 2.52, Hyprland 0.56 on Wayland, 2560×1440 @ 60 Hz.
+
+**Capture** (`capture/pipewire_source.py`): `pw-record --raw` on a pipe, 512-frame blocks.
+`--latency 256` gives one block per 10.7 ms; 512 delivers two at once (a dropped hop). Per-app pids
+come from `application.process.id`, else `pipewire.sec.pid`. A per-app target is pinned with
+`node.dont-reconnect`: otherwise WirePlumber re-links `pw-record` to the microphone when the app's
+stream ends. The watchdog marks the source `failed` when `pw-record` delivers no data for 1 s (4 s
+before the first block, for a sink waking from suspend); silent audio still streams zero blocks.
+
+| Measure (pink noise via `speaker-test`) | Result | Budget / macOS note |
+| --- | --- | --- |
+| Block interval, 5 s | p1/p50/p99 10.61 / 10.67 / 10.72 ms | 10.67 ms ideal |
+| Headless host CPU, 60 s, `tools.cpu_budget` | **2.4%** (analysis 1.4, main 0.6, reader 0.2) | < 10% (macOS 6.6%) |
+| Orbit bench, fullscreen 2560×1440 | 58.5–59.5 fps, p99 33 ms, 0.9–2.9% dropped | 60 fps, p99 20 ms |
+| Audio-to-screen p95 (same runs) | 31.4–31.7 ms | 50 ms |
+| App with window, Orbit, 1440p (% of one core) | `tidalviz` **30–33%**, WebProcess 10% | **over the budget** (macOS 13.8%) |
+
+- **Windowed host CPU is 30–33%, over the 10% budget, and not fixed here.** The GTK main thread is
+  25% of it. `py-spy record --native` shows no Tidalviz Python on the hot path, only GTK/GDK and
+  NVIDIA's EGL-Wayland libraries; what wakes it ~92 times a second isn't established.
+- **Crash on NVIDIA + native Wayland, and the fix.** The app died ~1 s after launch (`Gdk-Message:
+  Error 71 (Protocol error)`). One variable at a time, 12 s launches (exit 124 = survived):
+
+  | Variant | Exit | Error 71 |
+  | --- | --- | --- |
+  | baseline | 1, dead in ~1 s | yes |
+  | `WEBKIT_DISABLE_DMABUF_RENDERER=1` | 124 | 0 |
+  | `__NV_DISABLE_EXPLICIT_SYNC=1` | 124 | 0 |
+  | `GDK_BACKEND=x11` | 124 | 0 |
+
+  `window_gtk.configure_gl_environment()` sets `__NV_DISABLE_EXPLICIT_SYNC=1` before GTK starts when
+  `/proc/driver/nvidia/version` exists; a value the user set wins (`=0` brings the crash back).
+- **Known gap: WebKitWebProcess segfaults on exit with the NVIDIA driver** (a core dump each
+  time): `libwebkit2gtk` destructors call into `libnvidia-eglcore` after the window has gone. The
+  app itself exits normally. Not fixed here.
+- Not measured: switching the default output mid-stream, Flatpak apps.
+- **Tried and dropped:** `WEBKIT_DISABLE_DMABUF_RENDERER=1` copies every frame through shared
+  memory (Orbit 51.6 fps, WebKitWebProcess at 94.5% CPU, against 59.5 fps and 10.3% CPU with DMA-BUF
+  kept); a Qt backend (WebEngine is Chromium, 524 MB); PyGObject as a default dependency (a bare
+  `uv sync` would fail without headers), hence the `gtk` extra.
+
 ## Visualizer batch: Tentacube, Tie-Dye, Skull Trip, Dark Sun, Eclipse, Marbling, Laminar, Tetraballs (2026-09-28)
 
 Built in parallel worktrees and merged one at a time. GPU times were measured on the M4 Pro at

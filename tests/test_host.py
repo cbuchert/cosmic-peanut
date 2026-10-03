@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -436,6 +437,7 @@ async def test_add_folder_with_a_path_registers_a_dev_repo(installer, http, tmp_
     assert any(v["id"] == "pulse" and v["dev"] for v in viz["visualizers"])
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="System Settings deep link is macOS-only")
 @pytest.mark.asyncio
 async def test_open_permissions_opens_the_audio_capture_privacy_pane(
     tmp_path: Path, window: FakeWindow, http
@@ -459,6 +461,40 @@ async def test_open_permissions_opens_the_audio_capture_privacy_pane(
         ]
     finally:
         await h.stop()
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="macOS opens System Settings instead")
+@pytest.mark.asyncio
+async def test_open_permissions_opens_nothing_where_capture_needs_no_permission(
+    tmp_path: Path, window: FakeWindow, http
+):
+    opened: list[str] = []
+    h = Host(
+        root=tmp_path / "home",
+        builtin_dirs=BUILTINS,
+        source_id="synthetic:demo",
+        window=window,
+        open_url=opened.append,
+    )
+    await h.start()
+    try:
+        shell = await connect(h, http)
+        await shell.next_json("hello")
+        await shell.send({"type": "openPermissions"})
+        await asyncio.sleep(0.2)
+        assert opened == []
+    finally:
+        await h.stop()
+
+
+def test_make_source_resolves_the_platform_capture_source():
+    from tidalviz.host import make_source
+
+    name = type(make_source("system")).__name__
+    assert name == ("CatapSystemSource" if sys.platform == "darwin" else "PipeWireSystemSource")
+    assert type(make_source("synthetic:demo")).__name__ == "SyntheticSource"
+    with pytest.raises(ValueError):
+        make_source("bogus")
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,7 @@ import time
 import numpy as np
 import pytest
 
-from tidalviz.capture import CatapSystemSource
+from tidalviz.capture import system_source
 from tidalviz.frame import SCALAR_INDEX
 from tidalviz.pipeline import AudioPipeline
 from tidalviz.transport.frame import decode
@@ -28,7 +28,7 @@ def test_live_system_capture_through_the_pipeline():
             frames.append(data)
 
     statuses: list[tuple[str, str]] = []
-    pipe = AudioPipeline(CatapSystemSource(), publish, on_status=lambda *a: statuses.append(a))
+    pipe = AudioPipeline(system_source(), publish, on_status=lambda *a: statuses.append(a))
     pipe.start()
     try:
         # catap's first start can take ~2 s, and its first buffers may be zeros.

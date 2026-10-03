@@ -18,6 +18,20 @@ jobs:
         continue-on-error: true
         run: uv run pytest -m perf
 
+  python-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run ruff check . && uv run ruff format --check .
+      # catap_source.py can't resolve `catap` off macOS; the macOS job type-checks it
+      - run: uv run pyright -p pyrightconfig.linux.json
+      - run: uv run pytest -m "not live and not e2e and not perf"
+      - name: perf checks (informational on shared runners)
+        continue-on-error: true
+        run: uv run pytest -m perf
+
   web:
     runs-on: macos-latest
     defaults:
@@ -41,4 +55,14 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --locked
       - run: uv run playwright install webkit
+      - run: uv run pytest -m e2e
+
+  e2e-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      # --with-deps: Playwright's WebKit needs Ubuntu's libraries (installed via apt)
+      - run: uv run playwright install --with-deps webkit
       - run: uv run pytest -m e2e

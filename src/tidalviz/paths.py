@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 
 def default_root() -> Path:
-    """`~/Library/Application Support/Tidalviz`, or `$TIDALVIZ_HOME` when set (tests, dev)."""
+    """`~/Library/Application Support/Tidalviz` on macOS, `$XDG_DATA_HOME/Tidalviz` (default
+    `~/.local/share`) elsewhere, or `$TIDALVIZ_HOME` when set (tests, dev)."""
     env = os.environ.get("TIDALVIZ_HOME")
     if env:
         return Path(env)
-    return Path.home() / "Library" / "Application Support" / "Tidalviz"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Tidalviz"
+    xdg = os.environ.get("XDG_DATA_HOME", "")
+    base = Path(xdg) if xdg and Path(xdg).is_absolute() else Path.home() / ".local" / "share"
+    return base / "Tidalviz"
 
 
 @dataclass(frozen=True, slots=True)
