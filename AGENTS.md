@@ -1,8 +1,8 @@
 # Tidalviz — guide for agents and developers
 
-Tidalviz captures macOS system audio, analyzes it in Python, and drives sandboxed web visualizer
-plugins in a WKWebView. The PRD is the source of truth for product scope; these docs are the
-source of truth for contracts:
+Tidalviz captures system audio (macOS: catap; Linux: PipeWire), analyzes it in Python, and drives
+sandboxed web visualizer plugins in a WKWebView (Linux: WebKitGTK). The PRD is the source of truth
+for product scope; these docs are the source of truth for contracts:
 
 | Doc | What it pins down |
 | --- | --- |
@@ -26,9 +26,13 @@ uv run pytest -m perf                     # wall-clock checks only (non-blocking
 uv run pytest -m live                     # needs real audio playing + capture permission
 uv run pytest -m e2e                      # Playwright/WebKit end to end
 uv run ruff check && uv run ruff format --check
-uv run pyright
+uv run pyright                            # Linux: uv run pyright -p pyrightconfig.linux.json
 uv run tidalviz --dev <plugin folder>     # run from source, Web Inspector on
 ```
+
+On Linux use `uv sync --extra gtk` / `uv run --extra gtk tidalviz` for the window (README → Linux).
+Platform code stays behind `sys.platform` guards (e.g. `capture/__init__.py`, `app.py`, `host.py`,
+`paths.py`, `tools/cpu_budget.py`) so each OS only imports its own backend.
 
 Web (Node is a dev-time tool only; the shell and SDK are plain ES modules with JSDoc types, so
 the runtime never needs a build step):
