@@ -245,6 +245,8 @@ export interface VisualizerManifestEntry {
   renderer: RendererKind;
   /** For webgpu entries: `id` of another entry in this manifest to use when WebGPU is unavailable. */
   fallback?: string;
+  /** webgl2 and three only: false creates the canvas without a depth buffer. Default true. */
+  depth?: boolean;
   /** Host-provided libraries. v1: "three". */
   libs?: "three"[];
   /** Repo-relative image path. */

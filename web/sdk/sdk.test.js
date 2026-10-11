@@ -97,6 +97,21 @@ describe("boot", () => {
     ]);
   });
 
+  it("passes the manifest's depth opt-out to the webgl2 context", async () => {
+    /** @type {any[]} */
+    const calls = [];
+    // @ts-ignore
+    HTMLCanvasElement.prototype.getContext = function (/** @type {string} */ kind, /** @type {any} */ opts) {
+      calls.push([kind, opts]);
+      return {};
+    };
+    const manifest = { ...OPTS.manifest, renderer: /** @type {const} */ ("webgl2"), depth: false };
+    const booted = boot({ ...OPTS, manifest }, { importModule: env({ frame: vi.fn() }).importModule });
+    sendInit(INIT, [fakePort()]);
+    await booted;
+    expect(calls[0]).toEqual(["webgl2", expect.objectContaining({ depth: false })]);
+  });
+
   it("handles webglcontextlost / restored on the canvas", async () => {
     const plugin = { frame: vi.fn(), dispose: vi.fn() };
     const e = env(plugin);

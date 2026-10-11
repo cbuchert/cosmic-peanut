@@ -30,12 +30,14 @@ export class RendererUnavailableError extends Error {
 /**
  * @param {import("./tidalviz").RendererKind} kind
  * @param {HTMLCanvasElement} canvas
- * @param {{ gpu?: GPU, importThree?: () => Promise<typeof import("three")>, fallback?: string }} deps
+ * @param {{ gpu?: GPU, importThree?: () => Promise<typeof import("three")>, fallback?: string, depth?: boolean }} deps
+ *   `depth: false` (the manifest's opt-out) drops the canvas's depth buffer
  * @returns {Promise<RendererHandles>}
  */
 export async function createRendererContext(kind, canvas, deps) {
   /** @type {RendererHandles} */
   const h = { ctx2d: null, gl: null, gpu: null, three: null };
+  const glOptions = deps.depth === false ? { ...GL_OPTIONS, depth: false } : GL_OPTIONS;
   switch (kind) {
     case "2d": {
       h.ctx2d = canvas.getContext("2d");
@@ -43,7 +45,7 @@ export async function createRendererContext(kind, canvas, deps) {
       return h;
     }
     case "webgl2": {
-      h.gl = /** @type {WebGL2RenderingContext | null} */ (canvas.getContext("webgl2", GL_OPTIONS));
+      h.gl = /** @type {WebGL2RenderingContext | null} */ (canvas.getContext("webgl2", glOptions));
       if (!h.gl) throw new RendererUnavailableError("WebGL2 is unavailable", deps.fallback);
       return h;
     }
@@ -70,7 +72,7 @@ export async function createRendererContext(kind, canvas, deps) {
     case "three": {
       if (!deps.importThree) throw new RendererUnavailableError("three.js is unavailable", deps.fallback);
       const THREE = await deps.importThree();
-      const renderer = new THREE.WebGLRenderer({ canvas, ...GL_OPTIONS });
+      const renderer = new THREE.WebGLRenderer({ canvas, ...glOptions });
       renderer.setPixelRatio(1); // the SDK sizes the drawing buffer in device pixels itself
       renderer.setClearColor(0x000000, 0);
       const aspect = (canvas.clientWidth || 1) / (canvas.clientHeight || 1);

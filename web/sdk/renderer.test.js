@@ -30,6 +30,12 @@ describe("createRendererContext", () => {
     });
   });
 
+  it("webgl2: a manifest's depth: false drops the canvas depth buffer", async () => {
+    const canvas = fakeCanvas({ webgl2: {} });
+    await createRendererContext("webgl2", canvas, { depth: false });
+    expect(canvas.getContext).toHaveBeenCalledWith("webgl2", { ...GL_OPTIONS, depth: false });
+  });
+
   it("webgl2: throws when unavailable", async () => {
     await expect(createRendererContext("webgl2", fakeCanvas({}), {})).rejects.toThrow(/WebGL2/);
   });
@@ -88,5 +94,22 @@ describe("createRendererContext", () => {
     /** @type {() => void} */ (h.reset)();
     expect(t.scene).toBeInstanceOf(REAL_THREE.Scene);
     expect(t.autoRender).toBe(true);
+  });
+
+  it("three: a manifest's depth: false reaches WebGLRenderer", async () => {
+    /** @type {any[]} */
+    const opts = [];
+    class FakeRenderer {
+      /** @param {any} o */
+      constructor(o) {
+        opts.push(o);
+        this.setPixelRatio = vi.fn();
+        this.setClearColor = vi.fn();
+      }
+    }
+    const THREE = { ...REAL_THREE, WebGLRenderer: FakeRenderer };
+    const canvas = fakeCanvas({});
+    await createRendererContext("three", canvas, { importThree: async () => /** @type {any} */ (THREE), depth: false });
+    expect(opts[0]).toEqual({ canvas, ...GL_OPTIONS, depth: false });
   });
 });

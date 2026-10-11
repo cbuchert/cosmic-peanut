@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://tidalviz.local/manifest.schema.json",
   "title": "Tidalviz manifest (tidalviz.json)",
-  "description": "Semantic rules the schema can't express are checked by the host too: unique visualizer ids, unique param ids per visualizer, number params need min < max and min <= default <= max, a select default must be one of its options, fallback is only allowed on webgpu entries and must name another non-webgpu entry, and the three renderer requires libs to include \"three\".",
+  "description": "Semantic rules the schema can't express are checked by the host too: unique visualizer ids, unique param ids per visualizer, number params need min < max and min <= default <= max, a select default must be one of its options, fallback is only allowed on webgpu entries and must name another non-webgpu entry, depth is only allowed on webgl2 and three entries, and the three renderer requires libs to include \"three\".",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -78,6 +78,9 @@
         },
         "fallback": {
           "$ref": "#/$defs/vizId"
+        },
+        "depth": {
+          "type": "boolean"
         },
         "libs": {
           "type": "array",

@@ -133,7 +133,7 @@ async function main() {
     },
   };
   // Same context options as web/sdk/renderer.js: transparent, premultiplied canvases.
-  const glOpts = { powerPreference: /** @type {const} */ ("high-performance"), antialias: false, preserveDrawingBuffer: false, alpha: true, premultipliedAlpha: true };
+  const glOpts = { powerPreference: /** @type {const} */ ("high-performance"), antialias: false, preserveDrawingBuffer: false, alpha: true, premultipliedAlpha: true, ...(entry.depth === false ? { depth: false } : {}) };
   /** @type {WebGL2RenderingContext | null} */
   let gl = null;
   if (entry.renderer === "2d") ctx.ctx2d = canvas.getContext("2d", { alpha: true });
