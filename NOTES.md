@@ -3,6 +3,26 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Blaze: flame-test materials and sparks (2026-10-15)
+
+Eleven new palettes after the original four: propane, copper, boron, sodium, lithium, strontium,
+potassium, calcium, barium (flame-test colours) and iron, nickel (sparks).
+
+- **Blackbody rendering:** a material is `soot` × the blackbody glow plus `line` × `strength` × t^1.2
+  (its emission lines/bands, filling the body more evenly than the soot), tone-mapped together.
+  Propane is nearly soot-free, hence blue. Display gamma flattens colour ratios hard, so strontium
+  and calcium need almost no green in their lines to read as red and brick orange.
+  **Simple rendering:** a keyed ramp through a hand-picked `swatch`.
+- **Iron and nickel barely tint a flame** (they burn like "natural"); they throw sparks:
+  `lib/sparks.js`, a 1,024-slot structure-of-arrays pool (swap-remove, no per-frame allocation)
+  spawned from the fuel line by rejection sampling on fuel, so sparks fly from the loud columns,
+  at a rate set by the bass stoke and onset flare. Gravity + drag arcs; colour is blackbody cooling
+  over life. Iron sparks fork into 3–5 short, hotter children (steel's carbon burst); nickel's are
+  mixed 70% toward white and never fork. Drawn as soft additive streaks (35 ms of motion) after the
+  composite. Spark motion runs on sim time, so Speed and reduce-motion slow it.
+- Known gap: the spark pass's GPU cost isn't measured (worst case 1,024 streaks, a 172 KB
+  `bufferSubData` per frame).
+
 ## Blaze: blackbody rendering (2026-10-15)
 
 A new *Rendering* param: **blackbody** (default) or **simple** (the original hand-keyed ramps,

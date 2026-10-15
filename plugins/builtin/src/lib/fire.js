@@ -182,7 +182,39 @@ export function simSize(width, height, detail) {
   return { width: Math.max(SIM_MIN, Math.round(w)), height: Math.max(SIM_MIN, Math.round(h)) };
 }
 
-export const PALETTES = ["natural", "blue gas", "green chemical", "ember mono"];
+export const PALETTES = [
+  "natural", "blue gas", "green chemical", "ember mono",
+  "propane", "copper", "boron", "sodium", "lithium", "strontium", "potassium", "calcium", "barium", "iron", "nickel",
+];
+
+/**
+ * Flame-test materials. Blackbody rendering: `soot` scales the blackbody glow (propane burns
+ * almost soot-free, hence blue) and `line` × `strength` is the colour of the material's emission
+ * lines/bands (linear RGB), added before the tone map. Simple rendering: a keyed ramp through
+ * `swatch` (display RGB). Iron and nickel barely tint a flame: they burn like "natural" and throw
+ * sparks instead (sparkKind, lib/sparks.js).
+ * @type {Record<string, { soot: number, line: number[], strength: number, swatch: number[] }>}
+ */
+const MATERIALS = {
+  propane: { soot: 0.1, line: [0.1, 0.28, 1.0], strength: 1.0, swatch: [0.25, 0.45, 1.0] },
+  copper: { soot: 0.2, line: [0.04, 0.85, 0.75], strength: 1.4, swatch: [0.1, 0.9, 0.8] },
+  boron: { soot: 0.15, line: [0.08, 1.0, 0.06], strength: 1.5, swatch: [0.3, 1.0, 0.2] },
+  sodium: { soot: 0.5, line: [1.0, 0.8, 0.08], strength: 1.6, swatch: [1.0, 0.82, 0.15] },
+  lithium: { soot: 0.2, line: [1.0, 0.0, 0.1], strength: 1.5, swatch: [1.0, 0.06, 0.2] },
+  strontium: { soot: 0.1, line: [1.0, 0.0, 0.02], strength: 1.5, swatch: [1.0, 0.1, 0.06] },
+  potassium: { soot: 0.15, line: [0.75, 0.3, 1.0], strength: 1.3, swatch: [0.8, 0.45, 1.0] },
+  calcium: { soot: 0.3, line: [1.0, 0.1, 0.02], strength: 1.4, swatch: [1.0, 0.42, 0.12] },
+  barium: { soot: 0.2, line: [0.5, 1.0, 0.2], strength: 1.3, swatch: [0.75, 1.0, 0.4] },
+};
+
+/**
+ * Which sparks a palette throws: "iron" (gold, forking) or "nickel" (white), else null.
+ * @param {string} palette
+ * @returns {"iron" | "nickel" | null}
+ */
+export function sparkKind(palette) {
+  return palette === "iron" || palette === "nickel" ? palette : null;
+}
 /** Rendering modes, default first (a test keeps tidalviz.json in step). */
 export const RENDERINGS = ["blackbody", "simple"];
 
@@ -225,6 +257,10 @@ const RAMPS = {
     1, 1.0, 0.5, 0.2,
   ],
 };
+for (const [name, m] of Object.entries(MATERIALS)) {
+  const [r, g, b] = m.swatch;
+  RAMPS[name] = [0, 0, 0, 0, 0.2, 0.3 * r, 0.3 * g, 0.3 * b, 0.55, r, g, b, 1, 0.4 * r + 0.6, 0.4 * g + 0.6, 0.4 * b + 0.6];
+}
 
 /**
  * Tetraballs' fire model (shaders/tetraballs/volume.glsl; a test keeps the two in step): heat t is
@@ -278,6 +314,14 @@ export function rampColor(palette, t, out, rendering) {
   if (rendering === "simple") return keyedColor(RAMPS[palette] ?? RAMPS.natural, x, out);
   blackbody(FLAME.kMin + FLAME.kSpan * x ** FLAME.kExp, bbTmp);
   const e = FLAME.gain * x ** FLAME.emitExp;
+  const m = MATERIALS[palette];
+  if (m) {
+    // Soot glow plus the material's emission, which fills the body more evenly (t^1.2).
+    const l = m.strength * x ** 1.2;
+    for (let c = 0; c < 3; c++) out[c] = tonemap(m.soot * bbTmp[c] * e + m.line[c] * l);
+    out[3] = Math.max(out[0], out[1], out[2]);
+    return out;
+  }
   const r = tonemap(bbTmp[0] * e);
   const g = tonemap(bbTmp[1] * e);
   const b = tonemap(bbTmp[2] * e);

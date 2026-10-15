@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import manifest from "../../tidalviz.json";
 // @ts-expect-error -- a Node builtin (tests run in Node); the web tsconfig has no @types/node.
 import { readFileSync } from "node:fs";
-import { blackbody, createAutoGain, createDrive, createEnvelope, createStepper, FLAME, fillRampLut, motion, MOTION_DEFAULTS, PALETTES, rampColor, RENDERINGS, resampleSeed, simSize } from "./fire.js";
+import { blackbody, createAutoGain, createDrive, createEnvelope, createStepper, FLAME, fillRampLut, motion, MOTION_DEFAULTS, PALETTES, rampColor, RENDERINGS, sparkKind, resampleSeed, simSize } from "./fire.js";
 
 const DT = 1 / 60;
 
@@ -322,6 +322,65 @@ describe("palettes", () => {
       expect(c[1] / c[0]).toBeLessThan(0.7);
       expect(c[3]).toBeLessThanOrEqual(nat[3] + 1e-6);
     }
+  });
+});
+
+describe("materials", () => {
+  const c = new Float32Array(4);
+  /** Mid-flame colour of a palette in a rendering. @param {string} p @param {string} [r] */
+  const mid = (p, r) => [...rampColor(p, 0.5, c, r)];
+
+  it("are palettes, after the original four", () => {
+    expect(PALETTES.slice(0, 4)).toEqual(["natural", "blue gas", "green chemical", "ember mono"]);
+    expect(PALETTES.slice(4)).toEqual([
+      "propane", "copper", "boron", "sodium", "lithium", "strontium", "potassium", "calcium", "barium", "iron", "nickel",
+    ]);
+    const blaze = manifest.visualizers.find((/** @type {{ id: string }} */ v) => v.id === "blaze");
+    const param = /** @type {{ options?: string[] } | undefined} */ (blaze?.params.find((q) => q.id === "palette"));
+    expect(param?.options).toEqual(PALETTES);
+  });
+
+  it("burn in their flame-test colours, in both renderings", () => {
+    for (const r of ["blackbody", "simple"]) {
+      const [pr, pg, pb] = mid("propane", r);
+      expect(pb, `propane ${r}`).toBeGreaterThan(Math.max(pr, pg)); // blue
+      const [cr, cg, cb] = mid("copper", r);
+      expect(Math.min(cg, cb), `copper ${r}`).toBeGreaterThan(cr); // blue-green
+      const [br, bg, bb] = mid("boron", r);
+      expect(bg, `boron ${r}`).toBeGreaterThan(1.4 * Math.max(br, bb)); // vivid green
+      const [nr, ng, nb] = mid("sodium", r);
+      expect(ng / nr, `sodium ${r}`).toBeGreaterThan(0.6); // yellow, not orange
+      expect(ng, `sodium ${r}`).toBeGreaterThan(2 * nb);
+      const [lr, lg, lb] = mid("lithium", r);
+      expect(lr, `lithium ${r}`).toBeGreaterThan(3 * lg); // crimson: red with a little blue
+      expect(lb, `lithium ${r}`).toBeGreaterThan(lg);
+      const [sr, sg] = mid("strontium", r);
+      expect(sr, `strontium ${r}`).toBeGreaterThan(4 * sg); // deep red
+      const [kr, kg, kb] = mid("potassium", r);
+      expect(Math.min(kr, kb), `potassium ${r}`).toBeGreaterThan(kg); // lilac
+      const [ar, ag, ab] = mid("calcium", r);
+      expect(ar, `calcium ${r}`).toBeGreaterThan(ag); // brick orange
+      expect(ag, `calcium ${r}`).toBeGreaterThan(ab);
+      expect(ag / ar, `calcium ${r}`).toBeLessThan(0.6);
+      const [xr, xg, xb] = mid("barium", r);
+      expect(xg, `barium ${r}`).toBeGreaterThan(xr); // pale apple green
+      expect(xr, `barium ${r}`).toBeGreaterThan(xb);
+    }
+  });
+
+  it("iron and nickel burn like the natural fire and throw sparks; nothing else does", () => {
+    const d = new Float32Array(4);
+    for (const m of ["iron", "nickel"]) {
+      for (const r of ["blackbody", "simple"]) {
+        rampColor(m, 0.5, c, r);
+        rampColor("natural", 0.5, d, r);
+        expect([...c], `${m} ${r}`).toEqual([...d]);
+      }
+    }
+    expect(sparkKind("iron")).toBe("iron");
+    expect(sparkKind("nickel")).toBe("nickel");
+    for (const p of PALETTES.filter((q) => q !== "iron" && q !== "nickel")) expect(sparkKind(p), p).toBeNull();
+    expect(sparkKind("plaid")).toBeNull();
   });
 });
 

@@ -19,7 +19,8 @@
  *   velocity  self-advection, buoyancy, curl-noise turbulence, vorticity confinement, jets,
  *             each column pulled toward its rise speed
  *   scalar    advect temperature + fuel, feed fuel from the seed along the bottom, jet heat, burn, cool
- * and composite the temperature through the palette ramp onto the transparent canvas. Rendering
+ * and composite the temperature through the palette ramp onto the transparent canvas (the iron
+ * and nickel palettes add sparks on top, lib/sparks.js). Rendering
  * "blackbody" (default) builds that ramp from Tetraballs' fire model; "simple" uses hand-keyed
  * ramps (lib/fire.js).
  *
@@ -28,9 +29,10 @@
  * offset-encoded (±4 heights/s in 8 bits), temperature clamps at 1 and vorticity confinement is
  * off, so the fire is coarser and calmer but still works.
  */
-import { createDrive, createStepper, fillRampLut, motion, simSize } from "./lib/fire.js";
+import { createDrive, createStepper, fillRampLut, motion, simSize, sparkKind } from "./lib/fire.js";
 import { createFeed, resolveFeed } from "./lib/fuel.js";
 import { createProgram } from "./lib/gl.js";
+import { createSparks, SPARK_FLOATS } from "./lib/sparks.js";
 
 const SEED = 256;
 const SIM_RATE = 120; // sim steps per second
@@ -39,14 +41,16 @@ const JACOBI = 8; // even, so the warm start stays in pres[0]
 const JET_VEL = 3.6; // upward speed a full-strength jet drives its column to, heights/s
 const JET_HEAT = 1.5; // heat a full-strength jet adds at its root
 const RISE_PULL = 14; // how hard (1/s) a column's gas is pulled toward its rise speed
+const SPARK_CAP = 1024; // most sparks alive at once (iron and nickel palettes)
+const SPARK_WIDTH = 0.0055; // streak width, canvas heights
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
   const gl = /** @type {WebGL2RenderingContext} */ (ctx.gl);
   const dir = "shaders/blaze/";
   const files = ["fullscreen.vert", "noise.glsl", "curl.frag", "velocity.frag", "scalar.frag", "composite.frag"];
-  files.push("divergence.frag", "pressure.frag", "project.frag");
-  const [vs, noise, curlFs, velFs, scalFs, compFs, divFs, presFs, projFs] = await Promise.all(
+  files.push("divergence.frag", "pressure.frag", "project.frag", "spark.vert", "spark.frag");
+  const [vs, noise, curlFs, velFs, scalFs, compFs, divFs, presFs, projFs, sparkVs, sparkFs] = await Promise.all(
     files.map((f) => ctx.assets.text(dir + f)),
   );
   const inc = (/** @type {string} */ src) => src.replace("// #include noise", noise);
@@ -57,6 +61,24 @@ export default async function create(ctx) {
   const divP = createProgram(gl, vs, divFs, dir + "divergence.frag");
   const presP = createProgram(gl, vs, presFs, dir + "pressure.frag");
   const projP = createProgram(gl, vs, projFs, dir + "project.frag");
+  const sparkP = createProgram(gl, sparkVs, sparkFs, dir + "spark.frag");
+
+  // Sparks: a CPU particle pool (lib/sparks.js) streamed into one dynamic vertex buffer.
+  const sparks = createSparks(SPARK_CAP);
+  const sparkVerts = new Float32Array(SPARK_CAP * 6 * SPARK_FLOATS);
+  const sparkVao = gl.createVertexArray();
+  const sparkBuf = gl.createBuffer();
+  gl.bindVertexArray(sparkVao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, sparkBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, sparkVerts.byteLength, gl.DYNAMIC_DRAW);
+  const stride = SPARK_FLOATS * 4;
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, stride, 0);
+  gl.enableVertexAttribArray(1);
+  gl.vertexAttribPointer(1, 4, gl.FLOAT, false, stride, 8);
+  gl.enableVertexAttribArray(2);
+  gl.vertexAttribPointer(2, 1, gl.FLOAT, false, stride, 24);
+  gl.bindVertexArray(null);
 
   const half =
     Boolean(gl.getExtension("EXT_color_buffer_float")) || Boolean(gl.getExtension("EXT_color_buffer_half_float"));
@@ -182,6 +204,7 @@ export default async function create(ctx) {
       drive.step(audio, time.dt, ctx.reduceFlashing, mo.reactivity);
       const react = mo.reactivity > 0 ? Math.min(2, mo.reactivity) : 0;
       const boost = drive.boost;
+      sparks.step(time.dt * mo.speed, sparkKind(String(p.palette)), fuel, Math.min(1, drive.stoke * intensity), drive.flare);
 
       gl.bindVertexArray(vao);
       gl.disable(gl.DEPTH_TEST);
@@ -311,6 +334,20 @@ export default async function create(ctx) {
       gl.uniform1f(c.u_exposure, 1 + 0.3 * boost);
       gl.uniform1f(c.u_glow, Number(p.glow));
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+      // Sparks, added over the fire (premultiplied).
+      if (sparks.count > 0) {
+        const nv = sparks.fill(sparkVerts, cw / ch, SPARK_WIDTH);
+        gl.useProgram(sparkP.program);
+        gl.bindVertexArray(sparkVao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, sparkBuf);
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, sparkVerts, 0, nv * SPARK_FLOATS);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE);
+        gl.drawArrays(gl.TRIANGLES, 0, nv);
+        gl.disable(gl.BLEND);
+        gl.bindVertexArray(vao);
+      }
     },
 
     resize,
@@ -328,7 +365,9 @@ export default async function create(ctx) {
       gl.deleteTexture(seedTex);
       gl.deleteTexture(lutTex);
       gl.deleteVertexArray(vao);
-      for (const pr of [curlP, velP, scalP, compP, divP, presP, projP]) gl.deleteProgram(pr.program);
+      gl.deleteVertexArray(sparkVao);
+      gl.deleteBuffer(sparkBuf);
+      for (const pr of [curlP, velP, scalP, compP, divP, presP, projP, sparkP]) gl.deleteProgram(pr.program);
     },
   };
 }
