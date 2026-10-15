@@ -82,7 +82,9 @@ def make_source(source_id: str) -> AudioSource:
         return system_source()
     if source_id.startswith("app:"):
         pid = int(source_id.removeprefix("app:"))
-        app = next(a for a in list_audio_apps() if a.pid == pid)
+        app = next((a for a in list_audio_apps() if a.pid == pid), None)
+        if app is None:
+            raise ValueError(f"app {pid} is not playing audio")
         return app_source(app)
     if source_id.startswith("synthetic:"):
         return SyntheticSource(source_id.removeprefix("synthetic:"))
@@ -149,7 +151,14 @@ class Host:
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
         await self.servers.start()
-        self.pipeline = AudioPipeline(make_source(self.settings.data["source"]), self._publish)
+        try:
+            source = make_source(self.settings.data["source"])
+        except ValueError as e:
+            # A saved `app:<pid>` is usually gone after a restart; don't refuse to launch.
+            log.warning("saved source unavailable (%s); using system audio", e)
+            self.settings.data["source"] = "system"  # this launch only, like --source
+            source = make_source("system")
+        self.pipeline = AudioPipeline(source, self._publish)
         self.pipeline.pause()  # resumed when a shell connects
         self.pipeline.start()
         for key, folder in self.registry.dev_folders().items():
@@ -374,7 +383,7 @@ class Host:
     def _set_source(self, source_id: str) -> None:
         try:
             source = make_source(source_id)
-        except (ValueError, StopIteration):
+        except ValueError:
             self._spawn(
                 self.servers.control.broadcast_json(
                     {

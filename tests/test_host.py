@@ -285,6 +285,32 @@ async def test_unknown_source_is_rejected_with_a_status(host: Host, http):
     assert host.settings.data["source"] == "synthetic:demo"
 
 
+def test_make_source_rejects_an_app_that_is_not_playing(monkeypatch: pytest.MonkeyPatch):
+    import tidalviz.host as host_mod
+
+    monkeypatch.setattr(host_mod, "list_audio_apps", lambda: [])
+    with pytest.raises(ValueError):
+        host_mod.make_source("app:424242")
+
+
+@pytest.mark.asyncio
+async def test_start_falls_back_to_system_audio_when_the_saved_app_is_gone(
+    tmp_path: Path, window: FakeWindow, monkeypatch: pytest.MonkeyPatch
+):
+    import tidalviz.host as host_mod
+    from tidalviz.capture import SyntheticSource
+
+    monkeypatch.setattr(host_mod, "list_audio_apps", lambda: [])
+    monkeypatch.setattr(host_mod, "system_source", lambda: SyntheticSource("demo"))
+    h = Host(root=tmp_path / "home", builtin_dirs=BUILTINS, source_id="app:424242", window=window)
+    await h.start()
+    try:
+        assert h.settings.data["source"] == "system"
+        assert h.pipeline is not None
+    finally:
+        await h.stop()
+
+
 @pytest.mark.asyncio
 async def test_enable_reenables_a_disabled_visualizer(host: Host, http):
     host.registry.disable("builtin/bars")
