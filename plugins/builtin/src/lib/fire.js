@@ -183,10 +183,12 @@ export function simSize(width, height, detail) {
 }
 
 export const PALETTES = ["natural", "blue gas", "green chemical", "ember mono"];
+/** Rendering modes, default first (a test keeps tidalviz.json in step). */
+export const RENDERINGS = ["blackbody", "simple"];
 
 /**
  * Colour keys per palette: [t, r, g, b] rows, t rising from 0 (cold, black) to 1 (hottest).
- * "natural" follows a blackbody: deep red → orange → yellow → white-hot.
+ * The "simple" rendering: hand-keyed, "natural" deep red → orange → yellow → white-hot.
  * @type {Record<string, number[]>}
  */
 const RAMPS = {
@@ -225,22 +227,68 @@ const RAMPS = {
 };
 
 /**
+ * Tetraballs' fire model (shaders/tetraballs/volume.glsl; a test keeps the two in step): heat t is
+ * a temperature K = kMin + kSpan · t^kExp that glows with its blackbody colour at an emission
+ * ∝ t^emitExp, then tone-mapped like Tetraballs' tonemap(). `gain` stands in for the density its
+ * ray march accumulates, which a 2D field doesn't have.
+ */
+export const FLAME = { kMin: 800, kSpan: 2400, kExp: 1.4, emitExp: 2.2, gain: 2 };
+const LAMBDA = [0.61, 0.55, 0.465]; // micrometres; 14388 µm·K = hc/k
+
+/**
+ * Blackbody colour at `T` kelvin: Planck's law at 610/550/465 nm, normalised so the brightest
+ * channel is 1 (Tetraballs' blackbody()).
+ * @param {number} T
+ * @param {Float32Array | number[]} out length ≥ 3
+ */
+export function blackbody(T, out) {
+  let m = 0;
+  for (let i = 0; i < 3; i++) {
+    const lam = LAMBDA[i];
+    out[i] = 1 / (lam ** 5 * (Math.exp(14388 / (lam * T)) - 1));
+    if (out[i] > m) m = out[i];
+  }
+  for (let i = 0; i < 3; i++) out[i] /= m;
+  return out;
+}
+
+/** ACES filmic fit, then display gamma (Tetraballs' tonemap(), per channel). @param {number} x */
+function tonemap(x) {
+  const y = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+  return (y < 0 ? 0 : y > 1 ? 1 : y) ** (1 / 2.2);
+}
+
+const bbTmp = new Float32Array(3);
+
+/**
  * Sample a palette at temperature `t` (clamped to 0–1) into `out` as premultiplied RGBA: colour
  * is light-on-black and alpha is its brightest channel (docs/plugin-api.md, "The canvas is
- * transparent"), so cold gas is fully transparent rather than black smoke. Unknown palettes fall
- * back to "natural".
+ * transparent"), so cold gas is fully transparent rather than black smoke. Every palette is the
+ * blackbody fire above: "natural" as is, "blue gas" and "green chemical" with its channels
+ * swapped, "ember mono" as one deep-red-to-orange ember ramp on its luminance. With `rendering`
+ * "simple" it is instead the hand-keyed RAMPS above. Unknown palettes fall back to "natural",
+ * unknown renderings to "blackbody".
  * @param {string} palette
  * @param {number} t
  * @param {Float32Array | number[]} out length ≥ 4
+ * @param {string} [rendering]
  */
-export function rampColor(palette, t, out) {
-  const k = RAMPS[palette] ?? RAMPS.natural;
+export function rampColor(palette, t, out, rendering) {
   const x = t < 0 ? 0 : t > 1 ? 1 : t;
-  let j = 0;
-  while (j + 8 < k.length && k[j + 4] < x) j += 4;
-  const span = k[j + 4] - k[j];
-  const f = span > 0 ? (x - k[j]) / span : 0;
-  for (let c = 0; c < 3; c++) out[c] = k[j + 1 + c] + (k[j + 5 + c] - k[j + 1 + c]) * f;
+  if (rendering === "simple") return keyedColor(RAMPS[palette] ?? RAMPS.natural, x, out);
+  blackbody(FLAME.kMin + FLAME.kSpan * x ** FLAME.kExp, bbTmp);
+  const e = FLAME.gain * x ** FLAME.emitExp;
+  const r = tonemap(bbTmp[0] * e);
+  const g = tonemap(bbTmp[1] * e);
+  const b = tonemap(bbTmp[2] * e);
+  if (palette === "blue gas") [out[0], out[1], out[2]] = [b, g, r];
+  else if (palette === "green chemical") [out[0], out[1], out[2]] = [g, r, b];
+  else if (palette === "ember mono") {
+    // Driven by luminance, not the brightest channel (red saturates early and would flatten the
+    // body): deep red where dim, warming to orange only at the hottest, never brighter than natural.
+    const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    [out[0], out[1], out[2]] = [Math.min(Math.max(r, g, b), 1.15 * l), 0.55 * l ** 2.5, 0.22 * l ** 3];
+  } else [out[0], out[1], out[2]] = [r, g, b];
   out[3] = Math.max(out[0], out[1], out[2]);
   return out;
 }
@@ -267,6 +315,22 @@ export function motion(params, reduceMotion, out) {
   return out;
 }
 
+/**
+ * Linear interpolation through [t, r, g, b] keys at `x` (0–1); alpha = brightest channel.
+ * @param {number[]} k
+ * @param {number} x
+ * @param {Float32Array | number[]} out
+ */
+function keyedColor(k, x, out) {
+  let j = 0;
+  while (j + 8 < k.length && k[j + 4] < x) j += 4;
+  const span = k[j + 4] - k[j];
+  const f = span > 0 ? (x - k[j]) / span : 0;
+  for (let c = 0; c < 3; c++) out[c] = k[j + 1 + c] + (k[j + 5 + c] - k[j + 1 + c]) * f;
+  out[3] = Math.max(out[0], out[1], out[2]);
+  return out;
+}
+
 const rampTmp = new Float32Array(4);
 
 /**
@@ -274,11 +338,12 @@ const rampTmp = new Float32Array(4);
  * Called when the palette changes, not per frame.
  * @param {string} palette
  * @param {Uint8Array} lut
+ * @param {string} [rendering]
  */
-export function fillRampLut(palette, lut) {
+export function fillRampLut(palette, lut, rendering) {
   const n = lut.length >> 2;
   for (let i = 0; i < n; i++) {
-    rampColor(palette, n > 1 ? i / (n - 1) : 0, rampTmp);
+    rampColor(palette, n > 1 ? i / (n - 1) : 0, rampTmp, rendering);
     for (let c = 0; c < 4; c++) lut[i * 4 + c] = Math.round(rampTmp[c] * 255);
   }
 }

@@ -1,7 +1,9 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
 import manifest from "../../tidalviz.json";
-import { createAutoGain, createDrive, createEnvelope, createStepper, fillRampLut, motion, MOTION_DEFAULTS, PALETTES, rampColor, resampleSeed, simSize } from "./fire.js";
+// @ts-expect-error -- a Node builtin (tests run in Node); the web tsconfig has no @types/node.
+import { readFileSync } from "node:fs";
+import { blackbody, createAutoGain, createDrive, createEnvelope, createStepper, FLAME, fillRampLut, motion, MOTION_DEFAULTS, PALETTES, rampColor, RENDERINGS, resampleSeed, simSize } from "./fire.js";
 
 const DT = 1 / 60;
 
@@ -260,7 +262,7 @@ describe("rampColor", () => {
   it("natural runs deep red → orange → white-hot; unknown palettes fall back to natural", () => {
     const c = new Float32Array(4);
     rampColor("natural", 0.2, c);
-    expect(c[0]).toBeGreaterThan(4 * c[1]); // red tips
+    expect(c[0]).toBeGreaterThan(3.5 * c[1]); // red tips (a ~1050 K blackbody, display-encoded)
     rampColor("natural", 0.55, c);
     expect(c[0]).toBeGreaterThan(c[1]);
     expect(c[1]).toBeGreaterThan(c[2]); // orange body
@@ -270,6 +272,88 @@ describe("rampColor", () => {
     rampColor("plaid", 0.6, d);
     rampColor("natural", 0.6, c);
     expect([...d]).toEqual([...c]);
+  });
+});
+
+describe("blackbody", () => {
+  it("is Planck's law at 610/550/465 nm, normalised so the brightest channel is 1", () => {
+    // Reference values from h, c and k directly (not from the formula under test).
+    const ref = /** @type {const} */ ([
+      [1200, [1.0, 0.1966, 0.0085]],
+      [2000, [1.0, 0.4636, 0.0982]],
+      [3200, [1.0, 0.7507, 0.3899]],
+      [6500, [0.8128, 0.91, 1.0]],
+    ]);
+    const c = new Float32Array(3);
+    for (const [K, rgb] of ref) {
+      blackbody(K, c);
+      for (let i = 0; i < 3; i++) expect(c[i], `${K} K channel ${i}`).toBeCloseTo(rgb[i], 3);
+    }
+  });
+
+  it("uses the same flame model as Tetraballs' fire (shaders/tetraballs/volume.glsl)", () => {
+    const glsl = readFileSync(new URL("../../shaders/tetraballs/volume.glsl", import.meta.url), "utf8");
+    expect(glsl).toContain("vec3 lam = vec3(0.61, 0.55, 0.465);");
+    expect(glsl).toContain("exp(14388.0 / (lam * T))");
+    expect(glsl).toContain(`float K = ${FLAME.kMin.toFixed(1)} + ${FLAME.kSpan.toFixed(1)} * pow(f.y, ${FLAME.kExp});`);
+    expect(glsl).toContain(`blackbody(K) * pow(f.y, ${FLAME.emitExp})`);
+  });
+});
+
+describe("palettes", () => {
+  const nat = new Float32Array(4);
+  const c = new Float32Array(4);
+  it("blue gas and green chemical are the blackbody fire with its channels swapped", () => {
+    for (let i = 0; i <= 20; i++) {
+      rampColor("natural", i / 20, nat);
+      rampColor("blue gas", i / 20, c);
+      expect([...c]).toEqual([nat[2], nat[1], nat[0], nat[3]]);
+      rampColor("green chemical", i / 20, c);
+      expect([...c]).toEqual([nat[1], nat[0], nat[2], nat[3]]);
+    }
+  });
+
+  it("ember mono stays orange and never outshines the natural fire", () => {
+    for (let i = 1; i <= 20; i++) {
+      rampColor("natural", i / 20, nat);
+      rampColor("ember mono", i / 20, c);
+      expect(c[0]).toBeGreaterThanOrEqual(c[1]);
+      expect(c[1]).toBeGreaterThanOrEqual(c[2]);
+      expect(c[1] / c[0]).toBeLessThan(0.7);
+      expect(c[3]).toBeLessThanOrEqual(nat[3] + 1e-6);
+    }
+  });
+});
+
+describe("simple rendering", () => {
+  it("is the original hand-keyed ramps, and blackbody is the default", () => {
+    const c = new Float32Array(4);
+    const d = new Float32Array(4);
+    rampColor("natural", 0.32, c, "simple");
+    expect([...c.slice(0, 3)].map((v) => +v.toFixed(4))).toEqual([0.62, 0.08, 0.01]);
+    rampColor("blue gas", 0.4, c, "simple");
+    expect([...c.slice(0, 3)].map((v) => +v.toFixed(4))).toEqual([0.04, 0.2, 0.75]);
+    rampColor("natural", 0.2, c, "simple");
+    expect(c[0]).toBeGreaterThan(4 * c[1]); // the old deep-red tips
+    for (const mode of [undefined, "blackbody", "bogus"]) {
+      rampColor("natural", 0.6, c, mode);
+      rampColor("natural", 0.6, d, "blackbody");
+      expect([...c]).toEqual([...d]);
+    }
+  });
+
+  it("fillRampLut takes the rendering, and the modes match the manifest", () => {
+    const lut = new Uint8Array(256 * 4);
+    const c = new Float32Array(4);
+    fillRampLut("ember mono", lut, "simple");
+    rampColor("ember mono", 100 / 255, c, "simple");
+    expect(lut[400]).toBe(Math.round(c[0] * 255));
+    const blaze = manifest.visualizers.find((/** @type {{ id: string }} */ v) => v.id === "blaze");
+    const param = /** @type {{ options?: string[], default?: unknown } | undefined} */ (
+      blaze?.params.find((q) => q.id === "rendering")
+    );
+    expect(param?.options).toEqual(RENDERINGS);
+    expect(param?.default).toBe(RENDERINGS[0]);
   });
 });
 

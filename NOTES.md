@@ -3,6 +3,22 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Blaze: blackbody rendering (2026-10-15)
+
+A new *Rendering* param: **blackbody** (default) or **simple** (the original hand-keyed ramps,
+byte-identical stills).
+
+- **Blackbody is Tetraballs' fire model, not a new one.** Heat t → K = 800 + 2400 · t^1.4, Planck's
+  law at 610/550/465 nm, emission ∝ t^2.2, ACES tone map + display gamma. A test reads
+  `shaders/tetraballs/volume.glsl` so the two can't drift. (Tetraballs' SIGGRAPH citations are its
+  thin-film and sheen materials; the fire is plain Planck.)
+- **Still a 256-texel LUT built on the CPU**, rebuilt on palette/rendering change: the GPU path and
+  its cost are unchanged. `gain` (2) stands in for the density Tetraballs' ray march accumulates.
+- **Palettes are re-tints of the blackbody fire:** blue gas and green chemical swap channels; ember
+  mono is a deep-red → orange curve on luminance (the brightest channel saturates early and looked flat).
+- The low-heat tips are less red than the old ramp (r/g ≈ 3.8 at t = 0.2, against 14): that is a
+  ~1050 K blackbody after display gamma, so the red-tips test now asks r > 3.5 g.
+
 ## Linux support (2026-10-02)
 
 **Machine (not the M4 Pro above):** Linux 7.2 (CachyOS), i9-12900KF, RTX 4090 (driver 615.71),

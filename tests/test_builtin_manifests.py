@@ -186,6 +186,7 @@ def test_blaze_manifest():
         "speed",
         "glow",
         "palette",
+        "rendering",
         "feed",
         "layout",
         "detail",
@@ -201,6 +202,10 @@ def test_blaze_manifest():
     assert params["layout"]["default"] == "mirrored"
     assert params["palette"]["options"] == ["natural", "blue gas", "green chemical", "ember mono"]
     assert params["palette"]["default"] == "natural"
+    # blackbody: Tetraballs' fire model; simple: the original hand-keyed colour ramps.
+    assert params["rendering"]["type"] == "select"
+    assert params["rendering"]["options"] == ["blackbody", "simple"]
+    assert params["rendering"]["default"] == "blackbody"
     assert (params["detail"]["min"], params["detail"]["max"]) == (0.15, 0.5)
 
 

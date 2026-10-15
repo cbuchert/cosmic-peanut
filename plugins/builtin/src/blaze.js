@@ -19,7 +19,9 @@
  *   velocity  self-advection, buoyancy, curl-noise turbulence, vorticity confinement, jets,
  *             each column pulled toward its rise speed
  *   scalar    advect temperature + fuel, feed fuel from the seed along the bottom, jet heat, burn, cool
- * and composite the temperature through the palette ramp onto the transparent canvas.
+ * and composite the temperature through the palette ramp onto the transparent canvas. Rendering
+ * "blackbody" (default) builds that ramp from Tetraballs' fire model; "simple" uses hand-keyed
+ * ramps (lib/fire.js).
  *
  * Sim targets are RGBA16F when the GPU can render to half floats (EXT_color_buffer_float or
  * EXT_color_buffer_half_float). Without either they fall back to RGBA8: velocity is stored
@@ -132,7 +134,7 @@ export default async function create(ctx) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
   function applyPalette() {
-    fillRampLut(String(ctx.params.palette), lut);
+    fillRampLut(String(ctx.params.palette), lut, String(ctx.params.rendering));
     gl.bindTexture(gl.TEXTURE_2D, lutTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, lut);
   }
@@ -314,7 +316,7 @@ export default async function create(ctx) {
     resize,
 
     params(changed) {
-      if ("palette" in changed) applyPalette();
+      if ("palette" in changed || "rendering" in changed) applyPalette();
       if ("detail" in changed) resize();
     },
 
