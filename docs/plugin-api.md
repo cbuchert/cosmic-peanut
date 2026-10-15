@@ -131,7 +131,7 @@ own rAF loop and don't resize the canvas.
 | `renderScale` | 0.5–1, lowered automatically in Auto quality when frames run over budget |
 | `quality` | `auto`, `high`, `balanced`, `battery` |
 | `reduceFlashing` | Live; when true, at most 3 full-screen brightness changes per second |
-| `reduceMotion` | Live; macOS "Reduce motion". When true, default to gentler motion (e.g. no self-orbit) |
+| `reduceMotion` | Live; the OS reduce-motion setting (`prefers-reduced-motion`: macOS "Reduce motion", GTK's animations setting on Linux). When true, default to gentler motion (e.g. no self-orbit) |
 | `log(...)` | Prints to the dev overlay's console |
 | `id`, `name`, `renderer`, `apiVersion` | From the manifest |
 

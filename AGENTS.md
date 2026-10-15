@@ -1,8 +1,9 @@
-# Tidalviz — guide for agents and developers
+# Cosmic Peanut — guide for agents and developers
 
-Tidalviz captures system audio (macOS: catap; Linux: PipeWire), analyzes it in Python, and drives
-sandboxed web visualizer plugins in a WKWebView (Linux: WebKitGTK). The PRD is the source of truth
-for product scope; these docs are the source of truth for contracts:
+Cosmic Peanut runs on macOS and Linux; the app and its Python package are called Tidalviz. It
+captures system audio (macOS: catap; Linux: PipeWire), analyzes it in Python, and drives sandboxed
+web visualizer plugins in a WKWebView (Linux: WebKitGTK). The PRD is the source of truth for
+product scope; these docs are the source of truth for contracts:
 
 | Doc | What it pins down |
 | --- | --- |

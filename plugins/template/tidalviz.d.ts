@@ -182,8 +182,8 @@ export interface VisualizerContext {
    */
   readonly reduceFlashing: boolean;
   /**
-   * macOS "Reduce motion" (live). When true, default to gentler motion (e.g. stop
-   * self-orbiting cameras); users can still raise it through params.
+   * The OS reduce-motion setting, `prefers-reduced-motion` (live). When true, default to gentler
+   * motion (e.g. stop self-orbiting cameras); users can still raise it through params.
    */
   readonly reduceMotion: boolean;
 

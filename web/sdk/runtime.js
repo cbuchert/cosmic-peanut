@@ -47,7 +47,7 @@ import { createPerfMeter } from "./perf.js";
  *   createImageBitmap?: (b: Blob) => Promise<ImageBitmap>,
  *   reduceMotion?: () => boolean,
  * }} RuntimeDeps
- * `reduceMotion` is live: the page's `prefers-reduced-motion` (macOS Reduce motion).
+ * `reduceMotion` is live: the page's `prefers-reduced-motion` (macOS Reduce motion; GTK's animations setting on Linux).
  */
 
 /** @param {unknown} v @returns {v is Record<string, unknown>} */

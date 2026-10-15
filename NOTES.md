@@ -60,8 +60,8 @@ Two persisted settings, `backgroundOpacity` (0–1, default 0) and `visualOpacit
 - **Fade live on `input`, save on `change`.** Each `settings` message rewrites settings.json.
 - Visual stops at 0.1 so the visual can fade but never vanish; Background has no floor.
 
-Known gap: not run on macOS, and the GPU cost of the extra compositing layer below opacity 1 is
-unmeasured.
+Unit and e2e tests pass on macOS (2026-10-14). Known gap: the GPU cost of the extra compositing
+layer below opacity 1 is unmeasured.
 
 ## Visualizer batch: Tentacube, Tie-Dye, Skull Trip, Dark Sun, Eclipse, Marbling, Laminar, Tetraballs (2026-09-28)
 

@@ -23,7 +23,9 @@ uv sync
 uv run tidalviz
 ```
 
-Play some music. The first time, macOS asks to let your terminal capture system audio. If the
+On Linux, install the system packages and use the `gtk` extra instead (see [Linux](#linux)).
+
+Play some music. On macOS, the first time, the system asks to let your terminal capture system audio. If the
 visuals stay flat, allow it in **System Settings → Privacy & Security → Screen & System Audio
 Recording** (the app's permission button opens that page).
 
@@ -63,7 +65,13 @@ uv run --extra gtk tidalviz
 - **Float on top** is the compositor's job on Wayland, so that setting does nothing there; use your
   compositor's own float toggle (Hyprland's works as is).
 - **NVIDIA:** Tidalviz sets `__NV_DISABLE_EXPLICIT_SYNC=1` to avoid a WebKitGTK crash on Wayland;
-  set it to `0` yourself to opt out.
+  set it to `0` yourself to opt out. With the proprietary driver, WebKit's web process can also
+  crash *after* the window closes and leave a core dump; the app itself exits normally.
+- **CPU:** with a window open, the host uses ~30% of a core on the one measured setup (NVIDIA,
+  Wayland), against ~14% on macOS. Almost all of it is inside GTK and the NVIDIA EGL libraries.
+- **Tested on** Arch Linux with Hyprland (Wayland) and an NVIDIA RTX 4090. Not yet tested: other
+  distros and desktops (GNOME, KDE), X11, AMD/Intel graphics, Flatpak apps as capture targets, and
+  switching the default output while capturing. Reports welcome.
 
 ## Write a visualizer
 
@@ -92,4 +100,4 @@ Ubuntu's libraries (`playwright install --with-deps webkit` there, an Ubuntu con
 
 Start with [AGENTS.md](AGENTS.md) (layout, commands, rules), then [docs/prd.md](docs/prd.md),
 [docs/protocols.md](docs/protocols.md) and [NOTES.md](NOTES.md) (decisions and measurements).
-Packaging as a standalone `.app` isn't built yet.
+Packaging isn't built yet: no standalone `.app` on macOS, no package on Linux. Run from source.

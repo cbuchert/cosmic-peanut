@@ -1,6 +1,11 @@
 # Tidalviz PRD: modular audio visualizer for macOS
 
 > Snapshot of the PRD (claude.ai doc, 2026-09-25). The living doc is the source of truth for scope.
+>
+> **Since this snapshot (2026-10):** the project is called Cosmic Peanut (the app and package are
+> still Tidalviz), and it also runs on Linux: PipeWire capture and a WebKitGTK window behind the
+> same `AudioSource` and `WindowControl` seams. macOS stays the reference platform for the
+> performance gates. See README → Linux and NOTES.md → Linux support.
 
 ## Summary and goals
 
