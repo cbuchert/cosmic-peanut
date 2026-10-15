@@ -516,5 +516,5 @@ def test_other_pw_dump_failures_are_not_swallowed(tmp_path: Path, monkeypatch: p
 def test_make_source_for_an_app_without_pw_dump_raises_what_the_host_handles(no_pw_dump: None):
     from tidalviz.host import make_source
 
-    with pytest.raises(StopIteration):  # host.py catches (ValueError, StopIteration)
+    with pytest.raises(ValueError):  # what Host.start() and _set_source catch
         make_source("app:1234")
