@@ -519,10 +519,13 @@ describe("resize", () => {
       for (let f = 0; f < 120; f++) m.step(audioFrame({ rms: 0.3 }), DT, PARAMS, ENV);
       m.step(audioFrame({ rms: 0.3, onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, PARAMS, ENV);
       const r = Math.sqrt(0.075 ** 2 * 2); // generous bound on the main drop's radius
-      const hx = m.evA[1];
-      const hy = m.evA[2];
-      for (let i = 1; i < m.count; i++) {
-        if (m.evA[i * 4] !== EV_DROP) continue;
+      // The hit: the biggest first slice this frame (earlier slots may hold drops still pouring).
+      let h = 0;
+      for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === EV_DROP && m.evA[i * 4 + 3] > m.evA[h * 4 + 3]) h = i;
+      const hx = m.evA[h * 4 + 1];
+      const hy = m.evA[h * 4 + 2];
+      for (let i = 0; i < m.count; i++) {
+        if (m.evA[i * 4] !== EV_DROP || i === h) continue;
         // Spray lands around the hit (the beat's other drops land elsewhere, and are bigger).
         if (Math.hypot(m.evA[i * 4 + 1] - hx, m.evA[i * 4 + 2] - hy) >= 4 * r) continue;
         spray++;
@@ -894,6 +897,21 @@ describe("pour follows the music", () => {
     expect(quiet).toBeGreaterThan(1.5);
     expect(loud).toBeGreaterThan(6);
     expect(loud).toBeGreaterThan(2 * quiet);
+  });
+
+  it("lets the dropper's drops go in time with the beats when there are beats", () => {
+    const m = createMarbler(8);
+    let onBeat = 0;
+    let all = 0;
+    for (let f = 0; f < 1200; f++) {
+      const before = m.dripped;
+      m.step(audioFrame({ rms: 0.4, onset: f % 30 === 0, onsetStrength: 0.9, bands: bandsHit(0, 64) }), DT, PARAMS, ENV);
+      const d = m.dripped - before;
+      all += d;
+      if (f % 30 < 9) onBeat += d;
+    }
+    expect(all).toBeGreaterThan(100); // still ~6/s
+    expect(onBeat / all).toBeGreaterThan(0.7);
   });
 
   it("lands each hit where its sound sits in the spectrum: bass to the left, highs to the right", () => {

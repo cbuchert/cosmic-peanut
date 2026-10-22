@@ -319,9 +319,9 @@ export function createCurrents(seed) {
       const th = 0.9 + 0.05 * t;
       rate[0] = FLOW_DRIFT * s * Math.cos(th);
       rate[1] = FLOW_DRIFT * s * Math.sin(th);
-      // A beat surges the whole bath for a moment.
+      // The bath ebbs between beats and surges on each one.
       surge = audio.onset && !quiet ? Math.max(surge, clamp01(audio.onsetStrength)) : surge * Math.exp(-dt / 0.12);
-      const boost = 1 + 3 * surge;
+      const boost = 0.3 + 3.7 * surge;
       const swell = 0.25 + 0.75 * clamp01(bassS / 0.8);
       rate[2 + 3] = BIG_A * s * swell * boost * (1 + 1.5 * stir);
       rate[6 + 3] = -BIG_A * s * swell * boost;
@@ -595,8 +595,8 @@ export const EV_COMB = 4;
  * clear (paper-coloured, no rim) — the cream specks.
  */
 const RECIPES = [
-  { radius: 0.06, ink: 1, rimInk: 0, rimT: 0.003, pour: 0.3, spread: 0.7, sat: 0.85, maxSat: 3, clear: 0 }, // low: kicks, bass
-  { radius: 0.038, ink: 3, rimInk: 0, rimT: 0.005, pour: 0.2, spread: 0.85, sat: 0.5, maxSat: 2, clear: 0 }, // mid: snares
+  { radius: 0.06, ink: 1, rimInk: 0, rimT: 0.003, pour: 0.16, spread: 0.7, sat: 0.85, maxSat: 3, clear: 0 }, // low: kicks, bass
+  { radius: 0.038, ink: 3, rimInk: 0, rimT: 0.005, pour: 0.12, spread: 0.85, sat: 0.5, maxSat: 2, clear: 0 }, // mid: snares
   { radius: 0.015, ink: 2, rimInk: 0, rimT: 0.0018, pour: 0.1, spread: 1, sat: 0, maxSat: 0, clear: 0.3 }, // high: hats
 ];
 
@@ -859,6 +859,8 @@ export function createMarbler(seed) {
     count: 0,
     /** Paint drops landed and strokes begun this frame. */
     started: 0,
+    /** Dropper drops let go so far. */
+    dripped: 0,
     /** Flicks (quick strokes) started so far. */
     flicks: 0,
     /** Combs started so far. */
@@ -922,6 +924,7 @@ export function createMarbler(seed) {
     step(audio, dt, params, env) {
       now += dt;
       const drops0 = m.drops;
+      pulse = audio.onset && !audio.silent ? 1 : pulse * Math.exp(-dt / PULSE_TAU);
       const combs0 = m.combs;
       const flicks0 = m.flicks;
       const bands = audio.bands;
@@ -993,13 +996,15 @@ export function createMarbler(seed) {
       // follows the loudness, from a nozzle the spectral centroid steers across the page; the ink
       // is the loudest part of the spectrum's.
       if (!audio.silent) drizzle += dt * pour * DROPPER_RATE * energy;
-      if (drizzle >= 1 && !audio.silent) {
+      // With a beat going, drops are shaken loose on the beats (the stream keeps its rate).
+      if (drizzle >= 1 && !audio.silent && (pulse > 0.25 || drizzle >= 2.5)) {
         drizzle -= 1;
+        m.dripped++;
         const nx = env.aspect * (0.12 + 0.76 * clamp01(centroidS * 2.5) + 0.12 * Math.sin(0.37 * now));
         const ny = 0.5 + 0.32 * Math.sin(0.23 * now + 1);
         dropFrom(loudestRegion(bands), 0.6, audio, params, env, nx + 0.04 * (rand() - 0.5), ny + 0.04 * (rand() - 0.5));
       }
-      if (drizzle > 1) drizzle = 1;
+      if (drizzle > 3) drizzle = 3;
 
       // The dark ground: now and then a large vein-ink drop blooms, and the cells poured into it
       // squeeze it into the black veins and gaps between them.
@@ -1048,7 +1053,6 @@ export function createMarbler(seed) {
         }
       }
 
-      pulse = audio.onset && !audio.silent ? 1 : pulse * Math.exp(-dt / PULSE_TAU);
       // Mean ≈ 1 over a beat of eighth notes, ~2× right after a hit, ~0.35× just before the next.
       const lurch = 0.35 + 1.8 * pulse;
       // The comb's step this frame: its front advances; the paint it passes moves by combD in all.
