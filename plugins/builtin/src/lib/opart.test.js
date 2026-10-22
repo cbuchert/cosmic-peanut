@@ -742,6 +742,7 @@ describe("emitterSpot", () => {
   it("places an emitter at its sector's angle round the skull (highs above, bass below), on the given side, clear of the skull", () => {
     const outline = [0.594, 0.05, 0.1];
     const out = new Float32Array(2);
+    let maxLine = 0;
     for (let seq = 0; seq < 20; seq++) {
       for (const side of [-1, 1]) {
         emitterSpot(0, 16, side, seq, outline, out);
@@ -752,10 +753,12 @@ describe("emitterSpot", () => {
         emitterSpot(8, 16, side, seq, outline, out);
         expect(Math.sign(out[0])).toBe(side);
         const line = outlineField(out[0], out[1], outline);
-        expect(line).toBeGreaterThanOrEqual(0.25);
-        expect(line).toBeLessThanOrEqual(0.75);
+        expect(line).toBeGreaterThanOrEqual(0.35);
+        expect(line).toBeLessThanOrEqual(1.05);
+        maxLine = Math.max(maxLine, line);
       }
     }
+    expect(maxLine).toBeGreaterThan(0.9); // some well out from the skull, where their loops have room
   });
 });
 

@@ -42,9 +42,9 @@ export const FREE_FACTOR = 2.5;
  * the rest, so the sum at any pixel stays within RATE_BUDGET.
  */
 export const WAVE_RESERVE = 1.6;
-export const RIPPLE_RESERVE = 5.4;
+export const RIPPLE_RESERVE = 5;
 export const BULGE_RESERVE = 1;
-export const EMIT_RESERVE = 2.2;
+export const EMIT_RESERVE = 3.5;
 export const DUTY_RESERVE = 0.4;
 export const DRIVE_BUDGET = RATE_BUDGET - WAVE_RESERVE - RIPPLE_RESERVE - BULGE_RESERVE - EMIT_RESERVE - DUTY_RESERVE;
 /** Most of the drive's budget the shape changes (flow, twist, breathing) may take before the drift. */
@@ -682,8 +682,8 @@ export function createBulge(n) {
 /** An idle emitter's offset: far above any field value on screen, so it changes nothing. */
 export const EMIT_IDLE = 50;
 /** Seconds an emitter keeps pouring loops out before it winds down, and how deep it sinks. */
-export const EMIT_LIFE = 6;
-const EMIT_DEPTH = 0.35;
+export const EMIT_LIFE = 7;
+const EMIT_DEPTH = 1;
 /** Clearance above the skull's field an emitter starts (and ends) at, so it appears from nothing. */
 const EMIT_CLEAR = EMIT_K + 0.01;
 
@@ -770,7 +770,7 @@ export function createEmitters(cap) {
 
 /**
  * Where a new emitter goes: at the angle of bulge sector `sector` of `n` (0 straight up … n − 1
- * straight down), on the left (side −1) or right (+1), at an outline distance between 0.3 and 0.7
+ * straight down), on the left (side −1) or right (+1), at an outline distance between 0.4 and 1
  * chosen by the golden ratio from `seq` (so successive emitters spread out). Deterministic; writes
  * (x, y) into `out`.
  * @param {number} sector @param {number} n @param {number} side @param {number} seq
@@ -780,7 +780,7 @@ export function emitterSpot(sector, n, side, seq, outline, out) {
   const a = (Math.PI * (clamp(sector, 0, n - 1) + 0.5)) / n;
   const dx = (side < 0 ? -1 : 1) * Math.sin(a);
   const dy = Math.cos(a);
-  const want = 0.3 + 0.4 * ((seq * 0.6180339887) % 1);
+  const want = 0.4 + 0.6 * ((seq * 0.6180339887) % 1);
   let lo = 0;
   let hi = 4;
   for (let i = 0; i < 24; i++) {
