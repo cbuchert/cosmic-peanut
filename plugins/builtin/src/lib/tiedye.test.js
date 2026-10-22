@@ -18,7 +18,7 @@ import {
   createBandWidths,
   createIntensity,
   PULSE_MAX, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH,
-  createFlow, FLOW_MAX,
+  createFlow, FLOW_MAX, createRecord, REC_CAP, MIN_BAND, MAX_BAND, createDominant,
 } from "./tiedye.js";
 
 describe("createBandWidths", () => {
@@ -474,6 +474,68 @@ describe("createFlow", () => {
       if (nb.beat) n++;
     }
     expect(n).toBe(8);
+  });
+});
+
+describe("createRecord", () => {
+  /** Outer edges (ages) of the recorded bands, newest first. */
+  const outer = (/** @type {ReturnType<typeof createRecord>} */ r) => Array.from({ length: REC_CAP }, (_, k) => r.data[k * 4]);
+
+  it("lays down a band at the knot on each beat, with its color and ink; bands ride outward on the flow", () => {
+    const r = createRecord();
+    r.step(1, true, 3, 1.1);
+    expect(r.data[0]).toBeCloseTo(0, 6); // born at the center, zero width
+    expect(r.data[1]).toBe(3);
+    expect(r.data[2]).toBeCloseTo(1.1, 6);
+    r.step(1.3, false, 0, 0);
+    expect(r.data[0]).toBeCloseTo(0.3, 6);
+    r.step(1.5, true, 5, 0.8);
+    expect(r.data[1]).toBe(5);
+    expect(r.data[0]).toBeCloseTo(0, 6);
+    expect(r.data[4]).toBeCloseTo(0.5, 6); // the earlier band, now further out
+    expect(r.data[5]).toBe(3);
+    const e = outer(r);
+    for (let k = 1; k < REC_CAP; k++) expect(e[k]).toBeGreaterThan(e[k - 1]);
+  });
+
+  it("skips beats closer than MIN_BAND, renews every MAX_BAND in silence (next color), keeps REC_CAP bands", () => {
+    const r = createRecord();
+    r.step(10, true, 2, 1);
+    r.step(10 + MIN_BAND / 2, true, 4, 1);
+    expect(r.data[1]).toBe(2); // too soon: no new band
+    for (let f = 10; f < 10 + 3 * MAX_BAND; f += 0.01) r.step(f, false, 0, 0.9);
+    // In silence a new band appears every MAX_BAND, each one the next palette color.
+    expect(r.data[0]).toBeLessThan(MAX_BAND);
+    expect(r.data[1]).toBe(2 + 2);
+    expect(r.data[2]).toBeCloseTo(0.9, 6);
+    expect(r.data.length).toBe(REC_CAP * 4);
+    expect(r.data[(REC_CAP - 1) * 4]).toBeGreaterThan(100);
+    // Fully dyed from the first frame: varied bands out past the screen corners.
+    const fresh = createRecord().step(0, false, 0, 1);
+    expect(fresh.data[(REC_CAP - 2) * 4]).toBeGreaterThan(2.1);
+    expect(new Set([fresh.data[1], fresh.data[5], fresh.data[9]]).size).toBe(3);
+  });
+});
+
+describe("createDominant", () => {
+  /** 64 bands: `levels[k]` in region k of n. */
+  const mix = (/** @type {number[]} */ levels) => {
+    const b = new Float32Array(64);
+    for (let i = 0; i < 64; i++) b[i] = levels[Math.floor((i * levels.length) / 64)];
+    return b;
+  };
+
+  it("names the palette region that stands out in the mix right now; silence keeps the last", () => {
+    const d = createDominant();
+    let c = 0;
+    for (let f = 0; f < 240; f++) c = d.step(mix([0.8, 0.2, 0.1, 0.1, 0.1, 0.1]), 6, 1 / 60);
+    expect(c).toBe(0);
+    // A burst in region 4 stands out against its recent level even though bass is louder.
+    for (let f = 0; f < 6; f++) c = d.step(mix([0.8, 0.2, 0.1, 0.1, 0.5, 0.1]), 6, 1 / 60);
+    expect(c).toBe(4);
+    for (let f = 0; f < 120; f++) c = d.step(mix([0, 0, 0, 0, 0, 0]), 6, 1 / 60);
+    expect(c).toBe(4);
+    expect(d.step(mix([0.1, 0.1, 0.9, 0.1, 0.1]), 5, 1 / 60)).toBeLessThan(5);
   });
 });
 

@@ -422,3 +422,96 @@ export function createFlow() {
   };
   return s;
 }
+
+/** Dye bands in the record (uniform array size in the shader). */
+export const REC_CAP = 16;
+/** No new band until the newest is this wide (unit radii): fast beats don't stack up slivers. */
+export const MIN_BAND = 0.08;
+/** A band this wide makes way for a fresh one even without a beat, so silence still renews. */
+export const MAX_BAND = 0.6;
+
+/**
+ * The dye record: bands laid down at the knot (on beats) that ride outward on the flow, so the
+ * cloth keeps a history of the music. Each band has a palette shift (which color its first arm
+ * or ring takes; the shader adds it to the pattern's band index) and an ink strength. `data`
+ * holds, newest first, per band: outer edge (its distance from the knot, unit radii), shift, ink,
+ * 0 — ready for uniform4fv. The oldest band reaches to infinity. Nothing is allocated per step.
+ */
+export function createRecord() {
+  const born = new Float64Array(REC_CAP);
+  const shift = new Float32Array(REC_CAP);
+  const ink = new Float32Array(REC_CAP);
+  // A made-up history so the cloth starts fully dyed: one band per MAX_BAND, palette in order.
+  for (let k = 0; k < REC_CAP; k++) {
+    born[k] = -k * MAX_BAND * 0.5;
+    shift[k] = k;
+    ink[k] = 1;
+  }
+  let head = 0; // the newest band
+  const r = {
+    data: new Float32Array(REC_CAP * 4),
+    /**
+     * @param {number} flow the flow odometer @param {boolean} beat lay down a band?
+     * @param {number} sh its palette shift @param {number} inkAmt its ink strength
+     */
+    step(flow, beat, sh, inkAmt) {
+      const width = flow - born[head];
+      if ((beat && width >= MIN_BAND) || width >= MAX_BAND) {
+        head = (head + REC_CAP - 1) % REC_CAP;
+        born[head] = flow;
+        shift[head] = beat ? sh : shift[(head + 1) % REC_CAP] + 1;
+        ink[head] = inkAmt;
+      }
+      for (let k = 0; k < REC_CAP; k++) {
+        const i = (head + k) % REC_CAP;
+        r.data[k * 4] = k === REC_CAP - 1 ? 1e6 : flow - born[i];
+        r.data[k * 4 + 1] = shift[i];
+        r.data[k * 4 + 2] = ink[i];
+        r.data[k * 4 + 3] = 0;
+      }
+      return r;
+    },
+  };
+  return r;
+}
+
+/** Seconds: how fast "now" follows each region, and how long "recently" is. */
+const DOM_FAST = 0.05;
+const DOM_SLOW = 1.5;
+
+/**
+ * Which palette region of the spectrum stands out right now: high in level and above its own
+ * recent average (so a new instrument coming in wins over a steady bass). Silence keeps the last.
+ */
+export function createDominant() {
+  const fast = new Float32Array(MAX_COLORS);
+  const slow = new Float32Array(MAX_COLORS);
+  let last = 0;
+  return {
+    /** @param {Float32Array} bands @param {number} n palette size @param {number} dt */
+    step(bands, n, dt) {
+      const af = 1 - Math.exp(-dt / DOM_FAST);
+      const as = 1 - Math.exp(-dt / DOM_SLOW);
+      let best = -1;
+      let total = 0;
+      let pick = last;
+      for (let k = 0; k < n; k++) {
+        const lo = Math.floor((k * bands.length) / n);
+        const hi = Math.floor(((k + 1) * bands.length) / n);
+        let e = 0;
+        for (let i = lo; i < hi; i++) e += bands[i];
+        e /= Math.max(1, hi - lo);
+        fast[k] += (e - fast[k]) * af;
+        slow[k] += (e - slow[k]) * as;
+        total += fast[k];
+        const score = (fast[k] * fast[k]) / (slow[k] + 0.05);
+        if (score > best) {
+          best = score;
+          pick = k;
+        }
+      }
+      if (total / n > 0.02) last = pick;
+      return Math.min(last, n - 1);
+    },
+  };
+}
