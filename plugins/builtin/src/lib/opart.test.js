@@ -13,6 +13,15 @@ import {
   MAX_ALT_HZ,
   RATE_BUDGET,
   createEnergy,
+  createBulge,
+  createEmitters,
+  emitterSpot,
+  outlineField,
+  EMIT_RESERVE,
+  EMIT_IDLE,
+  BULGE_PHASE,
+  BULGE_RESERVE,
+  BULGE_SLEW,
   createPhrase,
   PHRASE_BEATS,
   REVERSE_RATE,
@@ -37,7 +46,7 @@ import {
   WAVE_SLEW,
 } from "./opart.js";
 import { CAM_DIST, screenRadius } from "./skull-bounds.js";
-import { PULSE_LIMIT, TILT_LIMIT } from "./skull-motion.js";
+import { PULSE_LIMIT, REDUCED, TILT_LIMIT } from "./skull-motion.js";
 
 describe("stripe (anti-aliased sign of sin)", () => {
   it("is 0 on black, 1 on white, with a monotonic ramp across each edge", () => {
@@ -585,5 +594,160 @@ describe("createRippleTrigger strength", () => {
     const weak = createRippleTrigger().step(true, 0.3, 1, 1 / 60, true);
     expect(full).toBeCloseTo(1, 5);
     expect(weak).toBeCloseTo(0.3, 5);
+  });
+});
+
+describe("createBulge (spectrum round the skull)", () => {
+  it("bulges the stripes at the angle of the loud band: bass under the jaw, highs over the cranium; silent → none", () => {
+    /** @param {(i: number) => number} shape band level by index (0 = 30 Hz … 63 = 16 kHz) */
+    const settle = (shape) => {
+      const b = createBulge(16);
+      const bands = new Float32Array(64).map((_, i) => shape(i));
+      let out = b.step(bands, 1, 1 / 60);
+      for (let f = 0; f < 600; f++) out = b.step(bands, 1, 1 / 60);
+      for (const v of out) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
+      return Array.from(out);
+    };
+    expect(Math.max(...settle(() => 0))).toBe(0);
+    const bass = settle((i) => (i < 4 ? 0.9 : 0.05));
+    expect(bass.indexOf(Math.max(...bass))).toBe(15); // sector 15 is straight down (the jaw)
+    expect(bass[0]).toBe(0);
+    const highs = settle((i) => (i >= 60 ? 0.9 : 0.05));
+    expect(highs.indexOf(Math.max(...highs))).toBe(0); // sector 0 is straight up (the cranium)
+    expect(highs[15]).toBe(0);
+  });
+
+  it("slews within the reserved phase budget and scales with Reactivity", () => {
+    expect(BULGE_PHASE * BULGE_SLEW).toBeLessThanOrEqual(BULGE_RESERVE + 1e-12);
+    for (const hz of [60, 120]) {
+      const b = createBulge(16);
+      const loud = new Float32Array(64).fill(1);
+      const none = new Float32Array(64);
+      let prev = Array.from(b.step(none, 2, 1 / hz));
+      for (let f = 0; f < hz * 6; f++) {
+        const now = Array.from(b.step(f % 30 < 15 ? loud : none, 2, 1 / hz));
+        for (let i = 0; i < 16; i++) expect(Math.abs(now[i] - prev[i]) * hz).toBeLessThanOrEqual(BULGE_SLEW + 1e-6);
+        prev = now;
+      }
+    }
+    /** @param {number} react */
+    const level = (react) => {
+      const b = createBulge(16);
+      const bands = new Float32Array(64).fill(0.5);
+      let out = b.step(bands, react, 1 / 60);
+      for (let f = 0; f < 600; f++) out = b.step(bands, react, 1 / 60);
+      return out[8];
+    };
+    expect(level(0)).toBe(0);
+    expect(level(2)).toBeGreaterThan(1.5 * level(1));
+  });
+});
+
+describe("createEmitters", () => {
+  const outline = [0.594, 0, 0.1];
+  const base = { flow: 3, warp: 1, outline, twist: 0.5 };
+
+  it("each emitter changes the field no faster than EMIT_RESERVE of phase a second, at any density", () => {
+    for (const freq of [16, 32, 70]) {
+      const em = createEmitters(6);
+      let seed = 9;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      const pts = Array.from({ length: 300 }, () => [(rnd() * 2 - 1) * 1.8, rnd() * 2 - 1]).filter(([x, y]) => Math.hypot(x, y) > 0.8);
+      let prev = pts.map(([x, y]) => opField(x, y, { ...base, emitters: em.data }));
+      for (let f = 0; f < 60 * 16; f++) {
+        if (f % 40 === 0) em.spawn(Math.cos(f) * 1.2, Math.sin(f) * 0.9, outline);
+        em.step(1 / 60, freq, outline, true);
+        const now = pts.map(([x, y]) => opField(x, y, { ...base, emitters: em.data }));
+        for (let i = 0; i < pts.length; i++) expect(Math.abs(now[i] - prev[i]) * freq * 60).toBeLessThanOrEqual(EMIT_RESERVE * 1.001);
+        prev = now;
+      }
+    }
+  });
+});
+
+describe("createEmitters lifecycle", () => {
+  const outline = [0.594, 0, 0.1];
+  const st = { flow: 0, warp: 0, outline, twist: 0 };
+  /** Whether the field has a dimple at (x, y): a local minimum, where closed loops are born. */
+  const dimple = (/** @type {Float32Array} */ data, /** @type {number} */ x, /** @type {number} */ y) => {
+    const c = opField(x, y, { ...st, emitters: data });
+    for (let a = 0; a < 8; a++) {
+      const f = opField(x + 0.04 * Math.cos(a), y + 0.04 * Math.sin(a), { ...st, emitters: data });
+      if (f <= c) return false;
+    }
+    return true;
+  };
+
+  it("appears from nothing, soon pours out closed loops, then winds down and frees its slot", () => {
+    const em = createEmitters(2);
+    const before = opField(1.3, 0.2, st);
+    expect(em.spawn(1.3, 0.2, outline)).toBe(true);
+    expect(opField(1.3, 0.2, { ...st, emitters: em.data })).toBeCloseTo(before, 6); // no pop
+    let t = 0;
+    while (!dimple(em.data, 1.3, 0.2) && t < 5) {
+      em.step(1 / 60, BASE_K, outline, true);
+      t += 1 / 60;
+    }
+    expect(t).toBeLessThan(1.5);
+    for (let f = 0; f < 60 * 20; f++) em.step(1 / 60, BASE_K, outline, true);
+    expect(em.count).toBe(0);
+    expect(em.data[2]).toBe(EMIT_IDLE);
+  });
+
+  it("keeps at most `cap` emitters and none on top of the skull", () => {
+    const em = createEmitters(2);
+    expect(em.spawn(0, 0, outline)).toBe(false);
+    expect(em.spawn(1.3, 0, outline)).toBe(true);
+    expect(em.spawn(-1.3, 0, outline)).toBe(true);
+    expect(em.spawn(0, 1.5, outline)).toBe(false);
+    expect(em.count).toBe(2);
+  });
+});
+
+describe("emitterSpot", () => {
+  it("places an emitter at its sector's angle round the skull (highs above, bass below), on the given side, clear of the skull", () => {
+    const outline = [0.594, 0.05, 0.1];
+    const out = new Float32Array(2);
+    for (let seq = 0; seq < 20; seq++) {
+      for (const side of [-1, 1]) {
+        emitterSpot(0, 16, side, seq, outline, out);
+        expect(out[1]).toBeGreaterThan(0);
+        expect(Math.abs(out[0])).toBeLessThan(out[1]);
+        emitterSpot(15, 16, side, seq, outline, out);
+        expect(out[1]).toBeLessThan(0);
+        emitterSpot(8, 16, side, seq, outline, out);
+        expect(Math.sign(out[0])).toBe(side);
+        const line = outlineField(out[0], out[1], outline);
+        expect(line).toBeGreaterThanOrEqual(0.25);
+        expect(line).toBeLessThanOrEqual(0.75);
+      }
+    }
+  });
+});
+
+describe("per-pixel alternation budget", () => {
+  it("drive + every local effect's reserve fit RATE_BUDGET: no pixel alternates faster than MAX_ALT_HZ with reduceFlashing", () => {
+    const sum = DRIVE_BUDGET + WAVE_RESERVE + RIPPLE_RESERVE + BULGE_RESERVE + EMIT_RESERVE + DUTY_RESERVE;
+    expect(sum).toBeLessThanOrEqual(RATE_BUDGET + 1e-9);
+    expect(RATE_BUDGET / (2 * Math.PI)).toBeLessThanOrEqual(MAX_ALT_HZ);
+    expect(DRIVE_BUDGET).toBeGreaterThan(0.3 * RATE_BUDGET); // the drift keeps a real share
+  });
+});
+
+describe("createStripeDrive under Reduce motion", () => {
+  it("Reduce motion's calmer speed and warp grow the loops and twist the whirlpool more gently", () => {
+    const calm = { speed: REDUCED.speed, warp: REDUCED.warp };
+    expect(settledDrift({ energy: 1, ...calm })).toBeLessThan(0.5 * settledDrift({ energy: 1 }));
+    expect(settledDrift({ energy: 0, ...calm })).toBeGreaterThan(0); // still growing
+    const twist = (/** @type {{ speed?: number, warp?: number }} */ k) => {
+      const d = createStripeDrive();
+      const input = { density: 1, speed: 1, warp: 1, reactivity: 1, bassAtt: 1, energy: 1, surge: 0, dir: 1, ...k };
+      for (let f = 0; f < 60 * 30; f++) d.step(1 / 60, input, true);
+      return d.twist;
+    };
+    expect(twist(calm)).toBeLessThan(0.7 * twist({}));
   });
 });

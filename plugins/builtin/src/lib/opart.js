@@ -42,9 +42,9 @@ export const FREE_FACTOR = 2.5;
  * the rest, so the sum at any pixel stays within RATE_BUDGET.
  */
 export const WAVE_RESERVE = 1.6;
-export const RIPPLE_RESERVE = 6;
+export const RIPPLE_RESERVE = 5.4;
 export const BULGE_RESERVE = 1;
-export const EMIT_RESERVE = 1.4;
+export const EMIT_RESERVE = 2.2;
 export const DUTY_RESERVE = 0.4;
 export const DRIVE_BUDGET = RATE_BUDGET - WAVE_RESERVE - RIPPLE_RESERVE - BULGE_RESERVE - EMIT_RESERVE - DUTY_RESERVE;
 /** Most of the drive's budget the shape changes (flow, twist, breathing) may take before the drift. */
@@ -58,10 +58,10 @@ const BREATHE_SLEW = 0.4; // rad per unit of field, per second
 /** Flow (units/s) at Speed 1 and full energy; the marble warp evolves with it. */
 export const FLOW_RATE = 0.04;
 /** Outward drift (rad/s of phase) at Speed 1: idle (silence) and added at full energy. */
-export const DRIFT_IDLE = 0.45;
-export const DRIFT_GAIN = 3.5;
+export const DRIFT_IDLE = 0.35;
+export const DRIFT_GAIN = 2.2;
 /** Extra drift a full beat surge adds, as a fraction of DRIFT_GAIN. */
-export const SURGE_DRIFT = 0.8;
+export const SURGE_DRIFT = 1.6;
 /** Fastest the whirlpool's twist may change (rad/s) before the budget. */
 const TWIST_SLEW = 0.35;
 
@@ -413,13 +413,13 @@ function smin(/** @type {number} */ a, /** @type {number} */ b, /** @type {numbe
 }
 
 /** Most twist (radians at the skull's centre) per unit of Warp: the whirlpool at its tightest. */
-export const TWIST_MAX = 1.2;
+export const TWIST_MAX = 1.1;
 /** How fast the twist falls off with distance from the skull (1/screen units). */
 export const TWIST_FALLOFF = 0.8;
 /** Largest |∂field/∂twist| outside the skull's bounding circle (checked against the mirror). */
 export const TWIST_SENS = 0.65;
 /** Smooth-min width (screen units) where an emitter's loops merge with the skull's. */
-export const EMIT_K = 0.12;
+export const EMIT_K = 0.035;
 
 /**
  * @typedef {{ flow: number, warp: number, outline: number[], twist?: number, emitters?: Float32Array }} FieldState
@@ -575,4 +575,149 @@ export function createPhrase() {
       return dir;
     },
   };
+}
+
+/** Most phase (rad) the spectrum bulge pushes the stripes outward by, and how fast it may change. */
+export const BULGE_PHASE = 2;
+export const BULGE_SLEW = BULGE_RESERVE / BULGE_PHASE;
+/** Band level (0–1 display scale) below which a sector doesn't bulge. */
+const BULGE_FLOOR = 0.15;
+
+/**
+ * The spectrum mapped round the skull, for bulging the stripes outward where the mix is loud:
+ * `n` sectors from straight up (sector 0: the highs, over the cranium) to straight down (sector
+ * n − 1: the bass, under the jaw), mirrored left/right in the shader. Each sector takes the
+ * loudest of its share of the 64 host bands; levels slew at BULGE_SLEW so the bulge stays within
+ * BULGE_RESERVE of phase a second.
+ * @param {number} n
+ */
+export function createBulge(n) {
+  const out = new Float32Array(n);
+  return {
+    /**
+     * @param {Float32Array} bands `audio.bands` (any length), 0–1
+     * @param {number} reactivity Reactivity param
+     * @param {number} dt seconds
+     * @returns {Float32Array} n levels 0–1 (the same array every call)
+     */
+    step(bands, reactivity, dt) {
+      const len = bands.length;
+      const max = BULGE_SLEW * Math.max(0, dt);
+      const react = clamp(reactivity, 0, 2);
+      for (let i = 0; i < n; i++) {
+        // Sector i (top → bottom) reads bands from the top of the spectrum down.
+        const a = Math.floor(((n - 1 - i) * len) / n);
+        const b = Math.max(a + 1, Math.floor(((n - i) * len) / n));
+        let v = 0;
+        for (let j = a; j < b && j < len; j++) if (bands[j] > v) v = bands[j]; // NaN never wins
+        const target = clamp(((Math.min(v, 1) - BULGE_FLOOR) / (1 - BULGE_FLOOR)) * 0.6 * react, 0, 1);
+        out[i] += clamp(target - out[i], -max, max);
+      }
+      return out;
+    },
+  };
+}
+
+/** An idle emitter's offset: far above any field value on screen, so it changes nothing. */
+export const EMIT_IDLE = 50;
+/** Seconds an emitter keeps pouring loops out before it winds down, and how deep it sinks. */
+export const EMIT_LIFE = 6;
+const EMIT_DEPTH = 0.35;
+/** Clearance above the skull's field an emitter starts (and ends) at, so it appears from nothing. */
+const EMIT_CLEAR = EMIT_K + 0.01;
+
+/**
+ * Loop emitters: points round the skull where new closed loops are born and grow outward, merged
+ * with the skull's own loops by a smooth minimum (opart.glsl opField). Each emitter's term is
+ * |q − e| + offset. It starts with its offset just above the skull's field at e (no effect), sinks
+ * (a dimple, then closed loops pinch off and grow), pours loops for EMIT_LIFE s, then rises back
+ * and retires. The field moves at EMIT_RESERVE / freq units a second at most, so no pixel's phase
+ * changes faster than EMIT_RESERVE from it. A preallocated pool: `data` holds (x, y, offset, 0) per slot
+ * for a vec4 uniform array; idle slots have offset EMIT_IDLE.
+ * @param {number} cap
+ */
+export function createEmitters(cap) {
+  const data = new Float32Array(cap * 4);
+  const age = new Float32Array(cap);
+  const floor = new Float32Array(cap);
+  const active = new Uint8Array(cap);
+  for (let i = 0; i < cap; i++) data[4 * i + 2] = EMIT_IDLE;
+  const em = {
+    data,
+    /** Emitters alive. */
+    count: 0,
+    /**
+     * Start an emitter at (x, y) (screen units, skull at the origin) if a slot is free and the spot
+     * is clear of the skull.
+     * @param {number} x @param {number} y @param {number[]} outline u_outline [scale, tilt, jaw drop]
+     * @returns {boolean} whether it started
+     */
+    spawn(x, y, outline) {
+      const line = outlineField(x, y, outline);
+      if (!(line > 0.1)) return false;
+      for (let i = 0; i < cap; i++) {
+        if (active[i]) continue;
+        active[i] = 1;
+        age[i] = 0;
+        floor[i] = Math.max(0, line - EMIT_DEPTH);
+        data[4 * i] = x;
+        data[4 * i + 1] = y;
+        data[4 * i + 2] = line + EMIT_CLEAR;
+        em.count++;
+        return true;
+      }
+      return false;
+    },
+    /**
+     * @param {number} dt seconds
+     * @param {number} freq stripe frequency (rad per unit of field)
+     * @param {number[]} outline u_outline
+     * @param {boolean} reduceFlashing
+     */
+    step(dt, freq, outline, reduceFlashing) {
+      if (!(dt > 0)) return em;
+      const max = (EMIT_RESERVE * (reduceFlashing ? 1 : FREE_FACTOR) * dt) / Math.max(freq, 1);
+      for (let i = 0; i < cap; i++) {
+        if (!active[i]) continue;
+        age[i] += dt;
+        const o = 4 * i + 2;
+        const line = outlineField(data[4 * i], data[4 * i + 1], outline);
+        const top = line + EMIT_CLEAR;
+        const target = age[i] < EMIT_LIFE ? floor[i] : top;
+        data[o] += clamp(target - data[o], -max, max);
+        if (age[i] >= EMIT_LIFE && data[o] >= top - 1e-4) {
+          active[i] = 0;
+          data[o] = EMIT_IDLE;
+          em.count--;
+        }
+      }
+      return em;
+    },
+  };
+  return em;
+}
+
+/**
+ * Where a new emitter goes: at the angle of bulge sector `sector` of `n` (0 straight up … n − 1
+ * straight down), on the left (side −1) or right (+1), at an outline distance between 0.3 and 0.7
+ * chosen by the golden ratio from `seq` (so successive emitters spread out). Deterministic; writes
+ * (x, y) into `out`.
+ * @param {number} sector @param {number} n @param {number} side @param {number} seq
+ * @param {number[]} outline u_outline @param {Float32Array} out
+ */
+export function emitterSpot(sector, n, side, seq, outline, out) {
+  const a = (Math.PI * (clamp(sector, 0, n - 1) + 0.5)) / n;
+  const dx = (side < 0 ? -1 : 1) * Math.sin(a);
+  const dy = Math.cos(a);
+  const want = 0.3 + 0.4 * ((seq * 0.6180339887) % 1);
+  let lo = 0;
+  let hi = 4;
+  for (let i = 0; i < 24; i++) {
+    const m = 0.5 * (lo + hi);
+    if (outlineField(m * dx, m * dy, outline) < want) lo = m;
+    else hi = m;
+  }
+  out[0] = lo * dx;
+  out[1] = lo * dy;
+  return out;
 }
