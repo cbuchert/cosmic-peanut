@@ -1,6 +1,11 @@
 // Skull Trip: the op-art stripe field, shared by the skull pass (reflections, eye whirlpools) and
-// the composite pass (the full-screen stripes). Mirrored in src/lib/opart.js (opField), whose tests
-// check the bounds the anti-strobe budget relies on (FIELD_MAX, FLOW_SENS).
+// the composite pass (the full-screen stripes). Mirrored in src/lib/opart.js (opField, outlineField,
+// ripplePhase), whose tests check the bounds the anti-strobe budget relies on (FIELD_MAX, FLOW_SENS,
+// TWIST_SENS, each reserve). The constants come from opart.js too (opartDefines, prepended at load).
+//
+// The stripes are contour lines of a distance field: the skull's silhouette smooth-min'd with the
+// loop emitters, marble-warped and twisted into a whirlpool. The global phase grows, so new closed
+// loops are born at the skull and at each emitter and grow outward off the screen.
 //
 // Screen units: the skull's centre is the origin, half the window's short side is 1.
 
@@ -10,17 +15,17 @@ uniform float u_phase;      // global phase (mod 2π), streams the stripes outwa
 uniform float u_flow;       // warp-field clock
 uniform float u_warp;       // Warp param (effective)
 uniform float u_duty;       // stripe threshold: > 0 fattens the black bands
+uniform float u_twist;      // whirlpool angle at the centre (signed by the swirl direction)
 uniform vec4 u_outline;     // skull outline: screen units per object unit, tilt, jaw drop, -
-uniform vec2 u_ripples[8];  // (radius, amplitude) per beat ripple
-uniform float u_wave[32];   // slew-limited waveform, mirrored left/right around the skull
+uniform vec2 u_ripples[RIPPLES];   // (outline distance, amplitude) per beat ripple
+uniform float u_wave[WAVE_POINTS]; // slew-limited waveform, mirrored left/right around the skull
+uniform vec4 u_emitters[EMITTERS]; // (x, y, offset, -) per loop emitter; idle ones sit far above
+uniform float u_bulge[BULGE_SECTORS]; // spectrum by angle: 0 straight up (highs) … straight down (bass)
 uniform vec3 u_ink;
 uniform vec3 u_paper;
 uniform float u_paperAlpha; // 0 for "black only": white stripes are transparent
 
 const float PI = 3.14159265;
-const float WAVE_PHASE = 1.0;   // lib/opart.js WAVE_PHASE
-const float RIPPLE_PHASE = 3.0; // phase a full-strength ripple adds at its crest
-const float RIPPLE_WIDTH = 0.2;
 
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -73,38 +78,51 @@ float outline(vec2 q) {
 }
 
 // The warped field: stripes are its contour lines. Marble domain warp + a whirlpool, around the
-// skull's silhouette so the bands flow round it.
+// skull's silhouette and the emitters (smooth-min'd, so their loops meet and fold into each other).
 float opField(vec2 p) {
   vec2 q = p;
   vec2 o = vec2(fbm(q * 0.8 + vec2(0.0, 0.5 * u_flow)), fbm(q * 0.8 + vec2(5.2 - 0.4 * u_flow, 1.3)));
   q += u_warp * 0.42 * (o * 2.0 - 1.0);
   float r = length(q);
-  q = rot2(q, u_warp * 1.3 * exp(-0.8 * r) * sin(0.6 * u_flow + 1.0));
-  return outline(q) + 0.25 * u_warp * (fbm(q * 1.6 - vec2(0.3 * u_flow, 0.0)) - 0.5);
+  q = rot2(q, u_twist * exp(-TWIST_FALLOFF * r));
+  float f = outline(q);
+  for (int i = 0; i < EMITTERS; i++) f = smin(f, length(q - u_emitters[i].xy) + u_emitters[i].z, EMIT_K);
+  return f + 0.25 * u_warp * (fbm(q * 1.6 - vec2(0.3 * u_flow, 0.0)) - 0.5);
 }
 
 // Waveform bend, mirrored left/right: -1..1 by angle round the skull (0 at the top).
 float waveAt(vec2 p) {
-  float a = abs(atan(p.x, p.y)) / PI * 31.0;
+  float a = abs(atan(p.x, p.y)) / PI * float(WAVE_POINTS - 1);
   int i = int(floor(a));
-  return mix(u_wave[i], u_wave[min(i + 1, 31)], fract(a));
+  return mix(u_wave[i], u_wave[min(i + 1, WAVE_POINTS - 1)], fract(a));
 }
 
-// Beat ripples launch at the skull's silhouette and run outward, shaped like it.
-float ripplePhase(vec2 p) {
-  float d = max(outline(p), 0.0);
+// Spectrum bulge, mirrored left/right: 0..1 by angle (sector centres at π(i + ½)/n from the top).
+float bulgeAt(vec2 p) {
+  float a = clamp(abs(atan(p.x, p.y)) / PI * float(BULGE_SECTORS) - 0.5, 0.0, float(BULGE_SECTORS - 1));
+  int i = int(floor(a));
+  return mix(u_bulge[i], u_bulge[min(i + 1, BULGE_SECTORS - 1)], fract(a));
+}
+
+// Beat ripples rise from under the skull and run outward across the screen, shaped like it.
+// lib/opart.js ripplePhase().
+float ripplePhase(float d) {
   float s = 0.0;
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < RIPPLES; i++) {
     float x = (d - u_ripples[i].x) / RIPPLE_WIDTH;
     s += u_ripples[i].y * exp(-x * x);
   }
   return RIPPLE_PHASE * s;
 }
 
-// Stripe phase at p (radians): contour lines of the field, streaming outward.
+// Stripe phase at p (radians): contour lines of the field, streaming outward. The ripples and the
+// spectrum push the stripes outward (less phase), the waveform bends them either way.
 float opPhase(vec2 p, bool full) {
   float ph = u_freq * opField(p) - u_phase;
-  if (full) ph += WAVE_PHASE * waveAt(p) + ripplePhase(p);
+  if (full) {
+    float d = max(outline(p), -1.0);
+    ph += WAVE_PHASE * waveAt(p) - ripplePhase(d) - BULGE_PHASE * bulgeAt(p) * exp(-max(d, 0.0) / 1.5);
+  }
   return ph;
 }
 
