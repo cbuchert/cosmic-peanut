@@ -3,7 +3,8 @@
 // Units: the composition's unit circle (lib/eclipse.js fitEclipse) — u_radius px per unit.
 precision highp float;
 
-uniform sampler2D u_lev;   // 256 × 2: row 0 corona level per angle, row 1 ring ripple (−1..1)
+uniform sampler2D u_lev;   // 256 × 3: row 0 corona level per angle, row 1 ring ripple (−1..1),
+                           // row 2 cloud bias (clouds.frag)
 uniform vec2 u_center;     // px
 uniform float u_radius;    // px per unit
 uniform float u_disc;      // black disc radius
@@ -20,6 +21,10 @@ uniform sampler2D u_fields; // cloud fields (clouds.frag), screen-aligned
 uniform vec2 u_res;        // canvas px
 uniform float u_th;        // cloud edge threshold (eclipse.js cloudThreshold)
 uniform float u_fieldTexel; // one cloud-field texel, in st (x) units
+uniform vec2 u_pulses[4];  // sky pulses: (distance past the ring, amplitude) — the rays light up
+uniform float u_bright;    // cloud brightening from the bass (flash-limited), 0–1
+uniform float u_rim;       // the ring's rim light on the clouds, beat pulse (flash-limited), 0–1
+uniform float u_horizon;   // waterline, px from the bottom (0 = no water): nothing drawn below
 
 out vec4 outColor;
 
@@ -91,13 +96,18 @@ vec2 tree(vec2 q, float c, float n, float L, float W, float ku, float px, int fo
 }
 
 void main() {
+  // Below the waterline only the water pass draws (it reflects what's above).
+  if (gl_FragCoord.y < u_horizon - 2.0) {
+    outColor = vec4(0.0, 0.0, 0.0, u_sky);
+    return;
+  }
   vec2 p = (gl_FragCoord.xy - u_center) / u_radius;
   float r = length(p);
   float px = 1.0 / u_radius; // one pixel in units
   float ang = atan(p.x, -p.y); // 0 = bottom, +π/2 = right
   float su = ang / TAU + 0.5;
-  float lvl = texture(u_lev, vec2(su, 0.25)).r;
-  float rip = texture(u_lev, vec2(su, 0.75)).r;
+  float lvl = texture(u_lev, vec2(su, 0.5 / 3.0)).r;
+  float rip = texture(u_lev, vec2(su, 1.5 / 3.0)).r;
 
   float inner = u_disc + 0.0035 * rip;
   float outer = u_outer + 0.007 * rip;
@@ -143,7 +153,10 @@ void main() {
     // Brighter toward the eroded edge, like ink pooled at a drying front.
     float rim = smoothstep(th + 0.12, th, dens);
     cloud = body * tone * mix(0.9, 1.0, max(lines, 1.0 - run)) * mix(0.3, 1.0, vein) * (0.85 + 0.15 * rim);
-    cloud *= min(1.0, 0.5 + u_clouds) * (1.0 + 0.35 * flare);
+    // The ring lights the clouds' near edges (pulsing on beats); the bass brightens them all.
+    float lit = exp(-max(r - outer, 0.0) / 0.3) * (0.2 + 0.8 * u_rim);
+    cloud *= 1.0 + 0.9 * lit * rim;
+    cloud *= min(1.0, 0.5 + u_clouds) * (0.72 + 0.4 * u_bright) * (1.0 + 0.35 * flare);
   }
 
   float v = 0.0;
@@ -179,7 +192,17 @@ void main() {
 
     float glow = exp(-rho / (0.004 + 0.012 * u_swell)) * (0.45 + 0.4 * u_swell);
     float haze = 0.14 * flare * (1.0 - smoothstep(0.0, 0.6, rho));
-    v = max(max(corona, cloud), glow + haze);
+    // Faint rays in the black sky: soft radial streaks (smooth in angle and radius, never dots)
+    // that light up as each sky pulse passes outward, and glow a little with the bass.
+    float pulse = 0.0;
+    for (int i = 0; i < 4; i++) {
+      float d = (rho - u_pulses[i].x) / 0.22;
+      pulse += u_pulses[i].y * exp(-d * d);
+    }
+    float sr = gnoise(vec2(su * 40.0, rho * 0.7 - u_time * 0.03), 40.0);
+    sr = smoothstep(0.05, 0.5, sr + 0.15 * gnoise(vec2(su * 13.0, 3.0 + u_time * 0.02), 13.0));
+    float rays = sr * (0.11 * min(pulse, 1.2) + 0.035 * u_bright) * smoothstep(0.02, 0.2, rho);
+    v = max(max(corona, cloud), glow + haze + rays);
     v *= step(outer - 0.02, r);
   }
   v = mix(v, 1.0, ringM);

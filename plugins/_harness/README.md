@@ -31,3 +31,13 @@ Headless Chromium falls back to software GL here; use WebKit numbers.
 `run.py --shots DIR [--tag after] [--prefix path/]` writes deterministic stills of each visualizer
 over black and over the light backdrop (plus the backdrop alone) to check transparency; `--prefix`
 points at another plugin tree under `/plugins/`, e.g. an older commit extracted with `git archive`.
+
+`motion.py <viz> --port N [--strip DIR]` measures motion (`meter=1`: mean |Δ RGB| per frame over
+named zones, `zone.<name>=+x0,y0,x1,y1;-…` in 0–1 coordinates) over 5 s of silence, a quiet passage
+(`audio=music&gain=0.05`) and loud music, plus the beat response (motion in the 150 ms after a
+strong onset / the 150 ms before); `--strip` writes frames across a kick side by side.
+`motion_hook.py VIZ… --port P [--region x0,y0,x1,y1] [--query …] [--prefix …]` measures background
+motion: the mean absolute frame-to-frame pixel change (0–1) over a deterministic 5 s window in
+silence (`silent=1`), a quiet passage (`audio=music&gain=0.05`) and loud music (`audio=music`), plus
+the beat response (mean motion in the 150 ms after each strong onset over the 150 ms before). It
+injects `window.__afterFrame(canvas, audio, time)`, a hook `harness.js` calls after every frame.

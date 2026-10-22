@@ -150,3 +150,47 @@ export function createHorizon(n) {
     },
   };
 }
+
+/** The drop's bound (in units of the range's depth), spring frequency (Hz), damping and kick. */
+export const DROP_MAX = 1;
+const DROP_HZ = 3;
+const DROP_DAMP = 0.45;
+const DROP_KICK = 26;
+/** Integration substep (s): the spring looks the same at 30, 60 or 120 Hz. */
+const DROP_STEP = 1 / 480;
+
+/**
+ * The range's beat jolt: a damped spring (DROP_HZ, DROP_DAMP) at rest at 0, kicked downward by
+ * beatHit · `motion` (Reduce motion makes it gentler). A full hit drops the peaks ~0.8 of their
+ * depth within ~70 ms, they spring back past rest by a fifth of that and settle within half a
+ * second. Output (down positive) is clamped to ±DROP_MAX. Allocation-free.
+ */
+export function createDrop() {
+  const w = 2 * Math.PI * DROP_HZ;
+  let x = 0;
+  let v = 0;
+  return {
+    /**
+     * @param {number} hit beatHit, 0–1
+     * @param {number} dt seconds
+     * @param {number} motion 0–1
+     */
+    step(hit, dt, motion) {
+      const h = hit > 0 ? (hit < 1 ? hit : 1) : 0;
+      const m = motion > 0 ? (motion < 1 ? motion : 1) : 0;
+      v += DROP_KICK * h * m;
+      let left = dt > 0 ? (dt < 0.1 ? dt : 0.1) : 0;
+      while (left > 1e-9) {
+        const s = left < DROP_STEP ? left : DROP_STEP;
+        v += (-w * w * x - 2 * DROP_DAMP * w * v) * s;
+        x += v * s;
+        left -= s;
+      }
+      if (x > DROP_MAX || x < -DROP_MAX) {
+        x = x > 0 ? DROP_MAX : -DROP_MAX;
+        v = 0;
+      }
+      return x;
+    },
+  };
+}

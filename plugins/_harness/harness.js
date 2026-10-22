@@ -16,11 +16,15 @@
  *   lum=1     record mean frame luminance (for the flash-limiter check)
  *   bg=light  a bright, busy backdrop behind the transparent canvas (default black, like the shell)
  *   nocanvas=1  hide the canvas (screenshot the backdrop alone)
- *   silent=1  the synth outputs silence (all-zero frames, silent: true)
+ *   silent=1  the synth outputs silence (all-zero frames, silent: true); with any other audio mode
+ *             it also zeroes the level scalars and onsets, like the host does in silence
  *   still=N   deterministic: seeded Math.random, fixed 1/60 s steps, stop after N frames
+ *   meter=1   record mean |Δ RGB| per frame over zones (zone.<name>=+x0,y0,x1,y1;-…, see motion.js)
+ *             and the frames of strong onsets (onsetStrength ≥ 0.8) as `beats`
  *   gain=G    scale the audio's level (waveform, rms, peak, spectrum, bands) by G, e.g. 0.05 for a
  *             quiet passage
  */
+import { createMotionMeter, parseZone } from "./motion.js";
 import { createDrums, createMelody, createMusic, createProtoDemo, createSynth, createTones } from "./synth.js";
 
 const q = new URLSearchParams(location.search);
@@ -42,6 +46,17 @@ function applyGain(a, g) {
   for (const k of ["waveform", "spectrum", "bands", "left", "right"]) if (a[k]) for (let i = 0; i < a[k].length; i++) a[k][i] *= g;
   a.rms *= g;
   a.peak *= g;
+}
+
+/**
+ * Silence as the host reports it: zero levels, scalars and onsets, silent = true.
+ * @param {any} a
+ */
+function applySilence(a) {
+  applyGain(a, 0);
+  for (const k of ["bass", "mid", "treb", "bassAtt", "midAtt", "trebAtt", "onsetStrength", "flux", "centroid"]) a[k] = 0;
+  a.onset = false;
+  a.silent = true;
 }
 
 const bgEl = /** @type {HTMLElement} */ (document.getElementById("bg"));
@@ -203,6 +218,21 @@ async function main() {
   probe.width = 32;
   probe.height = 18;
   const pg = /** @type {CanvasRenderingContext2D} */ (probe.getContext("2d", { willReadFrequently: true }));
+  const MW = 160;
+  const MH = 90;
+  /** @type {Record<string, Uint8Array>} */
+  const zones = {};
+  for (const [k, v] of q) if (k.startsWith("zone.")) zones[k.slice(5)] = parseZone(v, MW, MH);
+  if (!Object.keys(zones).length) zones.all = parseZone("+0,0,1,1", MW, MH);
+  const measureMotion = q.get("meter") === "1";
+  const meter = createMotionMeter(zones, MW, MH);
+  /** @type {Record<string, number[]>} */
+  const motion = Object.fromEntries(Object.keys(zones).map((n) => [n, []]));
+  /** @type {number[]} */ const beats = [];
+  const mprobe = document.createElement("canvas");
+  mprobe.width = MW;
+  mprobe.height = MH;
+  const mg = /** @type {CanvasRenderingContext2D} */ (mprobe.getContext("2d", { willReadFrequently: true }));
   const time = { now: 0, dt: 0, frame: 0 };
   let running = true;
   let last = performance.now();
@@ -221,6 +251,7 @@ async function main() {
     time.frame = frames++;
     const audio = synth.update(time.now, time.dt);
     if (gain !== 1) applyGain(audio, gain);
+    if (q.get("silent") === "1") applySilence(audio);
     const t0 = performance.now();
     try {
       for (let r = 0; r < rep; r++) {
@@ -240,6 +271,16 @@ async function main() {
       for (let i = 0; i < d.length; i += 4) s += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
       lum.push(s / (d.length / 4) / 255);
     }
+    if (measureMotion) {
+      mg.clearRect(0, 0, MW, MH);
+      mg.drawImage(canvas, 0, 0, MW, MH);
+      const m = meter.step(mg.getImageData(0, 0, MW, MH).data);
+      for (const n in m) motion[n].push(m[n]);
+      if (audio.onset && audio.onsetStrength >= 0.8) beats.push(motion[Object.keys(m)[0]].length - 1);
+    }
+    // Measurement hook (e.g. motion.py injects one): runs right after the frame, while the canvas
+    // still holds it.
+    w.__afterFrame?.(canvas, audio, time);
     if (still && frames >= still) {
       w.__still = true;
       return;
@@ -267,6 +308,8 @@ async function main() {
       intervalP99: pct(intervals, 0.99),
       size: [size.width, size.height],
       lum,
+      motion,
+      beats,
       errors,
     };
   };

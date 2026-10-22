@@ -346,11 +346,16 @@ def test_tiedye_manifest():
         "speed",
         "bleed",
         "reactivity",
+        "motion",
         "bloom",
     ]
-    # Option order is the shader index order in lib/tiedye.js (PATTERNS, PALETTES, FABRICS).
-    assert params["pattern"]["options"] == ["spiral", "bullseye", "crumple", "shibori"]
-    assert params["pattern"]["default"] == "spiral"
+    # Option order is lib/tiedye.js PATTERN_OPTIONS ("auto", then the shader index order of
+    # PATTERNS), PALETTES, FABRICS. "auto" morphs between the patterns with the song.
+    assert params["pattern"]["options"] == ["auto", "spiral", "bullseye", "crumple", "shibori"]
+    assert params["pattern"]["default"] == "auto"
+    # lib/tiedye.js DEFAULT_MOTION: Reduce motion calms the flow only while Motion is at this default.
+    assert params["motion"]["default"] == 1
+    assert params["motion"]["min"] == 0
     assert params["palette"]["options"] == ["rainbow", "sunset", "ocean", "neon"]
     assert params["palette"]["default"] == "rainbow"
     assert params["fabric"]["options"] == ["white", "none"]
@@ -429,7 +434,7 @@ def test_darksun_manifest():
     assert params["palette"]["default"] == "dusk"
     assert params["backdrop"]["options"] == ["painted", "none"]
     assert params["backdrop"]["default"] == "painted"
-    for f in ("fullscreen.vert", "darksun.frag"):
+    for f in ("fullscreen.vert", "noise.glsl", "backdrop.frag", "darksun.frag"):
         assert (REPOS["builtin"] / "shaders/darksun" / f).is_file(), f
 
 
@@ -449,6 +454,7 @@ def test_eclipse_manifest():
         "clouds",
         "tint",
         "sky",
+        "water",
         "rotation",
     ]
     r = params["reactivity"]
@@ -458,11 +464,14 @@ def test_eclipse_manifest():
     assert params["tint"]["default"] == "monochrome"
     assert params["sky"]["options"] == ["black", "none"]
     assert params["sky"]["default"] == "black"
+    # lib/eclipse.js WATERS; fitEclipse falls back to low for anything else.
+    assert params["water"]["options"] == ["off", "low", "mid"]
+    assert params["water"]["default"] == "low"
     # lib/eclipse.js DEFAULT_ROTATION: Reduce motion slows the drift only while it's at this default.
     rot = params["rotation"]
     assert rot["default"] == 0.03
     assert rot["min"] < 0 < rot["max"]
-    for f in ("fullscreen.vert", "noise.glsl", "eclipse.frag", "clouds.frag"):
+    for f in ("fullscreen.vert", "noise.glsl", "eclipse.frag", "clouds.frag", "water.frag"):
         assert (REPOS["builtin"] / "shaders/eclipse" / f).is_file(), f
 
 
@@ -475,16 +484,26 @@ def test_marbling_manifest():
         "thumbs/marbling.jpg",
     )
     params = {p["id"]: p for p in v["params"]}
-    assert list(params) == ["palette", "paper", "pour", "size", "rake", "reactivity", "renew"]
+    assert list(params) == [
+        "palette",
+        "paper",
+        "pour",
+        "size",
+        "rake",
+        "currents",
+        "reactivity",
+        "renew",
+    ]
     assert params["palette"]["options"] == ["beast", "indigo", "emerald", "gold"]
     assert params["palette"]["default"] == "beast"
     assert params["paper"]["options"] == ["cream", "none"]
     assert params["paper"]["default"] == "cream"
-    # lib/marbling.js DEFAULTS: Reduce motion calms pour/rake/renew only while they sit here.
-    for pid in ("pour", "size", "rake", "reactivity", "renew"):
+    # lib/marbling.js DEFAULTS: Reduce motion calms pour/rake/renew/currents only while they sit here.
+    for pid in ("pour", "size", "rake", "currents", "reactivity", "renew"):
         assert params[pid]["type"] == "number"
         assert params[pid]["default"] == 1, pid
     assert params["rake"]["min"] == 0
+    assert params["currents"]["min"] == 0
     assert params["renew"]["min"] == 0
     for f in (
         "fullscreen.vert",

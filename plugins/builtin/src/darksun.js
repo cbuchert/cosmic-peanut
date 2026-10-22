@@ -4,11 +4,18 @@
  * sky, a glowing horizon across the middle, and hanging from it an upside-down mountain range
  * with a beam of light falling from its heart.
  *
- * The music: the bass swells the sun's rim and the reach of its corona while the "diamond ring"
- * travels slowly round the rim; the inverted range is the live spectrum (log frequency, mirrored,
- * bass at the centre, highs toward its tapered sides, peaks that linger); the beam pulses with the
- * bass and rms; beats flare the beam and the horizon (through the flash limiter) and the horizon
- * breathes with the mids.
+ * The music: how loud it is (absolutely: rms in dB, smoothed) sets how alive everything is, so a
+ * quiet passage stays calm and moody and a loud one is visibly alive. The bass swells the sun's
+ * disc, rim and corona, while the "diamond ring" travels round the rim and spikes on every beat;
+ * the corona turns faster, a halo blooms and the sun rises in the sky as the song builds (and sinks
+ * toward the horizon as it falls); faint shafts of light pulse across the sky with the bass. The
+ * inverted range is the live spectrum (log frequency, mirrored, bass at the centre, peaks that
+ * linger); on each beat it drops (a spring jolt), the beam flares and widens, a shock runs out
+ * along the horizon and a ripple spreads through the wet ground from the beam. Between beats the
+ * landscape breathes on the host's beat phase. The watercolour washes flow faster and wilder with
+ * energy and surge on beats; the sky warms and brightens with spectral brightness and energy (and
+ * cools to ash when the music thins out); the range and beam shimmer in the dark ground.
+ * Every full-frame brightness change goes through the flash limiter.
  *
  * GPU: the painted sky and ground washes (shaders/darksun/backdrop.frag) render at quarter
  * resolution into their own target — they have no fine detail, and at full resolution they were
@@ -17,7 +24,16 @@
  * tested there. Nothing is allocated per frame.
  */
 import {
+  beatHit,
   createBeam,
+  createBreath,
+  createEnergy,
+  createFlow,
+  createRipples,
+  createSkyTone,
+  createSpike,
+  createSunMood,
+  reflection,
   createDiamond,
   createGlow,
   createSun,
@@ -29,12 +45,10 @@ import {
   resolveParams,
 } from "./lib/darksun.js";
 import { createProgram, createTarget } from "./lib/gl.js";
-import { createHorizon } from "./lib/horizon.js";
+import { createDrop, createHorizon } from "./lib/horizon.js";
 
 /** Columns across the range (half per side): the ridgeline's resolution. */
 const N = 64;
-/** Corona rotation (rad/s) at full motion. */
-const CORONA_RATE = 0.025;
 /** Backdrop target: full-resolution pixels per texel, each way. */
 const BG_DIV = 4;
 
@@ -66,39 +80,65 @@ export default async function create(ctx) {
   const beam = createBeam();
   const surge = createSurge();
   const glow = createGlow();
+  const energy = createEnergy();
+  const flow = createFlow();
+  const tone = createSkyTone();
+  const breath = createBreath();
+  const ripples = createRipples();
+  const drop = createDrop();
+  const spike = createSpike();
+  const throb = createSpike();
+  const mood = createSunMood();
   const pal = palette(ctx.params.palette, new Float32Array(PALETTES.SIZE));
   const P = resolveParams(ctx.params, ctx.reduceMotion, /** @type {any} */ ({}));
   const L = layout(ctx.size.width, ctx.size.height, P, /** @type {any} */ ({}));
-  let corona = 0;
-  let drift = 0;
 
   return {
     frame(audio, time) {
       const dt = time.dt;
       const { width: w, height: h } = ctx.size;
       resolveParams(ctx.params, ctx.reduceMotion, P);
-      layout(w, h, P, L);
       const r = P.reactivity;
 
+      const e = energy.step(audio.rms, dt);
+      const hit = beatHit(audio.onset, audio.onsetStrength, e, r);
       horizon.step(audio.spectrum, audio.sampleRate, dt, r, profile);
-      sun.step(audio.bassAtt, dt, r);
-      diamond.step(audio.bassAtt * r, dt, P.motion);
-      beam.step(audio.bass, audio.rms, dt, r);
-      const flare = surge.step(audio.onset, audio.onsetStrength, dt, ctx.reduceFlashing);
-      glow.step(audio.midAtt, flare, dt, r);
-      corona += CORONA_RATE * P.motion * (0.6 + 0.8 * sun.level) * dt;
-      drift += P.motion * dt;
+      sun.step(audio.bassAtt, dt, r, e);
+      diamond.step(audio.bassAtt * r * (0.3 + 0.7 * e), dt, P.motion);
+      beam.step(audio.bass, audio.rms, dt, r, e);
+      // Beat flares: the onset surge (as before) scaled by energy, and the energy-gated hit.
+      const flare = surge.step(audio.onset, audio.onsetStrength, dt, ctx.reduceFlashing) * (0.25 + 0.75 * e);
+      const beat = throb.step(hit, dt, ctx.reduceFlashing);
+      const breathe = breath.step(audio.bpm, audio.beatPhase, e, dt, r);
+      glow.step(audio.midAtt, Math.max(flare, beat), dt, r, e);
+      flow.step(e, hit, dt, r, P.motion);
+      tone.step(audio.centroid, e, dt, r, ctx.reduceFlashing);
+      ripples.step(hit * (0.5 + 0.5 * P.motion), dt);
+      const jolt = drop.step(hit, dt, P.motion);
+      const spk = spike.step(hit, dt, ctx.reduceFlashing);
+      mood.step(e, audio.bass, dt, r, P.motion);
+      P.rise = mood.rise;
+      layout(w, h, P, L);
+      const sunR = L.sunR * sun.scale;
+      const rangeDepth = L.rangeDepth * (1 + 0.32 * jolt + 0.1 * breathe);
+      const beamB = P.beam * beam.bright * (1 + 0.5 * flare + 0.7 * beat + 0.2 * breathe);
+      const beamW = L.beamWidth * beam.width * (1 + 0.9 * beat);
+      const glowV = glow.value + 0.25 * breathe;
 
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
       gl.bindVertexArray(vao);
       const painted = isPainted(ctx.params.backdrop);
 
-      // 1. The painted washes, at quarter resolution.
+      // 1. The painted washes, at quarter resolution. (Resize first: it binds the target's texture
+      // to the active unit, which must not then be the profile's while drawing into the target.)
+      const tw = Math.max(1, Math.ceil(w / BG_DIV));
+      const th = Math.max(1, Math.ceil(h / BG_DIV));
+      if (painted && (bgTarget.width !== tw || bgTarget.height !== th)) bgTarget.resize(tw, th);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, profTex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N, 1, gl.RED, gl.FLOAT, profile);
       if (painted) {
-        const tw = Math.max(1, Math.ceil(w / BG_DIV));
-        const th = Math.max(1, Math.ceil(h / BG_DIV));
-        if (bgTarget.width !== tw || bgTarget.height !== th) bgTarget.resize(tw, th);
         gl.bindFramebuffer(gl.FRAMEBUFFER, bgTarget.fbo);
         gl.viewport(0, 0, tw, th);
         gl.useProgram(bgProg.program);
@@ -106,15 +146,25 @@ export default async function create(ctx) {
         gl.uniform2f(ub.u_scale, w / tw, h / th);
         gl.uniform1f(ub.u_unit, L.unit);
         gl.uniform1f(ub.u_horizon, L.horizon);
-        gl.uniform1f(ub.u_time, drift);
+        gl.uniform1f(ub.u_time, flow.clock);
+        gl.uniform1f(ub.u_turb, flow.turb);
+        gl.uniform1f(ub.u_warm, tone.warm);
+        gl.uniform1f(ub.u_bright, tone.bright);
+        gl.uniform1f(ub.u_glow, glowV);
+        gl.uniform3f(ub.u_sun, L.sunX, L.sunY, sunR);
+        gl.uniform1f(ub.u_rays, mood.rays);
+        gl.uniform1f(ub.u_refl, reflection(e, beam.level, r) * (1 + 0.3 * breathe));
+        gl.uniform1f(ub.u_rangeHalf, L.rangeHalf);
+        gl.uniform1f(ub.u_rangeDepth, rangeDepth);
+        gl.uniform1f(ub.u_beamB, beamB);
+        gl.uniform2fv(ub.u_rings, ripples.rings);
+        gl.uniform1i(ub.u_prof, 0);
+        gl.uniform1f(ub.u_n, N);
         gl.uniform3fv(ub.u_c, pal);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
 
       // 2. Everything else, over them.
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, profTex);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N, 1, gl.RED, gl.FLOAT, profile);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, bgTarget.tex);
 
@@ -129,16 +179,20 @@ export default async function create(ctx) {
       gl.uniform2f(u.u_res, w, h);
       gl.uniform1f(u.u_unit, L.unit);
       gl.uniform1f(u.u_horizon, L.horizon);
-      gl.uniform3f(u.u_sun, L.sunX, L.sunY, L.sunR);
+      gl.uniform3f(u.u_sun, L.sunX, L.sunY, sunR);
       gl.uniform1f(u.u_rangeHalf, L.rangeHalf);
-      gl.uniform1f(u.u_rangeDepth, L.rangeDepth);
-      gl.uniform1f(u.u_beamW, L.beamWidth * beam.width);
-      gl.uniform1f(u.u_beamB, P.beam * beam.bright * (1 + 0.8 * flare));
+      gl.uniform1f(u.u_rangeDepth, rangeDepth);
+      gl.uniform1f(u.u_beamW, beamW);
+      gl.uniform1f(u.u_beamB, beamB);
       gl.uniform1f(u.u_rim, sun.rim);
       gl.uniform1f(u.u_reach, sun.reach);
       gl.uniform1f(u.u_diamond, diamond.angle);
-      gl.uniform1f(u.u_corona, corona);
-      gl.uniform1f(u.u_glow, glow.value);
+      gl.uniform1f(u.u_corona, mood.corona);
+      gl.uniform1f(u.u_glow, glowV);
+      gl.uniform1f(u.u_spike, spk);
+      gl.uniform1f(u.u_bloom, mood.bloom);
+      gl.uniform1f(u.u_warm, tone.warm);
+      gl.uniform2fv(u.u_rings, ripples.rings);
       gl.uniform1f(u.u_painted, painted ? 1 : 0);
       gl.uniform3fv(u.u_c, pal);
       gl.drawArrays(gl.TRIANGLES, 0, 3);

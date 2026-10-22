@@ -1,7 +1,8 @@
 // @ts-check
 /**
  * Marbling's pure logic, mirrored by shaders/marbling/sim.frag: the mathematical-marbling maps
- * (Jaffer et al.) and their exact inverses, the per-frame pour scheduler, palettes, renew, resize.
+ * (Jaffer et al.) and their exact inverses, the bath's currents and the comb, the per-frame pour
+ * scheduler (beats, dropper, stones, stylus, flicks, tempo combs), palettes, renew, resize.
  *
  * Coordinates are "page units": y from 0 (bottom) to 1 (top), x from 0 to the aspect ratio.
  */
@@ -124,6 +125,317 @@ export function clampDrag(invS2, v) {
   return v;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Currents: the water bath flows. A smooth divergence-free displacement field — a drift plus a few
+// Gaussian vortices — accumulated over a bake batch and applied (exactly inverted) like any event.
+// ---------------------------------------------------------------------------------------------
+
+/** Vortices in a flow field (two FLOW events of three each). */
+export const FLOW_VORTICES = 6;
+/** Flow field layout: [drift x, drift y, then per vortex (cx, cy, k = 1/σ², A)]. */
+export const FLOW_LEN = 2 + 4 * FLOW_VORTICES;
+
+/**
+ * The displacement of a flow field at p: the drift plus, per vortex, the curl of the stream
+ * function ψ = A·exp(−k|p − c|²), i.e. (∂ψ/∂y, −∂ψ/∂x) — divergence-free by construction, a swirl
+ * around c (counter-clockwise for A > 0) peaking at |p − c| = 1/√(2k). Mirrored in events.glsl.
+ * @param {ArrayLike<number>} f FLOW_LEN params
+ * @param {number} x
+ * @param {number} y
+ * @param {Float64Array | number[]} out
+ */
+export function flowDisp(f, x, y, out) {
+  let dx = f[0];
+  let dy = f[1];
+  for (let i = 2; i < FLOW_LEN; i += 4) {
+    const a = f[i + 3];
+    if (a === 0) continue;
+    const rx = x - f[i];
+    const ry = y - f[i + 1];
+    const k = f[i + 2];
+    const g = 2 * k * a * Math.exp(-k * (rx * rx + ry * ry));
+    dx -= g * ry;
+    dy += g * rx;
+  }
+  out[0] = dx;
+  out[1] = dy;
+  return out;
+}
+
+/**
+ * Largest steepness (Jacobian norm of the displacement) a batch of flow may build up before it is
+ * baked; FLOW_ITERS Newton steps of {@link flowInverse} then land within ~1e-6 page.
+ */
+export const FLOW_MAX_GRAD = 0.5;
+export const FLOW_ITERS = 2;
+
+/**
+ * An upper bound on the Jacobian norm of {@link flowDisp}: each vortex's is 2k|A|·max(1, |1 − 2kr²|)
+ * ·exp(−kr²) ≤ 2k|A|, and the drift has none.
+ * @param {ArrayLike<number>} f
+ */
+export function flowBound(f) {
+  let b = 0;
+  for (let i = 2; i < FLOW_LEN; i += 4) b += 2 * f[i + 2] * Math.abs(f[i + 3]);
+  return b;
+}
+
+const jac = new Float64Array(4);
+
+/**
+ * Inverse of p ↦ p + flowDisp(p): where the paint now at p came from, by Newton's method on
+ * q + d(q) = p from q = p (I + ∇d is well conditioned while flowBound ≤ FLOW_MAX_GRAD).
+ * Mirrored in events.glsl.
+ * @param {ArrayLike<number>} f
+ * @param {number} px
+ * @param {number} py
+ * @param {Float64Array | number[]} out
+ */
+export function flowInverse(f, px, py, out) {
+  let x = px - f[0];
+  let y = py - f[1];
+  for (let n = 0; n < FLOW_ITERS; n++) {
+    let dx = f[0];
+    let dy = f[1];
+    jac[0] = 1;
+    jac[1] = 0;
+    jac[2] = 0;
+    jac[3] = 1;
+    for (let i = 2; i < FLOW_LEN; i += 4) {
+      const a = f[i + 3];
+      if (a === 0) continue;
+      const rx = x - f[i];
+      const ry = y - f[i + 1];
+      const k = f[i + 2];
+      const g = 2 * k * a * Math.exp(-k * (rx * rx + ry * ry));
+      const k2 = 2 * k * g;
+      dx -= g * ry;
+      dy += g * rx;
+      jac[0] += k2 * rx * ry;
+      jac[1] += k2 * ry * ry - g;
+      jac[2] += g - k2 * rx * rx;
+      jac[3] -= k2 * rx * ry;
+    }
+    // Residual r = q + d(q) − p; q ← q − (I + ∇d)⁻¹ r.
+    const r0 = x + dx - px;
+    const r1 = y + dy - py;
+    const det = jac[0] * jac[3] - jac[1] * jac[2];
+    x -= (jac[3] * r0 - jac[1] * r1) / det;
+    y -= (jac[0] * r1 - jac[2] * r0) / det;
+  }
+  out[0] = x;
+  out[1] = y;
+  return out;
+}
+
+/** Currents: the two big swirls' widths (σ, page) and stream amplitude at full strength (page²/s:
+ * peak speed ≈ 2.9·A for σ 0.3), and the gentle drift's speed (page/s). */
+const BIG_SIGMA = [0.3, 0.26];
+const BIG_A = 0.0175;
+/** The four local vortices, one per 16-band group (low → high across the page): σ and amplitude
+ * (peak speed ≈ 6.6·A). */
+const LOCAL_SIGMA = 0.13;
+const LOCAL_A = 0.005;
+const FLOW_DRIFT = 0.006;
+/** Fastest the currents may ever move paint (page heights / s), whatever the params. */
+export const CURRENT_MAX_SPEED = 0.3;
+
+/**
+ * The bath's currents: a smooth, divergence-free flow (see {@link flowDisp}) whose strength follows
+ * the music and settles to exactly still in silence. `rate` is the field's velocity (page/s) right
+ * now; `acc` accumulates its displacement since the last {@link reset} (the last bake), with the
+ * vortex centres frozen at that moment, ready to be applied as the newest event.
+ * @param {number} seed
+ */
+export function createCurrents(seed) {
+  const rand = createRng(seed);
+  const rate = new Float32Array(FLOW_LEN);
+  const acc = new Float32Array(FLOW_LEN);
+  /** Per vortex: wander phases and rates (rad/s). */
+  const ph = new Float64Array(FLOW_VORTICES * 4);
+  for (let i = 0; i < ph.length; i += 4) {
+    ph[i] = rand() * 2 * Math.PI;
+    ph[i + 1] = rand() * 2 * Math.PI;
+    ph[i + 2] = 0.08 + 0.08 * rand();
+    ph[i + 3] = 0.06 + 0.08 * rand();
+  }
+  let t = 0;
+  let en = 0;
+  let bassS = 0;
+  let surge = 0;
+  let lastStep = 0;
+  let enSlow = 0;
+  let stir = 0;
+  /** Smoothed level of each 16-band group. */
+  const lv = new Float64Array(4);
+
+  /** Move the vortex centres along their slow wander. @param {number} aspect */
+  function place(aspect) {
+    for (let v = 0; v < FLOW_VORTICES; v++) {
+      const o = 2 + v * 4;
+      const p = v * 4;
+      const sigma = v < 2 ? BIG_SIGMA[v] : LOCAL_SIGMA;
+      const home = v < 2 ? 0.5 : 0.14 + 0.24 * (v - 2);
+      const reach = v < 2 ? 0.3 : 0.08;
+      // A build-up draws the first big swirl to the middle of the page (the stir).
+      const pull = v === 0 ? stir : 0;
+      rate[o] = aspect * (home + (1 - pull) * reach * Math.sin(ph[p] + ph[p + 2] * t));
+      rate[o + 1] = 0.5 + (1 - pull) * 0.28 * Math.sin(ph[p + 1] + ph[p + 3] * t);
+      rate[o + 2] = 1 / (sigma * sigma);
+    }
+  }
+
+  const c = {
+    rate,
+    acc,
+    /** The accumulated displacement is non-zero (something to bake). */
+    active: false,
+    /**
+     * @param {PourAudio} audio
+     * @param {number} energy the marbler's 0–1 loudness
+     * @param {number} dt
+     * @param {PourParams} params
+     * @param {PourEnv} env
+     */
+    step(audio, energy, dt, params, env) {
+      t += dt;
+      const target = audio.silent ? 0 : energy;
+      en += (target - en) * (1 - Math.exp(-dt / (target > en ? 0.4 : 0.6)));
+      if (target === 0 && en < 0.004) en = 0;
+      // A build-up (loudness climbing above its slow average) stirs a slow central spiral.
+      enSlow += (en - enSlow) * (1 - Math.exp(-dt / 4));
+      stir += (clamp01((en - enSlow - 0.05) * 5) - stir) * (1 - Math.exp(-dt / 0.8));
+      const s = en * Math.min(2, Math.max(0, params.reactivity) * Math.max(0, params.currents));
+      const bands = audio.bands;
+      const quiet = audio.silent;
+      let low = 0;
+      for (let i = REGIONS[0]; i < REGIONS[1]; i++) low += quiet ? 0 : bands[i];
+      bassS += (low / (REGIONS[1] - REGIONS[0]) - bassS) * (1 - Math.exp(-dt / 0.25));
+      for (let g = 0; g < 4; g++) {
+        let sum = 0;
+        for (let i = g * 16; i < g * 16 + 16; i++) sum += quiet ? 0 : bands[i];
+        lv[g] += (sum / 16 - lv[g]) * (1 - Math.exp(-dt / 0.12));
+      }
+      place(env.aspect);
+      const th = 0.9 + 0.05 * t;
+      rate[0] = FLOW_DRIFT * s * Math.cos(th);
+      rate[1] = FLOW_DRIFT * s * Math.sin(th);
+      // The bath ebbs between beats and surges on each one.
+      // (Strong beats surge far more than the weak ones between them.)
+      surge = audio.onset && !quiet ? Math.max(surge, clamp01(audio.onsetStrength) ** 2) : surge * Math.exp(-dt / 0.12);
+      const boost = 0.3 + 3.7 * surge;
+      const swell = 0.25 + 0.75 * clamp01(bassS / 0.8);
+      rate[2 + 3] = BIG_A * s * swell * boost * (1 + 1.5 * stir);
+      rate[6 + 3] = -BIG_A * s * swell * boost;
+      for (let g = 0; g < 4; g++) {
+        const p = (2 + g) * 4;
+        // Each local vortex slowly reverses (its own period, 10–20 s) so paint swirls back and forth.
+        const turn = Math.cos(ph[p] * 3 + (0.3 + 0.03 * g) * t);
+        rate[2 + (2 + g) * 4 + 3] = LOCAL_A * s * clamp01(lv[g] * 1.2) * turn * boost;
+      }
+      // Bound the speed: each vortex peaks at |A|·√(2k)·e^−½, the drift is uniform.
+      let top = Math.hypot(rate[0], rate[1]);
+      for (let o = 2; o < FLOW_LEN; o += 4) top += Math.abs(rate[o + 3]) * Math.sqrt(2 * rate[o + 2]) * 0.6065;
+      if (top > CURRENT_MAX_SPEED) {
+        const k = CURRENT_MAX_SPEED / top;
+        rate[0] *= k;
+        rate[1] *= k;
+        for (let o = 2; o < FLOW_LEN; o += 4) rate[o + 3] *= k;
+      }
+      // Accumulate this frame's displacement at the batch's frozen centres — never past the
+      // steepness the inverse handles (the caller bakes when `full`, so this rarely trims).
+      lastStep = flowBound(rate) * dt;
+      const room = FLOW_MAX_GRAD - flowBound(acc);
+      const k = lastStep > room ? Math.max(0, room) / lastStep : 1;
+      let any = false;
+      for (let i = 0; i < FLOW_LEN; i++) {
+        if (i >= 2 && (i - 2) % 4 !== 3) continue;
+        acc[i] += rate[i] * dt * k;
+        if (acc[i] !== 0) any = true;
+      }
+      c.active = any;
+    },
+    /** Bake now: another frame or two would make the batch too steep. */
+    full() {
+      return flowBound(acc) + 3 * lastStep >= FLOW_MAX_GRAD;
+    },
+    /** Start a new batch: zero the accumulated flow and freeze the current centres into it. */
+    reset() {
+      for (let i = 0; i < FLOW_LEN; i++) acc[i] = i >= 2 && (i - 2) % 4 !== 3 ? rate[i] : 0;
+      c.active = false;
+    },
+  };
+  place(1);
+  c.reset();
+  return c;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Comb: a row of tines dragged across the page (the classic combed pattern), applied a frame at
+// a time as its front passes.
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Largest per-frame amplitude of a comb step, per unit of front width: keeps 1 + ∂(displacement)/∂t
+ * ≥ 0.5 so the map stays invertible and {@link combInverse}'s Newton steps converge.
+ */
+export const COMB_MAX_AMP = 0.5 / Math.sqrt(2 / Math.E);
+const COMB_ITERS = 3;
+
+/**
+ * One comb step. c = [front, 1/w, amp, mx, my, spacing, phase, λ]: the comb moves along the unit
+ * vector m and its tines are lines parallel to m every `spacing` across it. Paint moves along m by
+ * amp·g·h: g = λ/(λ + distance to the nearest tine) (Jaffer's tine falloff: sharp V's at the
+ * tines), h = exp(−((m·p − front)/w)²) (only near the front). The cross-coordinate never changes.
+ * @param {ArrayLike<number>} c
+ * @param {number} px
+ * @param {number} py
+ * @param {Float64Array | number[]} out
+ */
+export function combForward(c, px, py, out) {
+  const mx = c[3];
+  const my = c[4];
+  const t = mx * px + my * py;
+  const z = (t - c[0]) * c[1];
+  const s = c[2] * combG(c, -my * px + mx * py) * Math.exp(-z * z);
+  out[0] = px + mx * s;
+  out[1] = py + my * s;
+  return out;
+}
+
+/** The tine falloff at cross-coordinate nn. @param {ArrayLike<number>} c @param {number} nn */
+function combG(c, nn) {
+  const u = nn / c[5] + c[6];
+  const d = c[5] * Math.abs(u - Math.floor(u) - 0.5);
+  return c[7] / (c[7] + d);
+}
+
+/**
+ * Exact-to-Newton inverse of {@link combForward}: solve t + amp·g·h(t) = t' along m (g is fixed,
+ * the cross-coordinate doesn't move). Mirrored in events.glsl.
+ * @param {ArrayLike<number>} c
+ * @param {number} px
+ * @param {number} py
+ * @param {Float64Array | number[]} out
+ */
+export function combInverse(c, px, py, out) {
+  const mx = c[3];
+  const my = c[4];
+  const nn = -my * px + mx * py;
+  const t1 = mx * px + my * py;
+  const ag = c[2] * combG(c, nn);
+  const iw = c[1];
+  let t = t1;
+  for (let i = 0; i < COMB_ITERS; i++) {
+    const z = (t - c[0]) * iw;
+    const h = Math.exp(-z * z);
+    t -= (t + ag * h - t1) / (1 - 2 * ag * h * z * iw);
+  }
+  out[0] = mx * t - my * nn;
+  out[1] = my * t + mx * nn;
+  return out;
+}
+
 /**
  * Seeded PRNG (mulberry32): drop positions and choices are deterministic given the audio and time.
  * @param {number} seed
@@ -167,6 +479,30 @@ export function strongestRegion(bands, prev) {
     }
   }
   return best;
+}
+
+/**
+ * Where across the spectrum a hit sits, 0 (lowest band) … 1 (highest): the mean band index
+ * weighted by each band's rise since the previous frame (by its level if nothing rose).
+ * @param {ArrayLike<number>} bands
+ * @param {ArrayLike<number>} prev
+ */
+export function risePosition(bands, prev) {
+  let w = 0;
+  let sum = 0;
+  for (let i = 0; i < 64; i++) {
+    const d = bands[i] - prev[i];
+    if (d > 0) {
+      w += d;
+      sum += d * i;
+    }
+  }
+  if (w === 0)
+    for (let i = 0; i < 64; i++) {
+      w += bands[i];
+      sum += bands[i] * i;
+    }
+  return w > 0 ? sum / w / 63 : 0.5;
 }
 
 /**
@@ -247,10 +583,11 @@ function loudestRegion(bands) {
 /** Events applied per frame (uniform array length in sim.frag). */
 export const MAX_EVENTS = 16;
 /** Drops being poured at once (each emits one DROP slice per frame). */
-export const MAX_POURS = 14;
+export const MAX_POURS = 24;
 export const EV_DROP = 1;
 export const EV_DRAG = 2;
 export const EV_SHIFT = 3;
+export const EV_COMB = 4;
 
 /**
  * Per-region drop recipe (page units: the page is 1 tall). radius: base radius; rimT: thickness of
@@ -260,8 +597,8 @@ export const EV_SHIFT = 3;
  * clear (paper-coloured, no rim) — the cream specks.
  */
 const RECIPES = [
-  { radius: 0.06, ink: 1, rimInk: 0, rimT: 0.003, pour: 0.3, spread: 0.7, sat: 0.85, maxSat: 3, clear: 0 }, // low: kicks, bass
-  { radius: 0.038, ink: 3, rimInk: 0, rimT: 0.005, pour: 0.2, spread: 0.85, sat: 0.5, maxSat: 2, clear: 0 }, // mid: snares
+  { radius: 0.06, ink: 1, rimInk: 0, rimT: 0.003, pour: 0.16, spread: 0.7, sat: 0.85, maxSat: 3, clear: 0 }, // low: kicks, bass
+  { radius: 0.038, ink: 3, rimInk: 0, rimT: 0.005, pour: 0.12, spread: 0.85, sat: 0.5, maxSat: 2, clear: 0 }, // mid: snares
   { radius: 0.015, ink: 2, rimInk: 0, rimT: 0.0018, pour: 0.1, spread: 1, sat: 0, maxSat: 0, clear: 0.3 }, // high: hats
 ];
 
@@ -275,6 +612,8 @@ const RECIPES = [
  * @property {number} peak
  * @property {number} centroid
  * @property {boolean} silent
+ * @property {number} [bpm] tempo, 0 until confident
+ * @property {number} [beatPhase] 0–1 between predicted beats
  */
 /**
  * @typedef {object} PourParams
@@ -283,6 +622,7 @@ const RECIPES = [
  * @property {number} rake stylus (stroke) amount
  * @property {number} reactivity how strongly hits scale drops
  * @property {number} renew renew-speed multiplier
+ * @property {number} currents strength of the bath's currents
  */
 /**
  * @typedef {object} PourEnv
@@ -310,6 +650,29 @@ const CLEAR_EVERY = 30;
 const CLEAR_POUR = 2.5;
 /** Seconds a ground (vein-ink) drop takes to bloom. */
 const GROUND_POUR = 1.2;
+
+/** Shortest gap between hit drops (s): every beat pours, a double-trigger doesn't. */
+const BEAT_GAP = 0.06;
+/** Downbeat stones: radius (page), seconds to bloom, and the loudness they need. */
+const STONE_R = 0.11;
+const STONE_POUR = 0.5;
+const STONE_ENERGY = 0.3;
+/** Comb directions in turn (m), and the width of its front (page). */
+const COMB_DIRS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+const COMB_W = 0.05;
+/** Decay (s) of the beat pulse that makes the rake lurch. */
+const PULSE_TAU = 0.1;
+/** Flicks: at most this many at once, each a straight stroke this long (s), this narrow. */
+const MAX_FLICKS = 2;
+const FLICK_DUR = 0.18;
+const FLICK_INV_S2 = 1 / (0.01 * 0.01);
+/** Dropper drops per second at full loudness (Pour 1). */
+const DROPPER_RATE = 7;
 
 /** @param {number} x */
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
@@ -365,6 +728,46 @@ export function createMarbler(seed) {
   let kick = 0;
   let clearClock = 0;
   let nextClear = CLEAR_EVERY;
+  let act = 0;
+  let beats = 0;
+  let lastPhase = 0;
+  // The comb sweeping the page (combForward's params) and its schedule.
+  const comb = new Float64Array(8);
+  let combOn = false;
+  let combEnd = 0;
+  let combSpeed = 0;
+  let combD = 0;
+  let combDir = 0;
+  let lastComb = -1e9;
+  /** 0–1 envelope that jumps on each beat and decays fast: the rake moves in lurches with it. */
+  let pulse = 0;
+  /** Quick strokes on snares and hats: per slot (x, y, dir x, dir y, speed, seconds left). */
+  const flicks = new Float64Array(MAX_FLICKS * 6);
+
+  /**
+   * Start a comb across the whole page, in the next of four directions, taking ~a bar.
+   * @param {number} energy @param {number} bpm @param {PourParams} params @param {PourEnv} env
+   */
+  function startComb(energy, bpm, params, env) {
+    const d = COMB_DIRS[combDir++ % 4];
+    const span = d[0] !== 0 ? env.aspect : 1;
+    const lo = d[0] + d[1] < 0 ? -span : 0;
+    const w = COMB_W;
+    const dur = Math.min(3, Math.max(1.2, bpm > 0 ? 240 / bpm : 2));
+    comb[0] = lo - 2 * w;
+    comb[1] = 1 / w;
+    comb[3] = d[0];
+    comb[4] = d[1];
+    comb[5] = 0.16 - 0.08 * energy;
+    comb[6] = rand();
+    comb[7] = 0.012;
+    combEnd = lo + span + 2 * w;
+    combSpeed = (combEnd - comb[0]) / dur;
+    combD = (0.03 + 0.07 * energy) * Math.min(2, params.rake * params.reactivity);
+    combOn = true;
+    lastComb = now;
+    m.combs++;
+  }
 
   /**
    * Queue a drop. Returns the slot, or -1 when every slot is busy (the drop is skipped: the cap).
@@ -376,6 +779,7 @@ export function createMarbler(seed) {
       const p = pours[i];
       if (p.state !== 0) continue;
       p.state = delay > 0 ? 1 : 2;
+      if (ink >= 0) m.drops++;
       p.delay = delay;
       p.x = x;
       p.y = y;
@@ -392,23 +796,25 @@ export function createMarbler(seed) {
   }
 
   /**
-   * A drop (plus maybe satellites) for a hit in `region`, sized by the hit and the params.
+   * A drop (plus maybe satellites) for a hit in `region` at (x, y), sized by the hit and the
+   * params. x < 0: anywhere in the region's spread.
    * @param {number} region @param {number} scale @param {PourAudio} audio
-   * @param {PourParams} params @param {PourEnv} env
+   * @param {PourParams} params @param {PourEnv} env @param {number} x @param {number} y
    */
-  function dropFrom(region, scale, audio, params, env) {
-    lastDrop = now;
+  function dropFrom(region, scale, audio, params, env, x = -1, y = -1) {
     const rc = RECIPES[region];
     const hit = clamp01(0.5 * audio.onsetStrength + 0.5 * (region === 0 ? audio.bassAtt / 2 : 0.5));
     const r = scale * rc.radius * params.size * (0.7 + 0.6 * params.reactivity * hit);
-    const x = env.aspect * (0.5 + (rand() - 0.5) * rc.spread);
-    const y = 0.5 + (rand() - 0.5) * rc.spread;
+    if (x < 0) {
+      x = env.aspect * (0.5 + (rand() - 0.5) * rc.spread);
+      y = 0.5 + (rand() - 0.5) * rc.spread;
+    }
     if (rand() < rc.clear) spawn(x, y, r, 0, -1, -1, rc.pour, 0);
     else spawn(x, y, r, rc.rimT, rc.ink, rc.rimInk, rc.pour, 0);
     if (scale === 1) {
-      // A flick of the brush: a spray of smaller drops around the hit, a third of them vein ink
-      // that later gets squeezed into the dark ground between the cells.
-      const k = 1 + Math.floor(rand() * 3 + 3 * hit);
+      // A flick of the brush: a spray of smaller drops around the hit (more when loud), a third
+      // of them vein ink that later gets squeezed into the dark ground between the cells.
+      const k = Math.floor(rand() * 2 + 5 * hit * m.energy);
       for (let j = 0; j < k; j++) {
         const a = rand() * 2 * Math.PI;
         const d = r * (1.2 + 1.8 * rand());
@@ -441,6 +847,12 @@ export function createMarbler(seed) {
     }
   }
 
+  // Where this frame's hit lands (allocation-free helpers for step).
+  let hitPos = 0.5;
+  let hitAspect = 1;
+  const hx = () => hitAspect * clamp01(0.1 + 0.8 * hitPos + 0.14 * (rand() - 0.5));
+  const hy = () => 0.5 + 0.8 * (rand() - 0.5);
+
   /** @param {Float32Array} arr @param {number} i @param {number} ink */
   function writeInk(arr, i, ink) {
     for (let k = 0; k < 4; k++) arr[i * 4 + k] = k === ink ? 1 : 0;
@@ -453,6 +865,20 @@ export function createMarbler(seed) {
     evD,
     /** Number of events this frame. */
     count: 0,
+    /** Paint drops landed and strokes begun this frame. */
+    started: 0,
+    /** Dropper drops let go so far. */
+    dripped: 0,
+    /** Flicks (quick strokes) started so far. */
+    flicks: 0,
+    /** Combs started so far. */
+    combs: 0,
+    /** A stone (big downbeat drop) landed this frame. */
+    stone: false,
+    /** Hit drops poured for this frame's beat. */
+    hits: 0,
+    /** Paint (not clear) drops laid so far. */
+    drops: 0,
     /** Smoothed loudness 0–1 that sets the pour rate. */
     energy: 0,
     /** 0–1 sheen pulse on hits (≤ 3 rises/s under reduceFlashing). */
@@ -474,6 +900,30 @@ export function createMarbler(seed) {
       sy = (sy - map[2]) * k + map[4];
     },
     /**
+     * A batch of current was baked into the page: carry drops being poured, and the stylus, along
+     * with it so the rest of each lands where its paint now is.
+     * @param {ArrayLike<number>} f the baked flow (createCurrents().acc)
+     */
+    advect(f) {
+      for (const p of pours) {
+        if (p.state === 0) continue;
+        flowDisp(f, p.x, p.y, v);
+        p.x += v[0];
+        p.y += v[1];
+      }
+      for (let o = 0; o < flicks.length; o += 6) {
+        if (flicks[o + 5] <= 0) continue;
+        flowDisp(f, flicks[o], flicks[o + 1], v);
+        flicks[o] += v[0];
+        flicks[o + 1] += v[1];
+      }
+      if (sx >= 0) {
+        flowDisp(f, sx, sy, v);
+        sx += v[0];
+        sy += v[1];
+      }
+    },
+    /**
      * @param {PourAudio} audio
      * @param {number} dt seconds
      * @param {PourParams} params
@@ -481,6 +931,10 @@ export function createMarbler(seed) {
      */
     step(audio, dt, params, env) {
       now += dt;
+      const drops0 = m.drops;
+      pulse = audio.onset && !audio.silent ? Math.max(pulse, clamp01(audio.onsetStrength)) : pulse * Math.exp(-dt / PULSE_TAU);
+      const combs0 = m.combs;
+      const flicks0 = m.flicks;
       const bands = audio.bands;
       // Energy 0–1: half relative to the recent loudest (auto-gain), half absolute.
       const rms = audio.silent ? 0 : audio.rms;
@@ -491,19 +945,73 @@ export function createMarbler(seed) {
       const pour = Math.max(0.05, params.pour);
 
       let region = -1;
-      let scale = 1;
-      if (audio.onset && !audio.silent && now - lastDrop >= (0.5 - 0.38 * energy) / pour) {
+      if (audio.onset && !audio.silent && now - lastDrop >= BEAT_GAP) {
         region = strongestRegion(bands, prevBands);
+        lastDrop = now;
       }
-      // Loud passages also drizzle smaller drops between the hits.
-      drizzle += dt * pour * (energy > 0.2 ? 4 * energy * energy : 0);
-      if (region < 0 && drizzle >= 1 && !audio.silent) {
+      m.hits = 0;
+      if (region >= 0) {
+        // Where the hit sits in the spectrum sets where it lands: bass left … highs right.
+        hitPos = risePosition(bands, prevBands);
+        hitAspect = env.aspect;
+        dropFrom(region, 1, audio, params, env, hx(), hy());
+        // Loud beats pour several drops at once.
+        m.hits = 1 + Math.floor(3 * clamp01(energy * audio.onsetStrength * params.reactivity * Math.min(1, pour)));
+        for (let j = 1; j < m.hits; j++) dropFrom(region, 0.75, audio, params, env, hx(), hy());
+        // Snares and hats flick a quick stroke through the paint near the hit.
+        if (region > 0 && params.rake > 0)
+          for (let i = 0; i < MAX_FLICKS; i++) {
+            const o = i * 6;
+            if (flicks[o + 5] > 0) continue;
+            const a = rand() * 2 * Math.PI;
+            const len = (0.05 + 0.07 * clamp01(audio.onsetStrength)) * Math.min(2, params.rake);
+            flicks[o] = hx();
+            flicks[o + 1] = hy();
+            flicks[o + 2] = Math.cos(a);
+            flicks[o + 3] = Math.sin(a);
+            flicks[o + 4] = len / FLICK_DUR;
+            flicks[o + 5] = FLICK_DUR;
+            m.flicks++;
+            break;
+          }
+      }
+      // Tempo: count beats from the predicted beat phase; each bar's downbeat drops a stone — a
+      // big drop that shoves everything outward.
+      m.stone = false;
+      const bpm = audio.bpm ?? 0;
+      const phase = audio.beatPhase ?? 0;
+      if (bpm > 0 && !audio.silent) {
+        if (phase < lastPhase - 0.5) {
+          beats++;
+          const every = energy > 0.55 ? 8 : 16;
+          if (beats % every === 1 && energy > 0.2 && params.rake > 0 && !combOn) startComb(energy, bpm, params, env);
+          if (beats % 4 === 1 && energy > STONE_ENERGY) {
+            m.stone = true;
+            const r = STONE_R * params.size * (0.85 + 0.3 * energy);
+            spawn(env.aspect * (0.25 + 0.5 * rand()), 0.3 + 0.4 * rand(), r, 0.004, 1, 0, STONE_POUR, 0);
+          }
+        }
+      } else {
+        beats = 0;
+        // No tempo yet: a strong hit in a loud passage combs now and then.
+        if (audio.onset && !audio.silent && audio.onsetStrength >= 0.7 && energy > 0.45 && params.rake > 0 && !combOn && now - lastComb >= 6)
+          startComb(energy, 0, params, env);
+      }
+      lastPhase = phase;
+
+      // The dropper: while music plays a stream of small drops feeds the page, at a rate that
+      // follows the loudness, from a nozzle the spectral centroid steers across the page; the ink
+      // is the loudest part of the spectrum's.
+      if (!audio.silent) drizzle += dt * pour * DROPPER_RATE * energy;
+      // With a beat going, drops are shaken loose on the beats (the stream keeps its rate).
+      if (drizzle >= 1 && !audio.silent && (pulse > 0.25 || drizzle >= 2.5)) {
         drizzle -= 1;
-        region = loudestRegion(bands);
-        scale = 0.6;
+        m.dripped++;
+        const nx = env.aspect * (0.12 + 0.76 * clamp01(centroidS * 2.5) + 0.12 * Math.sin(0.37 * now));
+        const ny = 0.5 + 0.32 * Math.sin(0.23 * now + 1);
+        dropFrom(loudestRegion(bands), 0.6, audio, params, env, nx + 0.04 * (rand() - 0.5), ny + 0.04 * (rand() - 0.5));
       }
-      if (drizzle > 1) drizzle = 1;
-      if (region >= 0) dropFrom(region, scale, audio, params, env);
+      if (drizzle > 3) drizzle = 3;
 
       // The dark ground: now and then a large vein-ink drop blooms, and the cells poured into it
       // squeeze it into the black veins and gaps between them.
@@ -523,7 +1031,10 @@ export function createMarbler(seed) {
       // Renew. The page drifts slowly, by whole sim pixels only (an exact copy, no resampling
       // blur), pushing old paint off one edge and bringing fresh paper in at the other; and now
       // and then (sooner when it's quiet) a large clear drop blooms open over a few seconds.
-      const renew = Math.max(0, params.renew);
+      // Renewal rests in silence (and resumes with the music), so a silent page is still.
+      act += ((audio.silent ? 0 : 1) - act) * (1 - Math.exp(-dt / 0.5));
+      if (audio.silent && act < 0.02) act = 0;
+      const renew = Math.max(0, params.renew) * act;
       if (renew > 0) {
         const a = 0.9 + 0.05 * now;
         const speed = renew * DRIFT_SPEED * dt * env.pxPerUnit;
@@ -549,6 +1060,30 @@ export function createMarbler(seed) {
         }
       }
 
+      // Mean ≈ 1 over a beat of eighth notes, ~2× right after a hit, ~0.35× just before the next.
+      const lurch = 0.35 + 1.8 * pulse;
+      // The comb's step this frame: its front advances; the paint it passes moves by combD in all.
+      if (combOn) {
+        const step = combSpeed * dt * lurch;
+        const amp = Math.min((combD * step * comb[1]) / Math.sqrt(Math.PI), (0.8 * COMB_MAX_AMP) / comb[1]);
+        comb[0] += step;
+        comb[2] = amp;
+        evA[n * 4] = EV_COMB;
+        evA[n * 4 + 1] = comb[0];
+        evA[n * 4 + 2] = comb[1];
+        evA[n * 4 + 3] = amp;
+        evB[n * 4] = comb[3];
+        evB[n * 4 + 1] = comb[4];
+        evB[n * 4 + 2] = comb[5];
+        evB[n * 4 + 3] = comb[6];
+        evC[n * 4] = comb[7];
+        evC[n * 4 + 1] = 0;
+        evC[n * 4 + 2] = 0;
+        evC[n * 4 + 3] = 0;
+        n++;
+        if (comb[0] >= combEnd) combOn = false;
+      }
+
       // The stylus rakes through the paint: height from the (smoothed) spectral centroid, a
       // wobble from the waveform's peak, speed from the energy; it drips clear paper as it goes.
       centroidS += (audio.centroid - centroidS) * (1 - Math.exp(-dt / 0.6));
@@ -558,7 +1093,7 @@ export function createMarbler(seed) {
       if (rake > 0 && !audio.silent && energy > 0.02) {
         const x0 = sx;
         const y0 = sy;
-        sx += dir * rake * (0.04 + 0.16 * energy) * dt;
+        sx += dir * rake * (0.04 + 0.16 * energy) * dt * lurch;
         if (sx > env.aspect + STYLUS_MARGIN) dir = -1;
         if (sx < -STYLUS_MARGIN) dir = 1;
         // Centroid sets the height; a slow meander carries the rivers over the whole page.
@@ -584,6 +1119,26 @@ export function createMarbler(seed) {
           const r = 0.0075 * (0.7 + 0.6 * energy) * Math.min(1.5, Math.sqrt(rake));
           spawn(sx, sy, r, 0, -1, -1, 0.12, 0);
         }
+      }
+      for (let i = 0; i < MAX_FLICKS; i++) {
+        const o = i * 6;
+        if (flicks[o + 5] <= 0) continue;
+        flicks[o + 5] -= dt;
+        const step = flicks[o + 4] * dt;
+        v[0] = flicks[o + 2] * step * STYLUS_GRIP;
+        v[1] = flicks[o + 3] * step * STYLUS_GRIP;
+        clampDrag(FLICK_INV_S2, v);
+        evA[n * 4] = EV_DRAG;
+        evA[n * 4 + 1] = flicks[o];
+        evA[n * 4 + 2] = flicks[o + 1];
+        evA[n * 4 + 3] = FLICK_INV_S2;
+        evB[n * 4] = v[0];
+        evB[n * 4 + 1] = v[1];
+        evB[n * 4 + 2] = 0;
+        evB[n * 4 + 3] = 0;
+        n++;
+        flicks[o] += flicks[o + 2] * step;
+        flicks[o + 1] += flicks[o + 3] * step;
       }
       for (let i = 0; i < 64; i++) prevBands[i] = bands[i] ?? 0;
 
@@ -618,15 +1173,17 @@ export function createMarbler(seed) {
         if (u >= 1) p.state = 0;
       }
       m.count = n;
+      m.started = m.drops - drops0 + m.combs - combs0 + m.flicks - flicks0;
     },
   };
   return m;
 }
 
 /** Manifest defaults of the numeric params (tests/test_builtin_manifests.py pins them). */
-export const DEFAULTS = Object.freeze({ pour: 1, size: 1, rake: 1, reactivity: 1, renew: 1 });
-/** What Reduce motion uses instead of a default: a calmer pour, a gentler rake, slower renewal. */
-const REDUCED = { pour: 0.6, rake: 0.4, renew: 0.5 };
+export const DEFAULTS = Object.freeze({ pour: 1, size: 1, rake: 1, reactivity: 1, renew: 1, currents: 1 });
+/** What Reduce motion uses instead of a default: a calmer pour, a gentler rake, slower renewal,
+ * gentler currents. */
+const REDUCED = { pour: 0.6, rake: 0.4, renew: 0.5, currents: 0.5 };
 const PARAM_KEYS = /** @type {(keyof PourParams)[]} */ (Object.keys(DEFAULTS));
 
 /**
@@ -647,6 +1204,7 @@ export function effectiveParams(params, reduceMotion, out) {
     if (out.pour === DEFAULTS.pour) out.pour = REDUCED.pour;
     if (out.rake === DEFAULTS.rake) out.rake = REDUCED.rake;
     if (out.renew === DEFAULTS.renew) out.renew = REDUCED.renew;
+    if (out.currents === DEFAULTS.currents) out.currents = REDUCED.currents;
   }
   return out;
 }

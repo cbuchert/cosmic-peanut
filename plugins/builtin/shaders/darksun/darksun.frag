@@ -32,11 +32,21 @@ uniform float u_diamond;   // diamond-ring angle, rad (ccw from +x, y up)
 uniform float u_corona;    // corona rotation, rad
 uniform float u_glow;      // horizon glow level (mids + surge)
 uniform float u_painted;   // 1 = paint sky and ground, 0 = transparent
+uniform float u_spike;     // the diamond's beat spike, 0-1 (flash-limited)
+uniform float u_bloom;     // the sun's soft halo on loud passages, 0-1
+uniform float u_warm;      // spectral warmth: 0 cool ash ... 0.5 the cover ... 1 warm
+uniform vec2 u_rings[3];   // beat ripples: age (s), amplitude - a shock along the horizon
 uniform vec3 u_c[8];       // palette: sky top, sky low, ground, wash, glow, rim, disc, corona
 
 const float TAU = 6.2831853;
 
 // #include noise
+
+// Colour temperature: cool desaturates toward ash, warm leans toward `hot`.
+vec3 temper(vec3 c, vec3 hot, float warm) {
+  vec3 cool = mix(vec3(dot(c, vec3(0.3, 0.59, 0.11))), c, 0.45);
+  return warm < 0.5 ? mix(cool, c, warm * 2.0) : mix(c, hot, warm * 2.0 - 1.0);
+}
 
 float depthAt(float x) {
   // Straight segments between texel centres, like a ridgeline.
@@ -57,6 +67,9 @@ void main() {
 
   vec3 SKY_TOP = u_c[0], SKY_LOW = u_c[1], GROUND = u_c[2], WASH = u_c[3];
   vec3 GLOW = u_c[4], RIM = u_c[5], DISC = u_c[6], CORONA = u_c[7];
+  // The lights warm with the music's brightness and cool toward ash when it thins out.
+  RIM = temper(RIM, mix(RIM, CORONA * 1.2, 0.4), u_warm);
+  GLOW = temper(GLOW, mix(GLOW, SKY_LOW * 1.15, 0.35), u_warm);
 
   // ---- sun geometry
   vec2 ds = (fc - u_sun.xy) / u_sun.z;   // sun radii, y down
@@ -96,10 +109,13 @@ void main() {
   float diamond = exp(-da * da / 0.3);
   float ring = exp(-pow((d - 1.0) / 0.03, 2.0));
   float outer = d > 1.0 ? exp(-(d - 1.0) / 0.12) : 0.0;
-  float rimI = u_rim * (0.3 + 2.4 * diamond);
+  float rimI = u_rim * (0.3 + 2.4 * diamond * (1.0 + 1.6 * u_spike));
   light += RIM * rimI * (ring * 0.9 + outer * 0.5);
   // The diamond's bloom spills into the sky.
-  light += RIM * u_rim * diamond * diamond * exp(-max(d - 1.0, 0.0) / 0.22) * 0.8 * step(1.0, d);
+  light += RIM * u_rim * diamond * diamond * exp(-max(d - 1.0, 0.0) / (0.22 + 0.25 * u_spike))
+    * (0.8 + 1.2 * u_spike) * step(1.0, d);
+  // A soft halo blooms round the sun when the music is loud.
+  if (d > 1.0) light += mix(CORONA, RIM, 0.3) * u_bloom * 0.22 * exp(-(d - 1.0) / 1.3);
   // Corona: soft thin streaks, slowly turning, reaching further with the bass.
   float r = d - 1.0;
   if (d > 0.98 && r < 2.6 * u_reach) {
@@ -115,7 +131,15 @@ void main() {
   float dy = fc.y - hz;
   float line = exp(-pow(dy / (0.0022 * u_unit), 2.0));
   float above = dy < 0.0 ? exp(dy / (0.035 * u_unit)) : exp(-dy / (0.006 * u_unit));
-  light += GLOW * (line * (0.7 + 0.4 * u_glow) + above * 0.45 * u_glow);
+  // A shock runs out along the horizon from the centre on every beat.
+  float sx = abs(fc.x - cx) / u_unit;
+  float shock = 0.0;
+  for (int i = 0; i < 3; i++) {
+    float rr = u_rings[i].x * 1.1;
+    float x = (sx - rr) / (0.03 + 0.03 * rr);
+    shock += u_rings[i].y * exp(-x * x) * exp(-rr * 0.9);
+  }
+  light += GLOW * (line * (0.7 + 0.4 * u_glow + 1.2 * shock) + above * (0.45 * u_glow + 0.5 * shock));
 
   // ---- the upside-down range: the live spectrum
   float rangeCov = 0.0;

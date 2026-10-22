@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   BLOOM_CAP,
   BLOOM_SPREAD,
-  createArmWarp,
+  createArmWarp, warpAmount, WARP_MAX,
   WARP_N,
   PALETTES,
-  PATTERNS,
+  PATTERNS, PATTERN_OPTIONS, isAutoPattern,
   FABRICS,
   paletteOf,
   patternIndex,
@@ -17,7 +17,11 @@ import {
   edgesFromWidths,
   createBandWidths,
   createIntensity,
-  PULSE_MAX, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH } from "./tiedye.js";
+  PULSE_MAX, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH,
+  createFlow, FLOW_MAX, createRecord, REC_CAP, MIN_BAND, MAX_BAND, createDominant,
+  createMorph, PHRASE_BEATS, LOOKS, MORPH_TIME, PHRASE_SECONDS,
+  driftPalette, createPaletteDrift, MAX_HUE_DRIFT, createBreath, BREATH_MAX,
+} from "./tiedye.js";
 
 describe("createBandWidths", () => {
   it("gives even bands for a silent track", () => {
@@ -66,6 +70,16 @@ describe("createBandWidths", () => {
     expect(at[0]).toBeCloseTo(at[1], 2);
   });
 
+  it("answers the mix quickly and visibly: a region that comes in takes over within a quarter second", () => {
+    const bw = createBandWidths();
+    const quiet = new Float32Array(64);
+    for (let f = 0; f < 60; f++) bw.step(quiet, 6, 1 / 60, 1);
+    const loud = regionBands(6, 0, 1, 0);
+    let w = bw.step(loud, 6, 1 / 60, 1);
+    for (let f = 1; f < 15; f++) w = bw.step(loud, 6, 1 / 60, 1);
+    expect(w[0]).toBeGreaterThan(0.4);
+  });
+
   it("is monotonic in each region's energy", () => {
     for (let k = 0; k < 6; k++) {
       let prev = 0;
@@ -79,7 +93,9 @@ describe("createBandWidths", () => {
 });
 
 /** @param {Partial<import('./tiedye.js').SpinInput>} o */
-const spinIn = (o = {}) => ({ twist: 1.5, speed: DEFAULT_SPEED, bassAtt: 1, reactivity: 1, reduceMotion: false, ...o });
+const spinIn = (o = {}) => ({
+  twist: 1.5, speed: DEFAULT_SPEED, motion: 1, bassAtt: 1, energy: 0, bpm: 0, reactivity: 1, reduceMotion: false, ...o,
+});
 
 describe("createSpin", () => {
   it("at average bass settles on the Twist param and rotates at a steady rate at 60 and 120 Hz", () => {
@@ -126,6 +142,23 @@ describe("createSpin", () => {
     }
   });
 
+  it("turns faster with the music's energy and a faster confident tempo, easing, bounded", () => {
+    /** Turns per second once settled. */
+    const rate = (/** @type {Partial<import('./tiedye.js').SpinInput>} */ o) => {
+      const s = createSpin();
+      for (let f = 0; f < 300; f++) s.step(1 / 60, spinIn(o));
+      const t0 = s.turns;
+      s.step(1, spinIn(o));
+      return s.turns - t0;
+    };
+    const calm = rate({});
+    expect(rate({ energy: 1 })).toBeGreaterThan(2.5 * calm);
+    expect(rate({ energy: 1, bpm: 160 })).toBeGreaterThan(rate({ energy: 1, bpm: 120 }) * 1.2);
+    expect(rate({ energy: 1, bpm: 60 })).toBeLessThan(rate({ energy: 1, bpm: 120 }));
+    expect(rate({ energy: 1, bpm: 400, bassAtt: 9, reactivity: 2 })).toBeLessThan(0.5);
+    expect(rate({ energy: 1, reactivity: 0 })).toBeCloseTo(rate({ reactivity: 0 }), 6);
+  });
+
   it("with Reduce motion at default Speed rotates slower and changes twist more gently", () => {
     const run = (/** @type {boolean} */ reduceMotion, speed = DEFAULT_SPEED) => {
       const s = createSpin();
@@ -155,7 +188,7 @@ describe("createBlooms", () => {
     const b = createBlooms(1);
     for (let f = 0; f < 30; f++) b.step(false, 0, 1 / 60);
     expect(active(b)).toBe(0);
-    b.step(true, 1, 1 / 60);
+    b.step(true, 0.5, 1 / 60);
     b.step(false, 0, 1 / 60);
     expect(active(b)).toBe(1);
   });
@@ -166,7 +199,7 @@ describe("createBlooms", () => {
     /** @type {number[]} */
     const out = [];
     for (let k = 0; k < n; k++) {
-      b.step(true, 1, 1 / 60);
+      b.step(true, 0.5, 1 / 60);
       out.push(b.data[k * 4], b.data[k * 4 + 1]);
       for (let f = 0; f < 30; f++) b.step(false, 0, 1 / 60);
     }
@@ -184,7 +217,7 @@ describe("createBlooms", () => {
   it("caps the pool, recycling the oldest bloom", () => {
     const b = createBlooms(1);
     for (let k = 0; k < 20; k++) {
-      b.step(true, 1, 1 / 60);
+      b.step(true, 0.5, 1 / 60);
       b.step(false, 0, 1 / 60);
     }
     expect(b.data.length).toBe(BLOOM_CAP * 4);
@@ -192,8 +225,32 @@ describe("createBlooms", () => {
     // Slot 20 % CAP holds the oldest (spawned 2 × CAP frames ago); the next onset replaces it.
     const oldest = (20 % BLOOM_CAP) * 4;
     const before = b.data[oldest + 2];
-    b.step(true, 1, 1 / 60);
+    b.step(true, 0.5, 1 / 60);
     expect(b.data[oldest + 2]).toBeLessThan(before);
+  });
+
+  it("scales with onsetStrength: a strong beat drops two big blooms, a weak onset one small one", () => {
+    /** Count and mean final size of blooms from one onset of `st`. */
+    const drop = (/** @type {number} */ st) => {
+      const b = createBlooms(4);
+      b.step(true, st, 1 / 60);
+      for (let f = 0; f < 60; f++) b.step(false, 0, 1 / 60);
+      let n = 0;
+      let size = 0;
+      for (let i = 0; i < BLOOM_CAP; i++) if (b.data[i * 4 + 3] > 0) (n++, (size += b.data[i * 4 + 2]));
+      return { n, size: size / n };
+    };
+    expect(drop(1).n).toBe(2);
+    expect(drop(0.3).n).toBe(1);
+    expect(drop(1).size).toBeGreaterThan(1.6 * drop(0.3).size);
+  });
+
+  it("rides outward with the flow", () => {
+    const b = createBlooms(2);
+    b.step(true, 0.3, 1 / 60, 0);
+    const r0 = Math.hypot(b.data[0], b.data[1]);
+    for (let f = 0; f < 30; f++) b.step(false, 0, 1 / 60, 0.01);
+    expect(Math.hypot(b.data[0], b.data[1])).toBeCloseTo(r0 + 0.3, 4);
   });
 
   it("bleeds outward (radius grows) and fades out within ~2 s", () => {
@@ -212,6 +269,21 @@ describe("createBlooms", () => {
     expect(peak).toBeLessThanOrEqual(1);
     expect(b.data[3]).toBe(0);
     expect(active(b)).toBe(0);
+  });
+});
+
+describe("warpAmount", () => {
+  it("ripples the arms harder the louder the music, bounded, none at Reactivity 0", () => {
+    let prev = -1;
+    for (const e of [0, 0.25, 0.5, 1]) {
+      const w = warpAmount(e, 1);
+      expect(w).toBeGreaterThan(prev);
+      prev = w;
+    }
+    expect(warpAmount(1, 1)).toBeGreaterThan(2.5 * warpAmount(0, 1));
+    expect(warpAmount(0, 0)).toBe(0);
+    expect(warpAmount(1, 0)).toBe(0);
+    expect(warpAmount(9, 9)).toBeLessThanOrEqual(WARP_MAX);
   });
 });
 
@@ -266,6 +338,10 @@ describe("selection", () => {
     expect(PATTERNS).toEqual(["spiral", "bullseye", "crumple", "shibori"]);
     PATTERNS.forEach((p, i) => expect(patternIndex(p)).toBe(i));
     expect(patternIndex("paisley")).toBe(0);
+    expect(PATTERN_OPTIONS).toEqual(["auto", ...PATTERNS]);
+    expect(isAutoPattern("auto")).toBe(true);
+    expect(isAutoPattern("spiral")).toBe(false);
+    expect(isAutoPattern(undefined)).toBe(false);
     expect(FABRICS).toEqual(["white", "none"]);
     expect(fabricIndex("none")).toBe(1);
     expect(fabricIndex(undefined)).toBe(0);
@@ -316,8 +392,9 @@ describe("band index (mirror of tiedye.frag)", () => {
     };
     expect(ray(0)).toBe(1);
     expect(ray(1.5)).toBeGreaterThan(3);
-    // Rotation turns the whole pattern.
-    expect(band(0, 0.5, 0.3, 1.5, 0.25)).toBe(band(0, 0.5, 0.3 + Math.PI / 2, 1.5, 0));
+    // Rotation turns the whole pattern, the way the outward flow winds it (so the two add up).
+    expect(band(0, 0.5, 0.3, 1.5, 0.25)).toBe(band(0, 0.5, 0.3 - Math.PI / 2, 1.5, 0));
+    expect(bandCoord(0, 0.4, 0.2, 1.5, 0.1, 0)).toBeCloseTo(bandCoord(0, 0.4, 0.2, 1.5, 0, 0.1 / 1.5), 6);
   });
 
   it("bullseye: the band depends on radius only", () => {
@@ -328,6 +405,34 @@ describe("band index (mirror of tiedye.frag)", () => {
     const out = new Set();
     for (let k = 0; k < 50; k++) out.add(band(1, k / 50, 0));
     expect(out.size).toBe(n);
+  });
+
+  it("the flow carries the bands outward from the knot; the spiral takes 1–3 arms", () => {
+    // Shibori stripes flow away from the center fold (here across x, at no rotation).
+    for (const x of [0.1, 0.45]) expect(bandCoord(3, x + 0.13, 0.3, 1.5, 0, 0.13)).toBeCloseTo(bandCoord(3, x, 0.3, 1.5, 0, 0), 5);
+    for (const p of [0, 1]) {
+      for (const r of [0.2, 0.5, 0.8]) {
+        const x = r * Math.cos(0.4);
+        const y = r * Math.sin(0.4);
+        const f = 0.13;
+        const s = (r + f) / r;
+        expect(bandCoord(p, x * s, y * s, 1.5, 0.1, f), `pattern ${p} r ${r}`).toBeCloseTo(bandCoord(p, x, y, 1.5, 0.1, 0), 5);
+      }
+    }
+    // Arms: the palette repeats `arms` times around the circle.
+    const around = (/** @type {number} */ arms) => {
+      let wraps = 0;
+      const at = (/** @type {number} */ k) => (2 * Math.PI * (k + 0.5)) / 360;
+      let prev = bandCoord(0, 0.5 * Math.cos(at(0)), 0.5 * Math.sin(at(0)), 0, 0, 0, arms);
+      for (let k = 1; k <= 360; k++) {
+        const a = at(k);
+        const t = bandCoord(0, 0.5 * Math.cos(a), 0.5 * Math.sin(a), 0, 0, 0, arms);
+        if (Math.abs(t - prev) > 0.5) wraps++;
+        prev = t;
+      }
+      return wraps;
+    };
+    expect([1, 2, 3].map(around)).toEqual([1, 2, 3]);
   });
 
   it("shibori: accordion-folded stripes, mirror-symmetric across each fold", () => {
@@ -367,3 +472,360 @@ describe("createIntensity", () => {
     expect(off.max).toBeGreaterThan(1 + PULSE_MAX / 2);
   });
 });
+
+/** @param {Partial<import('./tiedye.js').FlowInput>} o */
+const flowIn = (o = {}) => ({
+  rms: 0, bassAtt: 1, onset: false, onsetStrength: 0, bpm: 0, beatPhase: 0,
+  reactivity: 1, motion: 1, speed: DEFAULT_SPEED, reduceMotion: false, ...o,
+});
+/** Run a flow for `s` seconds at `hz` with input `o` (a function of the frame, or fixed). */
+const runFlow = (/** @type {ReturnType<typeof createFlow>} */ fl, /** @type {number} */ s, /** @type {any} */ o, hz = 60) => {
+  for (let f = 0; f < s * hz; f++) fl.step(1 / hz, typeof o === "function" ? o(f, hz) : o);
+  return fl;
+};
+
+describe("createFlow", () => {
+  it("drifts outward slowly in silence and streams several times faster when loud", () => {
+    const quiet = runFlow(createFlow(), 3, flowIn());
+    const q0 = quiet.flow;
+    runFlow(quiet, 2, flowIn());
+    const loud = runFlow(createFlow(), 3, flowIn({ rms: 0.3, bassAtt: 1.3 }));
+    const l0 = loud.flow;
+    runFlow(loud, 2, flowIn({ rms: 0.3, bassAtt: 1.3 }));
+    expect(quiet.flow - q0).toBeGreaterThan(0.02);
+    expect(loud.flow - l0).toBeGreaterThan(4 * (quiet.flow - q0));
+  });
+
+  it("surges on each beat: a quick, smooth push scaled by onsetStrength, the same at 60 and 120 Hz", () => {
+    const loud = { rms: 0.3 };
+    /** Extra distance in the 0.4 s after a beat of `strength`, over a beatless run. */
+    const push = (/** @type {number} */ strength, hz = 60) => {
+      const a = runFlow(createFlow(), 2, flowIn(loud), hz);
+      const b = runFlow(createFlow(), 2, flowIn(loud), hz);
+      const a0 = a.flow;
+      const b0 = b.flow;
+      runFlow(a, 0.4, (/** @type {number} */ f) => flowIn({ ...loud, onset: f === 0, onsetStrength: strength }), hz);
+      runFlow(b, 0.4, flowIn(loud), hz);
+      return a.flow - a0 - (b.flow - b0);
+    };
+    expect(push(1)).toBeGreaterThan(0.06);
+    expect(push(0.4)).toBeLessThan(push(1) * 0.7);
+    expect(push(0.4)).toBeGreaterThan(0);
+    expect(Math.abs(push(1, 120) / push(1, 60) - 1)).toBeLessThan(0.05);
+    // Bounded however strong, and smooth: the speed never jumps between frames.
+    const fl = runFlow(createFlow(), 2, flowIn(loud));
+    let v = fl.speed;
+    for (let f = 0; f < 120; f++) {
+      fl.step(1 / 60, flowIn({ ...loud, onset: f % 6 === 0, onsetStrength: 50 }));
+      // (0.25 unit radii/s between frames is a 0.004 radius change of step: smooth to the eye.)
+      expect(Math.abs(fl.speed - v)).toBeLessThan(0.25);
+      expect(fl.speed).toBeLessThanOrEqual(FLOW_MAX);
+      v = fl.speed;
+    }
+  });
+
+  /** Distance travelled over 4 s of loud beats every 0.5 s, after 1 s of settling. */
+  const travel = (/** @type {Partial<import('./tiedye.js').FlowInput>} */ o, hz = 60) => {
+    const beat = (/** @type {number} */ f, /** @type {number} */ h) => flowIn({ rms: 0.3, onset: f % (h / 2) === 0, onsetStrength: 0.9, ...o });
+    const fl = runFlow(createFlow(), 1, beat, hz);
+    const f0 = fl.flow;
+    return runFlow(fl, 4, beat, hz).flow - f0;
+  };
+
+  it("scales the music's part of the flow by Reactivity; the calm drift stays", () => {
+    const drift = travel({ rms: 0, onset: false });
+    expect(travel({ reactivity: 0 })).toBeCloseTo(drift, 3);
+    expect(travel({ reactivity: 2 })).toBeGreaterThan(travel({ reactivity: 1 }) * 1.5);
+    expect(travel({ reactivity: 1 })).toBeGreaterThan(drift * 4);
+  });
+
+  it("scales with Speed and Motion; Reduce motion at the defaults is gentler but still follows the music", () => {
+    const normal = travel({});
+    expect(travel({ speed: 2 })).toBeCloseTo(2 * normal, 2);
+    expect(travel({ motion: 0.5 })).toBeCloseTo(0.5 * normal, 2);
+    expect(travel({ motion: 0 })).toBe(0);
+    const reduced = travel({ reduceMotion: true });
+    expect(reduced).toBeLessThan(normal * 0.5);
+    expect(reduced).toBeGreaterThan(travel({ reduceMotion: true, rms: 0, onset: false }) * 3);
+    // A Speed or Motion the user picked is respected.
+    expect(travel({ reduceMotion: true, speed: 1.5 })).toBeCloseTo(travel({ speed: 1.5 }), 6);
+    expect(travel({ reduceMotion: true, motion: 1.5 })).toBeCloseTo(travel({ motion: 1.5 }), 6);
+  });
+
+  it("locks to a confident tempo: a beat (and a surge) on every beatPhase wrap; else on strong onsets", () => {
+    const fl = createFlow();
+    let beats = 0;
+    /** @type {number[]} */
+    const per = [];
+    let last = 0;
+    for (let f = 0; f < 600; f++) {
+      fl.step(1 / 60, flowIn({ rms: 0.3, bpm: 120, beatPhase: (f / 30) % 1 }));
+      if (fl.beat) {
+        beats++;
+        if (f > 120) per.push(fl.flow - last);
+        last = fl.flow;
+      }
+    }
+    expect(beats).toBeGreaterThanOrEqual(19);
+    expect(beats).toBeLessThanOrEqual(20);
+    // Every beat carries the dye the same distance (so new bands cross a radius once per beat).
+    for (const d of per) expect(d).toBeCloseTo(per[0], 3);
+    expect(per[0]).toBeGreaterThan(0.5 * travel({ onset: false }) / 8);
+    const nb = createFlow();
+    let n = 0;
+    for (let f = 0; f < 240; f++) {
+      nb.step(1 / 60, flowIn({ rms: 0.3, onset: f % 15 === 0, onsetStrength: f % 30 === 0 ? 0.9 : 0.3 }));
+      if (nb.beat) n++;
+    }
+    expect(n).toBe(8);
+  });
+});
+
+describe("createRecord", () => {
+  /** Outer edges (ages) of the recorded bands, newest first. */
+  const outer = (/** @type {ReturnType<typeof createRecord>} */ r) => Array.from({ length: REC_CAP }, (_, k) => r.data[k * 4]);
+
+  it("lays down a band at the knot on each beat, with its color and ink; bands ride outward on the flow", () => {
+    const r = createRecord();
+    r.step(1, true, 3, 1.1);
+    expect(r.data[0]).toBeCloseTo(0, 6); // born at the center, zero width
+    expect(r.data[1]).toBe(3);
+    expect(r.data[2]).toBeCloseTo(1.1, 6);
+    r.step(1.3, false, 0, 0);
+    expect(r.data[0]).toBeCloseTo(0.3, 6);
+    r.step(1.5, true, 5, 0.8);
+    expect(r.data[1]).toBe(5);
+    expect(r.data[0]).toBeCloseTo(0, 6);
+    expect(r.data[4]).toBeCloseTo(0.5, 6); // the earlier band, now further out
+    expect(r.data[5]).toBe(3);
+    const e = outer(r);
+    for (let k = 1; k < REC_CAP; k++) expect(e[k]).toBeGreaterThan(e[k - 1]);
+  });
+
+  it("skips beats closer than MIN_BAND, renews every MAX_BAND in silence (next color), keeps REC_CAP bands", () => {
+    const r = createRecord();
+    r.step(10, true, 2, 1);
+    r.step(10 + MIN_BAND / 2, true, 4, 1);
+    expect(r.data[1]).toBe(2); // too soon: no new band
+    for (let f = 10; f < 10 + 3 * MAX_BAND; f += 0.01) r.step(f, false, 0, 0.9);
+    // In silence a new band appears every MAX_BAND, each one the next palette color.
+    expect(r.data[0]).toBeLessThan(MAX_BAND);
+    expect(r.data[1]).toBe(2 + 2);
+    expect(r.data[2]).toBeCloseTo(0.9, 6);
+    expect(r.data.length).toBe(REC_CAP * 4);
+    expect(r.data[(REC_CAP - 1) * 4]).toBeGreaterThan(100);
+    // Fully dyed from the first frame: varied bands out past the screen corners.
+    const fresh = createRecord().step(0, false, 0, 1);
+    expect(fresh.data[(REC_CAP - 2) * 4]).toBeGreaterThan(2.1);
+    expect(new Set([fresh.data[1], fresh.data[5], fresh.data[9]]).size).toBe(3);
+  });
+});
+
+describe("createDominant", () => {
+  /** 64 bands: `levels[k]` in region k of n. */
+  const mix = (/** @type {number[]} */ levels) => {
+    const b = new Float32Array(64);
+    for (let i = 0; i < 64; i++) b[i] = levels[Math.floor((i * levels.length) / 64)];
+    return b;
+  };
+
+  it("names the palette region that stands out in the mix right now; silence keeps the last", () => {
+    const d = createDominant();
+    let c = 0;
+    for (let f = 0; f < 240; f++) c = d.step(mix([0.8, 0.2, 0.1, 0.1, 0.1, 0.1]), 6, 1 / 60);
+    expect(c).toBe(0);
+    // A burst in region 4 stands out against its recent level even though bass is louder.
+    for (let f = 0; f < 6; f++) c = d.step(mix([0.8, 0.2, 0.1, 0.1, 0.5, 0.1]), 6, 1 / 60);
+    expect(c).toBe(4);
+    for (let f = 0; f < 120; f++) c = d.step(mix([0, 0, 0, 0, 0, 0]), 6, 1 / 60);
+    expect(c).toBe(4);
+    expect(d.step(mix([0.1, 0.1, 0.9, 0.1, 0.1]), 5, 1 / 60)).toBeLessThan(5);
+  });
+});
+
+/** @param {Partial<import('./tiedye.js').MorphInput>} o */
+const morphIn = (o = {}) => ({ auto: true, home: 0, beat: false, tempo: false, energy: 0.5, reduceMotion: false, ...o });
+
+describe("createMorph", () => {
+  it("holds the chosen pattern when one is picked, still marking phrases (for the palette drift)", () => {
+    const m = createMorph();
+    let phrases = 0;
+    for (let f = 1; f <= 60 * 120; f++) {
+      m.step(1 / 60, morphIn({ auto: false, home: 2, beat: f % 30 === 0, tempo: true }));
+      expect(m.a).toBe(2);
+      expect(m.mix).toBe(0);
+      if (m.phrase) phrases++;
+    }
+    expect(phrases).toBe(Math.floor(240 / PHRASE_BEATS));
+  });
+
+  it("auto: morphs smoothly to the next look once a phrase (PHRASE_BEATS beats) with a tempo", () => {
+    const m = createMorph();
+    const beatEvery = 30; // 120 BPM at 60 Hz
+    /** @type {{ f: number, mix: number }[]} */
+    const starts = [];
+    const seen = new Set();
+    let mix = 0;
+    let prevB = -1;
+    for (let f = 0; f < beatEvery * PHRASE_BEATS * LOOKS.length + 60 * MORPH_TIME * 2; f++) {
+      m.step(1 / 60, morphIn({ beat: f % beatEvery === 0 && f > 0, tempo: true }));
+      expect(m.mix).toBeGreaterThanOrEqual(0);
+      expect(m.mix).toBeLessThanOrEqual(1);
+      // Smooth: a small step each frame, or the handover (all b → b becomes the new a).
+      const handover = m.mix === 0 && mix > 1 - 2 / (60 * MORPH_TIME) && m.a === prevB;
+      if (!handover) expect(Math.abs(m.mix - mix)).toBeLessThanOrEqual(1 / (60 * MORPH_TIME) + 1e-9);
+      if (mix === 0 && m.mix > 0) starts.push({ f, mix: m.mix });
+      mix = m.mix;
+      prevB = m.b;
+      seen.add(m.a);
+    }
+    expect(starts.length).toBeGreaterThanOrEqual(LOOKS.length);
+    expect(starts[0].f).toBe(beatEvery * PHRASE_BEATS);
+    expect(starts[1].f - starts[0].f).toBe(beatEvery * PHRASE_BEATS);
+    expect([...seen].sort()).toEqual([0, 1, 2, 3]); // every pattern family comes round
+  });
+
+  /** Seconds until the first morph starts, for energy(t). */
+  const firstMorph = (/** @type {(t: number) => number} */ energy, reduceMotion = false) => {
+    const m = createMorph();
+    for (let f = 0; f < 60 * 120; f++) {
+      m.step(1 / 60, morphIn({ energy: energy(f / 60), reduceMotion }));
+      if (m.mix > 0) return f / 60;
+    }
+    return Infinity;
+  };
+
+  it("without a tempo: a phrase every PHRASE_SECONDS of music, sooner when the energy shifts, slower in quiet", () => {
+    const steady = firstMorph(() => 0.8);
+    expect(steady).toBeGreaterThan(PHRASE_SECONDS * 0.8);
+    expect(steady).toBeLessThan(PHRASE_SECONDS * 1.3);
+    // The music drops at 8 s: the look changes within a few seconds of the drop.
+    const drop = firstMorph((t) => (t < 8 ? 0.8 : 0.2));
+    expect(drop).toBeGreaterThan(8);
+    expect(drop).toBeLessThan(12);
+    // Silence still changes now and then, but slowly.
+    const silent = firstMorph(() => 0);
+    expect(silent).toBeGreaterThan(steady * 1.5);
+    expect(silent).toBeLessThan(90);
+  });
+
+  it("under Reduce motion morphs at half the speed", () => {
+    const run = (/** @type {boolean} */ reduceMotion) => {
+      const m = createMorph();
+      let n = 0;
+      for (let f = 0; f < 60 * 40; f++) {
+        m.step(1 / 60, morphIn({ beat: f % 30 === 0 && f > 0, tempo: true, reduceMotion }));
+        if (m.mix > 0) n++;
+      }
+      return n;
+    };
+    expect(run(true)).toBeCloseTo(2 * run(false), -1);
+  });
+});
+
+describe("palette drift", () => {
+  /** Hue angle (radians) of an RGB color in opponent space, the rotation driftPalette applies. */
+  const hue = (/** @type {ArrayLike<number>} */ c, i = 0) => {
+    const [r, g, b] = [c[i * 3], c[i * 3 + 1], c[i * 3 + 2]];
+    return Math.atan2(Math.sqrt(3) * (g - b), 2 * r - g - b);
+  };
+  const wrap = (/** @type {number} */ a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+  it("rotates each dye's hue by the drift (none at 0), staying a valid color", () => {
+    const base = new Float32Array(MAX_COLORS * 3);
+    const n = paletteOf("rainbow", base);
+    const out = new Float32Array(MAX_COLORS * 3);
+    driftPalette(base, n, 0, out);
+    expect(Array.from(out)).toEqual(Array.from(base));
+    driftPalette(base, n, 0.3, out);
+    for (let i = 0; i < n; i++) {
+      expect(wrap(hue(out, i) - hue(base, i))).toBeCloseTo(0.3, 1);
+      for (let c = 0; c < 3; c++) {
+        expect(out[i * 3 + c]).toBeGreaterThanOrEqual(0);
+        expect(out[i * 3 + c]).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("drifts the hue gradually on phrases, within ±MAX_HUE_DRIFT, never jumping", () => {
+    const d = createPaletteDrift(5);
+    let h = d.step(1 / 60, false);
+    expect(h).toBe(0);
+    for (let f = 0; f < 600; f++) h = d.step(1 / 60, false);
+    expect(h).toBe(0); // no phrase, no drift
+    /** @type {number[]} */
+    const settled = [];
+    for (let p = 0; p < 6; p++) {
+      for (let f = 0; f < 60 * 16; f++) {
+        const next = d.step(1 / 60, f === 0);
+        expect(Math.abs(next - h)).toBeLessThan(0.004);
+        expect(Math.abs(next)).toBeLessThanOrEqual(MAX_HUE_DRIFT);
+        h = next;
+      }
+      settled.push(+h.toFixed(3));
+    }
+    expect(new Set(settled).size).toBeGreaterThanOrEqual(5);
+    expect(Math.max(...settled.map(Math.abs))).toBeGreaterThan(MAX_HUE_DRIFT / 3);
+  });
+});
+
+describe("createBreath", () => {
+  const settled = (/** @type {number} */ midAtt, /** @type {number} */ trebAtt, reactivity = 1) => {
+    const b = createBreath();
+    for (let f = 0; f < 120; f++) b.step(1 / 60, midAtt, trebAtt, reactivity);
+    return { dye: b.dye, bleed: b.bleed };
+  };
+
+  it("deepens the dye with the mids and loosens the edges with the treble: monotonic, bounded", () => {
+    let prev = settled(0, 0);
+    for (const v of [0.5, 1, 1.5, 2, 5]) {
+      const cur = settled(v, v);
+      expect(cur.dye).toBeGreaterThanOrEqual(prev.dye);
+      expect(cur.bleed).toBeGreaterThanOrEqual(prev.bleed);
+      prev = cur;
+    }
+    expect(settled(1, 1)).toEqual({ dye: 0, bleed: 0 });
+    expect(settled(9, 9, 2).dye).toBeLessThanOrEqual(1);
+    expect(settled(0, 0, 2).dye).toBeGreaterThanOrEqual(-1);
+    expect(settled(9, 9, 2).bleed).toBeLessThanOrEqual(1);
+    expect(settled(9, 9, 2).bleed).toBeGreaterThan(0.5);
+    expect(settled(1.6, 1.6, 0)).toEqual({ dye: 0, bleed: 0 });
+  });
+
+  it("breathes smoothly: mids slamming every frame barely flicker it", () => {
+    const b = createBreath();
+    let prev = 0;
+    for (let f = 0; f < 120; f++) {
+      b.step(1 / 60, f % 2 ? 0 : 2, f % 2 ? 0 : 2, 2);
+      expect(Math.abs(b.dye - prev)).toBeLessThan(0.08);
+      prev = b.dye;
+    }
+  });
+});
+
+describe("createIntensity breathing", () => {
+  it("deepens with the breath, bounded, and a fast breath is still limited to 3 rises per second", () => {
+    const at = (/** @type {number} */ breath) => {
+      const it = createIntensity();
+      let v = 1;
+      for (let f = 0; f < 60; f++) v = it.step(false, 0, 1 / 60, true, breath);
+      return v;
+    };
+    expect(at(0)).toBeCloseTo(1, 6);
+    expect(at(1)).toBeCloseTo(1 + BREATH_MAX, 6);
+    expect(at(-1)).toBeCloseTo(1 - BREATH_MAX, 6);
+    expect(at(-1)).toBeGreaterThan(0.5);
+    const it = createIntensity();
+    let prev = 0;
+    let rising = false;
+    let rises = 0;
+    for (let f = 0; f < 240; f++) {
+      const v = it.step(f % 6 === 0, 1, 1 / 60, true, f % 6 < 3 ? 1 : -1);
+      if (v > prev + 1e-6 && !rising) rises++;
+      rising = v > prev + 1e-6;
+      prev = v;
+    }
+    expect(rises / 4).toBeLessThanOrEqual(3.25);
+  });
+});
+

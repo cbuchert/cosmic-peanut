@@ -1,6 +1,7 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
 import { createGlow, GLOW_RANGE, DEFAULTS, isPainted, layout, PALETTES, palette, resolveParams, BEAM_BRIGHT, BEAM_WIDTH, createBeam, createDiamond, createSun, createSurge, DIAMOND_RATE, REACH_MAX, REACH_MIN, RIM_MAX, RIM_MIN } from "./darksun.js";
+import { SWELL, REFLECT_REST, reflection, beatHit, createBreath, createSpike, createSunMood, CORONA_RATE, createEnergy, createFlow, createRipples, RIPPLES, createSkyTone, FLOW, loudness, SKY_BRIGHT } from "./darksun.js";
 
 describe("createSun: bass swells the rim and the corona's reach", () => {
   it("is bounded and smooth under violent kicks, and grows with the bass", () => {
@@ -145,6 +146,25 @@ describe("layout", () => {
     }
   });
 
+  it("raises the sun with the song (rise 0–1), clear of the top and the horizon even fully swollen", () => {
+    for (const [w, h] of sizes) {
+      for (const sunSize of [0.5, 1, 1.6]) {
+        const at = (/** @type {number} */ rise) => layout(w, h, { ...opts, sunSize, rise }, /** @type {any} */ ({}));
+        const tag = `${w}x${h} sun ${sunSize}`;
+        let prev = Infinity;
+        for (let rise = 0; rise <= 1; rise += 0.1) {
+          const L = at(rise);
+          expect(L.sunY, tag).toBeLessThanOrEqual(prev + 1e-9);
+          expect(L.sunY - 1.2 * L.sunR * (1 + SWELL), tag).toBeGreaterThanOrEqual(-1e-9);
+          expect(L.sunY + 1.3 * L.sunR * (1 + SWELL), tag).toBeLessThanOrEqual(L.horizon + 1e-9);
+          prev = L.sunY;
+        }
+        if (w > h && sunSize === 1) expect(at(0).sunY - at(1).sunY, tag).toBeGreaterThan(0.06 * h);
+      }
+    }
+    expect(layout(1280, 720, opts, /** @type {any} */ ({})).sunY).toBeCloseTo(layout(1280, 720, { ...opts, rise: 0.5 }, /** @type {any} */ ({})).sunY, 6);
+  });
+
   it("centres the range on the requested width; its depth and the beam scale with min(w, h)", () => {
     for (const [w, h] of sizes) {
       const L = layout(w, h, opts, /** @type {any} */ ({}));
@@ -239,5 +259,348 @@ describe("createGlow: the horizon breathes with the mids", () => {
     const still = createGlow();
     for (let f = 0; f < 120; f++) still.step(2, 0, dt, 0);
     expect(still.value).toBeCloseTo(GLOW_RANGE[0], 6);
+  });
+});
+
+describe("loudness and createEnergy: how loud the music is, absolutely (quiet passages stay calm)", () => {
+  it("maps rms in dB to 0–1, monotonic and bounded; NaN is silence", () => {
+    expect(loudness(0)).toBe(0);
+    expect(loudness(NaN)).toBe(0);
+    expect(loudness(0.01)).toBeLessThan(0.1); // −40 dBFS: a quiet passage
+    expect(loudness(0.25)).toBeGreaterThan(0.9); // mastered, loud
+    expect(loudness(5)).toBe(1);
+    let prev = 0;
+    for (let r = 0.001; r < 1; r *= 1.2) {
+      const l = loudness(r);
+      expect(l).toBeGreaterThanOrEqual(prev);
+      prev = l;
+    }
+  });
+
+  it("smooths it (a quick rise, a slower fall) the same at 60 and 120 Hz", () => {
+    /** @param {number} hz @param {number} secs @param {number} rms */
+    const run = (hz, secs, rms, e = createEnergy()) => {
+      for (let f = 0; f < hz * secs; f++) e.step(rms, 1 / hz);
+      return e;
+    };
+    expect(Math.abs(run(60, 0.3, 0.3).value - run(120, 0.3, 0.3).value)).toBeLessThan(0.01);
+    expect(run(60, 0.5, 0.3).value).toBeGreaterThan(0.7); // rises within half a second
+    const up = run(60, 3, 0.3);
+    run(60, 0.5, 0, up);
+    expect(up.value).toBeGreaterThan(0.4); // falls more slowly
+    run(60, 6, 0, up);
+    expect(up.value).toBeLessThan(0.02);
+    // A single loud sample barely moves it: no jitter.
+    const e = run(60, 1, 0.01);
+    const before = e.value;
+    e.step(1, 1 / 60);
+    expect(e.value - before).toBeLessThan(0.1);
+  });
+});
+
+describe("beatHit: a beat's kick to the landscape, scaled by the music's energy", () => {
+  it("is 0 without an onset, grows with strength, energy and reactivity, and stays 0–1", () => {
+    expect(beatHit(false, 1, 1, 1)).toBe(0);
+    expect(beatHit(true, 1, 1, 1)).toBeGreaterThan(0.8);
+    expect(beatHit(true, 1, 0.1, 1)).toBeLessThan(0.25 * beatHit(true, 1, 1, 1)); // quiet: a nudge
+    expect(beatHit(true, 0.3, 1, 1)).toBeLessThan(beatHit(true, 1, 1, 1));
+    expect(beatHit(true, 1, 1, 0)).toBe(0);
+    expect(beatHit(true, 1, 0.5, 2)).toBeGreaterThan(beatHit(true, 1, 0.5, 1));
+    expect(beatHit(true, 99, 99, 99)).toBeLessThanOrEqual(1);
+    expect(beatHit(true, NaN, NaN, NaN)).toBe(0);
+  });
+});
+
+describe("createFlow: the washes' drift clock and turbulence follow the energy and surge on beats", () => {
+  const dt = 1 / 60;
+  it("drifts slowly at rest and several times faster when loud, smoothly, the same at 60 and 120 Hz", () => {
+    /** @param {number} hz @param {number} energy @param {number} r @param {number} motion */
+    const run = (hz, energy, r = 1, motion = 1) => {
+      const f = createFlow();
+      for (let i = 0; i < hz * 4; i++) f.step(energy, 0, 1 / hz, r, motion);
+      return f;
+    };
+    const calm = run(60, 0);
+    const loud = run(60, 1);
+    expect(calm.clock).toBeCloseTo(4 * FLOW.REST, 2);
+    expect(loud.clock).toBeGreaterThan(3 * calm.clock);
+    expect(Math.abs(run(120, 0.7).clock - run(60, 0.7).clock)).toBeLessThan(0.01 * run(60, 0.7).clock);
+    expect(loud.turb).toBeGreaterThan(calm.turb + 0.3);
+    expect(run(60, 1, 0).clock).toBeCloseTo(calm.clock, 6); // reactivity 0: the resting drift
+    expect(run(60, 1, 1, 0.4).clock).toBeCloseTo(0.4 * loud.clock, 6); // Reduce motion
+  });
+
+  it("surges on a beat: faster for a moment, then back, bounded and never stepping", () => {
+    const f = createFlow();
+    for (let i = 0; i < 120; i++) f.step(0.8, 0, dt, 1, 1);
+    const cruise = f.speed;
+    let prev = f.speed;
+    let top = 0;
+    for (let i = 0; i < 120; i++) {
+      f.step(0.8, i % 30 === 0 ? 1 : 0, dt, 2, 1);
+      expect(f.speed).toBeLessThanOrEqual(FLOW.MAX);
+      expect(f.turb).toBeLessThanOrEqual(1);
+      expect(Math.abs(f.speed - prev)).toBeLessThan(0.25 * FLOW.MAX); // eased, not a jump
+      top = Math.max(top, f.speed);
+      prev = f.speed;
+    }
+    expect(top).toBeGreaterThan(1.5 * cruise);
+    for (let i = 0; i < 120; i++) f.step(0.8, 0, dt, 1, 1);
+    expect(f.speed).toBeCloseTo(cruise, 2);
+  });
+});
+
+describe("createSkyTone: the sky warms and brightens as the music opens up, cools to ash when sparse", () => {
+  const dt = 1 / 60;
+  /** @param {number} centroid @param {number} energy @param {number} r */
+  const settle = (centroid, energy, r = 1, t = createSkyTone()) => {
+    for (let i = 0; i < 600; i++) t.step(centroid, energy, dt, r, true);
+    return t;
+  };
+  it("is monotonic in brightness and energy, bounded, and the cover's tone at reactivity 0", () => {
+    const sparse = settle(0.03, 0.05);
+    const open = settle(0.2, 1);
+    expect(open.warm).toBeGreaterThan(sparse.warm + 0.4);
+    expect(open.bright).toBeGreaterThan(sparse.bright + 0.1);
+    expect(settle(0.15, 0.5).warm).toBeGreaterThan(settle(0.05, 0.5).warm);
+    expect(settle(0.1, 0.8).bright).toBeGreaterThan(settle(0.1, 0.3).bright);
+    for (const t of [sparse, open, settle(9, 9, 2), settle(NaN, NaN)]) {
+      expect(t.warm).toBeGreaterThanOrEqual(0);
+      expect(t.warm).toBeLessThanOrEqual(1);
+      expect(t.bright).toBeGreaterThanOrEqual(SKY_BRIGHT[0]);
+      expect(t.bright).toBeLessThanOrEqual(SKY_BRIGHT[1]);
+    }
+    const still = settle(0.2, 1, 0);
+    expect(still.warm).toBeCloseTo(0.5, 6);
+    expect(still.bright).toBeCloseTo(1, 6);
+  });
+
+  it("changes smoothly, and under reduceFlashing starts at most 3 brightenings a second", () => {
+    const t = settle(0.05, 0.1);
+    let prevW = t.warm;
+    let prevB = t.bright;
+    let rises = 0;
+    let falling = true;
+    for (let i = 0; i < 600; i++) {
+      const on = Math.floor(i / 3) % 2 === 0; // a 10 Hz strobe of energy and brightness
+      t.step(on ? 0.25 : 0.02, on ? 1 : 0, dt, 2, true);
+      expect(Math.abs(t.warm - prevW)).toBeLessThan(0.02);
+      expect(Math.abs(t.bright - prevB)).toBeLessThan(0.01);
+      if (t.bright > prevB && falling) rises++;
+      if (t.bright !== prevB) falling = t.bright < prevB;
+      prevW = t.warm;
+      prevB = t.bright;
+    }
+    expect(rises / 10).toBeLessThanOrEqual(3);
+  });
+});
+
+describe("createBreath: between beats the landscape breathes in time (when the tempo is known)", () => {
+  const dt = 1 / 60;
+  it("peaks on the beat and dips between, scaled by energy and reactivity, 0 without a tempo", () => {
+    const b = createBreath();
+    for (let i = 0; i < 240; i++) b.step(120, (i / 30) % 1, 1, dt, 1);
+    const onBeat = b.step(120, 0, 1, dt, 1);
+    const offBeat = b.step(120, 0.5, 1, dt, 1);
+    expect(onBeat).toBeGreaterThan(0.8);
+    expect(offBeat).toBeLessThan(0.1);
+    const quiet = createBreath();
+    for (let i = 0; i < 240; i++) quiet.step(120, (i / 30) % 1, 0.1, dt, 1);
+    expect(quiet.step(120, 0, 0.1, dt, 1)).toBeLessThan(0.25 * onBeat);
+    const none = createBreath();
+    for (let i = 0; i < 240; i++) none.step(0, 0, 1, dt, 1);
+    expect(none.value).toBeLessThan(0.01);
+    const still = createBreath();
+    for (let i = 0; i < 240; i++) still.step(120, (i / 30) % 1, 1, dt, 0);
+    expect(still.value).toBe(0);
+  });
+
+  it("fades in and out as the tempo is found and lost, never jumping", () => {
+    const b = createBreath();
+    let prev = 0;
+    for (let i = 0; i < 600; i++) {
+      const bpm = i > 120 && i < 400 ? 120 : 0;
+      const v = b.step(bpm, bpm ? (i / 30) % 1 : 0, 1, dt, 2);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+      expect(Math.abs(v - prev)).toBeLessThan(0.12); // a 2 Hz breath moves ≈ 0.1 a frame at most
+      prev = v;
+    }
+  });
+});
+
+describe("createRipples: each beat sends a ripple out from the beam (and a shock along the horizon)", () => {
+  const dt = 1 / 60;
+  it("spawns on a beat, ages at wall-clock speed, fades, and keeps the newest RIPPLES", () => {
+    const r = createRipples();
+    for (let i = 0; i < 60; i++) r.step(0, dt);
+    for (let k = 0; k < RIPPLES; k++) expect(r.rings[2 * k + 1]).toBe(0); // silence: none
+    r.step(0.9, dt);
+    const amps = () => Array.from({ length: RIPPLES }, (_, k) => r.rings[2 * k + 1]);
+    const newest = () => Math.min(...Array.from({ length: RIPPLES }, (_, k) => (r.rings[2 * k + 1] > 0 ? r.rings[2 * k] : Infinity)));
+    expect(Math.max(...amps())).toBeCloseTo(0.9, 6);
+    expect(newest()).toBe(0);
+    let prev = 0.9;
+    for (let i = 0; i < 30; i++) {
+      r.step(0, dt);
+      const a = Math.max(...amps());
+      expect(a).toBeLessThan(prev);
+      prev = a;
+    }
+    expect(newest()).toBeCloseTo(0.5, 6);
+    for (let i = 0; i < 10; i++) r.step(i % 2 ? 0 : 0.7, dt);
+    expect(amps().filter((a) => a > 0).length).toBe(RIPPLES);
+    expect(Math.max(...amps())).toBeLessThanOrEqual(1);
+    expect(newest()).toBeCloseTo(dt, 6); // the oldest ring was replaced
+    for (let i = 0; i < 600; i++) r.step(0, dt);
+    expect(Math.max(...amps())).toBeLessThan(0.01); // they die away
+  });
+
+  it("ignores hits too small to see and ages the same at 60 and 120 Hz", () => {
+    const r = createRipples();
+    r.step(0.01, dt);
+    expect(Math.max(r.rings[1], r.rings[3], r.rings[5])).toBe(0);
+    const a = createRipples();
+    const b = createRipples();
+    a.step(1, 1 / 60);
+    b.step(1, 1 / 120);
+    for (let i = 0; i < 60; i++) a.step(0, 1 / 60);
+    for (let i = 0; i < 120; i++) b.step(0, 1 / 120);
+    expect(a.rings[1]).toBeCloseTo(b.rings[1], 6);
+    expect(a.rings[0]).toBeCloseTo(b.rings[0], 6);
+  });
+});
+
+describe("createSun with energy: loud passages swell the disc and flare the rim; quiet ones barely", () => {
+  it("gates the bass swell by energy and swells the disc (bounded, smooth)", () => {
+    const dt = 1 / 60;
+    /** @param {number} energy */
+    const settle = (energy) => {
+      const s = createSun();
+      for (let f = 0; f < 240; f++) s.step(1.5, dt, 1, energy);
+      return s;
+    };
+    const loud = settle(1);
+    const quiet = settle(0.1);
+    expect(loud.level).toBeGreaterThan(2 * quiet.level);
+    expect(loud.scale).toBeGreaterThan(1.03);
+    expect(loud.scale).toBeLessThanOrEqual(1 + SWELL);
+    expect(quiet.scale).toBeLessThan(1 + 0.4 * SWELL);
+    expect(createSun().step(1.5, dt, 1)).toBeGreaterThan(0); // energy defaults to full
+  });
+});
+
+describe("createSpike: the diamond ring spikes bright on each beat, flash-limited", () => {
+  const dt = 1 / 60;
+  it("flares at once with the hit, fades within half a second, and is 0 without beats", () => {
+    const s = createSpike();
+    for (let i = 0; i < 30; i++) expect(s.step(0, dt, true)).toBe(0);
+    expect(s.step(0.8, dt, true)).toBeCloseTo(0.8, 6);
+    let v = 0.8;
+    for (let i = 0; i < 30; i++) {
+      const n = s.step(0, dt, true);
+      expect(n).toBeLessThan(v);
+      v = n;
+    }
+    expect(v).toBeLessThan(0.1);
+  });
+
+  it("with reduceFlashing a 10 Hz train of hits starts at most 3 flares a second", () => {
+    const s = createSpike();
+    let prev = 0;
+    let rises = 0;
+    for (let i = 0; i < 600; i++) {
+      const v = s.step(i % 6 === 0 ? 1 : 0, dt, true);
+      if (v > prev) rises++;
+      prev = v;
+    }
+    expect(rises / 10).toBeLessThanOrEqual(3);
+    const free = createSpike();
+    prev = 0;
+    rises = 0;
+    for (let i = 0; i < 600; i++) {
+      const v = free.step(i % 6 === 0 ? 1 : 0, dt, false);
+      if (v > prev) rises++;
+      prev = v;
+    }
+    expect(rises / 10).toBeGreaterThan(9);
+  });
+});
+
+describe("createSunMood: the sun's halo, height, corona spin and light shafts follow the song", () => {
+  const dt = 1 / 60;
+  /** @param {number} secs @param {number} energy @param {(i: number) => number} bass */
+  const run = (secs, energy, bass = () => 1, r = 1, motion = 1, m = createSunMood(), hz = 60) => {
+    for (let i = 0; i < secs * hz; i++) m.step(energy, bass(i), 1 / hz, r, motion);
+    return m;
+  };
+  it("blooms and rises slowly with loud music, and stays dark and low in silence", () => {
+    const quiet = run(15, 0);
+    expect(quiet.bloom).toBeLessThan(0.01);
+    expect(quiet.rise).toBeLessThan(0.01);
+    expect(quiet.rays).toBeLessThan(0.01);
+    expect(run(1, 1).rise).toBeLessThan(0.35); // a build, not a jump
+    const loud = run(15, 1);
+    expect(loud.bloom).toBeGreaterThan(0.7);
+    expect(loud.rise).toBeGreaterThan(0.8);
+    for (const v of [loud.bloom, loud.rise, loud.rays]) expect(v).toBeLessThanOrEqual(1);
+    const still = run(15, 1, () => 2, 0);
+    expect(still.bloom + still.rise + still.rays).toBe(0);
+    expect(run(15, 1, () => 1, 1, 0.4).rise).toBeCloseTo(0.4 * loud.rise, 3); // Reduce motion
+  });
+
+  it("pulses the light shafts with the bass", () => {
+    const m = run(2, 1, (i) => (i % 30 < 3 ? 2 : 0.4));
+    const after = run(3 / 60, 1, () => 2, 1, 1, m).rays;
+    const between = run(20 / 60, 1, () => 0.4, 1, 1, m).rays;
+    expect(after).toBeGreaterThan(between + 0.3);
+    expect(run(2, 0.1, (i) => (i % 30 < 3 ? 2 : 0.4)).rays).toBeLessThan(0.2); // quiet: faint
+  });
+
+  it("turns the corona faster with energy, the same at 60 and 120 Hz", () => {
+    const calm = run(4, 0).corona;
+    const loud = run(4, 1).corona;
+    expect(calm).toBeCloseTo(4 * CORONA_RATE, 3);
+    expect(loud).toBeGreaterThan(2.5 * calm);
+    const hz120 = run(4, 0.6, () => 1, 1, 1, createSunMood(), 120).corona;
+    expect(Math.abs(hz120 - run(4, 0.6).corona)).toBeLessThan(0.01 * hz120);
+  });
+});
+
+describe("reflection: how strongly the range and the beam shimmer in the dark ground", () => {
+  it("is a faint rest in silence, grows with energy and the beam, bounded, still at reactivity 0", () => {
+    expect(reflection(0, 0, 1)).toBeCloseTo(REFLECT_REST, 6);
+    expect(reflection(1, 0, 1)).toBeGreaterThan(reflection(0.3, 0, 1));
+    expect(reflection(0.6, 1, 1)).toBeGreaterThan(reflection(0.6, 0, 1));
+    expect(reflection(1, 1, 1)).toBeGreaterThan(3 * REFLECT_REST);
+    expect(reflection(9, 9, 9)).toBeLessThanOrEqual(1);
+    expect(reflection(NaN, NaN, NaN)).toBeCloseTo(REFLECT_REST, 6);
+    expect(reflection(1, 1, 0)).toBeCloseTo(REFLECT_REST, 6);
+  });
+});
+
+describe("createBeam with energy: a quiet passage's kicks barely pulse it", () => {
+  it("gates the (relative) bass by energy", () => {
+    const dt = 1 / 60;
+    const loud = createBeam();
+    const quiet = createBeam();
+    for (let f = 0; f < 5; f++) {
+      loud.step(2, 0.01, dt, 1, 1);
+      quiet.step(2, 0.01, dt, 1, 0.1);
+    }
+    expect(quiet.level).toBeLessThan(0.4 * loud.level);
+  });
+});
+
+describe("createGlow with energy: the horizon breathes with the mids only as loud as the music", () => {
+  it("gates the (relative) mids by energy", () => {
+    const dt = 1 / 60;
+    const loud = createGlow();
+    const quiet = createGlow();
+    for (let f = 0; f < 120; f++) {
+      loud.step(1.6, 0, dt, 1, 1);
+      quiet.step(1.6, 0, dt, 1, 0.1);
+    }
+    expect(quiet.level).toBeLessThan(0.4 * loud.level);
   });
 });
