@@ -17,6 +17,10 @@ import {
   createEmitters,
   emitterSpot,
   outlineField,
+  opartDefines,
+  RIPPLE_WIDTH,
+  TWIST_FALLOFF,
+  EMIT_K,
   EMIT_RESERVE,
   EMIT_IDLE,
   BULGE_PHASE,
@@ -501,8 +505,10 @@ describe("createStripeDrive energy", () => {
     const surge = settledDrift({ energy: 1, surge: 1 });
     expect(silence).toBeGreaterThan(0.2); // never frozen
     expect(quiet).toBeGreaterThan(1.5 * silence);
-    expect(loud).toBeGreaterThan(6 * silence);
-    expect(surge).toBeGreaterThan(1.2 * loud);
+    expect(loud).toBeGreaterThan(4 * silence);
+    expect(surge).toBeGreaterThan(2.5 * loud); // the beats carry most of the motion
+    const weak = settledDrift({ energy: 1, surge: 0.4 });
+    expect(weak - loud).toBeLessThan(0.35 * (surge - loud)); // weak onsets only nudge
     expect(surge).toBeLessThanOrEqual(DRIVE_BUDGET + 1e-9);
   });
 });
@@ -749,5 +755,25 @@ describe("createStripeDrive under Reduce motion", () => {
       return d.twist;
     };
     expect(twist(calm)).toBeLessThan(0.7 * twist({}));
+  });
+});
+
+describe("opartDefines", () => {
+  it("hands the shader the same constants the bounds were checked with (floats as GLSL floats)", () => {
+    const src = opartDefines({ ripples: 8, wave: 32, emitters: 6, sectors: 16 });
+    /** @param {string} name */
+    const get = (name) => {
+      const m = src.match(new RegExp(`^#define ${name} (\\S+)$`, "m"));
+      expect(m, name).not.toBeNull();
+      return /** @type {RegExpMatchArray} */ (m)[1];
+    };
+    expect(get("RIPPLES")).toBe("8");
+    expect(get("EMITTERS")).toBe("6");
+    expect(get("WAVE_POINTS")).toBe("32");
+    expect(get("BULGE_SECTORS")).toBe("16");
+    for (const [name, v] of Object.entries({ WAVE_PHASE, RIPPLE_PHASE, RIPPLE_WIDTH, BULGE_PHASE, EMIT_K, TWIST_FALLOFF })) {
+      expect(get(name)).toMatch(/^-?\d+\.\d+(e-?\d+)?$/);
+      expect(Number(get(name))).toBeCloseTo(v, 9);
+    }
   });
 });

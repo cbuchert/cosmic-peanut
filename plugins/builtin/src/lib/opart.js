@@ -58,10 +58,13 @@ const BREATHE_SLEW = 0.4; // rad per unit of field, per second
 /** Flow (units/s) at Speed 1 and full energy; the marble warp evolves with it. */
 export const FLOW_RATE = 0.04;
 /** Outward drift (rad/s of phase) at Speed 1: idle (silence) and added at full energy. */
-export const DRIFT_IDLE = 0.35;
-export const DRIFT_GAIN = 2.2;
-/** Extra drift a full beat surge adds, as a fraction of DRIFT_GAIN. */
-export const SURGE_DRIFT = 1.6;
+export const DRIFT_IDLE = 0.3;
+export const DRIFT_GAIN = 1.2;
+/**
+ * Extra drift (rad/s) a full beat surge adds (by surge², so weak onsets only nudge): the loops
+ * lurch outward on each beat, within what the budget leaves.
+ */
+export const SURGE_DRIFT = 6;
 /** Fastest the whirlpool's twist may change (rad/s) before the budget. */
 const TWIST_SLEW = 0.35;
 
@@ -126,7 +129,8 @@ export function createStripeDrive() {
         dflow *= s;
       }
       const used = twistUsed + Math.min(rest, shapeMax - twistUsed);
-      const dphase = Math.min(DRIFT_IDLE * speed * dt + DRIFT_GAIN * speed * react * (energy + SURGE_DRIFT * surge) * dt, budget - used);
+      const drift = speed * (DRIFT_IDLE + react * (DRIFT_GAIN * energy + SURGE_DRIFT * surge * surge));
+      const dphase = Math.min(drift * dt, budget - used);
 
       d.freq += dk;
       d.phase += dphase;
@@ -486,7 +490,7 @@ export function loudness(rms) {
 const ENERGY_ATTACK = 0.3;
 const ENERGY_RELEASE = 1.2;
 /** Seconds for a beat surge to fall to 1/e. */
-export const SURGE_TAU = 0.22;
+export const SURGE_TAU = 0.15;
 
 /**
  * The music's energy for the stripes: `level` (0–1.3), the loudness weighted by the bass, smoothed
@@ -720,4 +724,24 @@ export function emitterSpot(sector, n, side, seq, outline, out) {
   out[0] = lo * dx;
   out[1] = lo * dy;
   return out;
+}
+
+/** A GLSL float literal. @param {number} v */
+const glslFloat = (v) => {
+  const s = String(v);
+  return /[.e]/.test(s) ? (s.includes(".") ? s : s.replace("e", ".0e")) : s + ".0";
+};
+
+/**
+ * #defines for shaders/skull/opart.glsl: the array sizes and the constants the anti-strobe bounds
+ * were checked with, so the shader and these tests can't drift apart.
+ * @param {{ ripples: number, wave: number, emitters: number, sectors: number }} n array sizes
+ */
+export function opartDefines(n) {
+  const ints = { RIPPLES: n.ripples, WAVE_POINTS: n.wave, EMITTERS: n.emitters, BULGE_SECTORS: n.sectors };
+  const floats = { WAVE_PHASE, RIPPLE_PHASE, RIPPLE_WIDTH, BULGE_PHASE, EMIT_K, TWIST_FALLOFF };
+  let s = "";
+  for (const [k, v] of Object.entries(ints)) s += `#define ${k} ${Math.round(v)}\n`;
+  for (const [k, v] of Object.entries(floats)) s += `#define ${k} ${glslFloat(v)}\n`;
+  return s;
 }
