@@ -99,6 +99,27 @@ Two persisted settings, `backgroundOpacity` (0–1, default 0) and `visualOpacit
 Unit and e2e tests pass on macOS (2026-10-14). Known gap: the GPU cost of the extra compositing
 layer below opacity 1 is unmeasured.
 
+## More reactive backgrounds: Tie-Dye, Skull Trip, Dark Sun, Eclipse, Marbling (2026-10-21)
+
+Background motion = mean frame-to-frame pixel change over the background (subject excluded),
+5–10 s deterministic windows in the harness; beat response = motion 150 ms after a strong onset
+÷ 150 ms before. Each agent used its own meter, so compare rows, not visualizers.
+
+| Visualizer | Loud ÷ silence (main → now) | Beat response (main → now) | What changed |
+| --- | --- | --- | --- |
+| Tie-Dye | 2.6 → 7.6 | 1.29 → 1.57 | new bands born per beat, coloured by the spectrum; auto pattern morphs every 32 beats |
+| Skull Trip | 3.4 → 8.9 | 2.57 → 2.85 | stripes are contours of a distance field: closed loops born at beat-seeded emitters grow off screen |
+| Dark Sun | 4.2 → 64.5 | 2.49 → 3.90 | flowing washes, beat-locked range drop and horizon shock, ground ripples; sun 2.4 → 32 |
+| Eclipse | 1.3 → 19.6 (30.8 with water) | 1.01 → 1.45 | orbiting, re-forming clouds; water reflection (off/low/mid) |
+| Marbling | ~3–9 → ~260 | 1.7–3.1 → 4.2 | every beat pours (by spectrum), currents between drops, tempo-locked combing |
+
+- **Skull Trip is budget-limited on purpose:** every stripe motion shares one per-pixel alternation
+  budget (≤ 3 Hz with Reduce flashing). On main the skull's nod/chomp moved every contour and spent
+  most of it; the field now uses the skull's rest outline and the budget goes to the background.
+- **Silence:** several visualizers now move *less* in silence than before, by design.
+- **Harness:** each agent wrote its own motion meter; kept one built-in meter (`meter=1`, named
+  zones) plus `motion_hook.py`; `silent=1` now zeroes levels in every audio mode.
+
 ## Visualizer batch: Tentacube, Tie-Dye, Skull Trip, Dark Sun, Eclipse, Marbling, Laminar, Tetraballs (2026-09-28)
 
 Built in parallel worktrees and merged one at a time. GPU times were measured on the M4 Pro at
