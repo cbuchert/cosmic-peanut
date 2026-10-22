@@ -16,7 +16,8 @@
  *   lum=1     record mean frame luminance (for the flash-limiter check)
  *   bg=light  a bright, busy backdrop behind the transparent canvas (default black, like the shell)
  *   nocanvas=1  hide the canvas (screenshot the backdrop alone)
- *   silent=1  the synth outputs silence (all-zero frames, silent: true)
+ *   silent=1  the synth outputs silence (all-zero frames, silent: true); with any other audio mode
+ *             it also zeroes the level scalars and onsets, like the host does in silence
  *   still=N   deterministic: seeded Math.random, fixed 1/60 s steps, stop after N frames
  *   meter=1   record mean |Δ RGB| per frame over zones (zone.<name>=+x0,y0,x1,y1;-…, see motion.js)
  *             and the frames of strong onsets (onsetStrength ≥ 0.8) as `beats`
@@ -45,6 +46,17 @@ function applyGain(a, g) {
   for (const k of ["waveform", "spectrum", "bands", "left", "right"]) if (a[k]) for (let i = 0; i < a[k].length; i++) a[k][i] *= g;
   a.rms *= g;
   a.peak *= g;
+}
+
+/**
+ * Silence as the host reports it: zero levels, scalars and onsets, silent = true.
+ * @param {any} a
+ */
+function applySilence(a) {
+  applyGain(a, 0);
+  for (const k of ["bass", "mid", "treb", "bassAtt", "midAtt", "trebAtt", "onsetStrength", "flux", "centroid"]) a[k] = 0;
+  a.onset = false;
+  a.silent = true;
 }
 
 const bgEl = /** @type {HTMLElement} */ (document.getElementById("bg"));
@@ -239,6 +251,7 @@ async function main() {
     time.frame = frames++;
     const audio = synth.update(time.now, time.dt);
     if (gain !== 1) applyGain(audio, gain);
+    if (q.get("silent") === "1") applySilence(audio);
     const t0 = performance.now();
     try {
       for (let r = 0; r < rep; r++) {
