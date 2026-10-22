@@ -83,7 +83,9 @@ describe("createBandWidths", () => {
 });
 
 /** @param {Partial<import('./tiedye.js').SpinInput>} o */
-const spinIn = (o = {}) => ({ twist: 1.5, speed: DEFAULT_SPEED, bassAtt: 1, reactivity: 1, reduceMotion: false, ...o });
+const spinIn = (o = {}) => ({
+  twist: 1.5, speed: DEFAULT_SPEED, motion: 1, bassAtt: 1, energy: 0, bpm: 0, reactivity: 1, reduceMotion: false, ...o,
+});
 
 describe("createSpin", () => {
   it("at average bass settles on the Twist param and rotates at a steady rate at 60 and 120 Hz", () => {
@@ -128,6 +130,23 @@ describe("createSpin", () => {
       tw = s.twist;
       tu = s.turns;
     }
+  });
+
+  it("turns faster with the music's energy and a faster confident tempo, easing, bounded", () => {
+    /** Turns per second once settled. */
+    const rate = (/** @type {Partial<import('./tiedye.js').SpinInput>} */ o) => {
+      const s = createSpin();
+      for (let f = 0; f < 300; f++) s.step(1 / 60, spinIn(o));
+      const t0 = s.turns;
+      s.step(1, spinIn(o));
+      return s.turns - t0;
+    };
+    const calm = rate({});
+    expect(rate({ energy: 1 })).toBeGreaterThan(2.5 * calm);
+    expect(rate({ energy: 1, bpm: 160 })).toBeGreaterThan(rate({ energy: 1, bpm: 120 }) * 1.2);
+    expect(rate({ energy: 1, bpm: 60 })).toBeLessThan(rate({ energy: 1, bpm: 120 }));
+    expect(rate({ energy: 1, bpm: 400, bassAtt: 9, reactivity: 2 })).toBeLessThan(0.5);
+    expect(rate({ energy: 1, reactivity: 0 })).toBeCloseTo(rate({ reactivity: 0 }), 6);
   });
 
   it("with Reduce motion at default Speed rotates slower and changes twist more gently", () => {

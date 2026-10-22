@@ -42,7 +42,10 @@ export function createBandWidths() {
  * @typedef {object} SpinInput
  * @property {number} twist the Twist param (turns of spiral across the radius)
  * @property {number} speed the Speed param (motion multiplier)
+ * @property {number} motion the Motion param
  * @property {number} bassAtt `audio.bassAtt`
+ * @property {number} energy createFlow's `energy`, 0–1
+ * @property {number} bpm `audio.bpm` (0 until confident)
  * @property {number} reactivity the Reactivity param
  * @property {boolean} reduceMotion `ctx.reduceMotion`
  */
@@ -55,6 +58,11 @@ const REDUCED_TWIST_SLOWDOWN = 3;
 /** Rotation (turns/s at Speed 1): a slow drift plus a bass-driven part. */
 const BASE_RATE = 0.02;
 const BASS_RATE = 0.025;
+/** More rotation with the music's energy (turns/s at full energy, Reactivity 2, 120 BPM). */
+const ENERGY_RATE = 0.12;
+/** A confident tempo scales the energy's part of the rotation by bpm / 120, within these. */
+const TEMPO_MIN = 0.6;
+const TEMPO_MAX = 1.6;
 /** Most the bass can tighten (or loosen) the twist, as a fraction of the Twist param. */
 export const TWIST_DEPTH = 0.35;
 /** Smoothing time constants (s): the twist runs through two such stages, the rate one. */
@@ -77,12 +85,14 @@ export function createSpin() {
     /** @param {number} dt @param {SpinInput} o */
     step(dt, o) {
       // Reduce motion: gentler defaults; a Speed the user picked is respected.
-      const gentle = o.reduceMotion && o.speed === DEFAULT_SPEED;
-      const speed = gentle ? REDUCED_SPEED : o.speed;
+      const gentle = o.reduceMotion && o.speed === DEFAULT_SPEED && o.motion === DEFAULT_MOTION;
+      const scale = motionScale(o);
       const bass = Math.max(-1, Math.min(1, o.bassAtt - 1));
       const react = Math.max(0, Math.min(2, o.reactivity)) / 2;
       const twist = o.twist * (1 + TWIST_DEPTH * react * bass);
-      const target = speed * (BASE_RATE + BASS_RATE * react * (1 + bass));
+      const tempo = o.bpm > 0 ? Math.max(TEMPO_MIN, Math.min(TEMPO_MAX, o.bpm / 120)) : 1;
+      const energy = Math.max(0, Math.min(1, o.energy));
+      const target = scale * (BASE_RATE + react * (BASS_RATE * (1 + bass) + ENERGY_RATE * tempo * energy));
       if (Number.isNaN(s.twist)) {
         s.twist = twistMid = twist;
         rate = target;
