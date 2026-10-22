@@ -20,6 +20,10 @@
  *   still=N   deterministic: seeded Math.random, fixed 1/60 s steps, stop after N frames
  *   gain=G    scale the audio's level (waveform, rms, peak, spectrum, bands) by G, e.g. 0.05 for a
  *             quiet passage
+ *   silent=1  with any audio mode: also zero the level scalars and onsets, like the host in silence
+ *   motion=1  record background motion: mean |Δ luminance| (0–255) per frame over a 320 × 180
+ *             readback, outside a centred circle of radius motionR × min(width, height) / 2
+ *             (default 1.08), plus each frame's onset strength (0 when no onset)
  */
 import { createDrums, createMelody, createMusic, createProtoDemo, createSynth, createTones } from "./synth.js";
 
@@ -36,12 +40,23 @@ const base = `/plugins/${repo}/`;
 const w = /** @type {any} */ (window);
 const still = Number(q.get("still") ?? 0);
 const gain = Number(q.get("gain") ?? 1);
+const silentQ = q.get("silent") === "1";
+const measureMotion = q.get("motion") === "1";
+const motionR = Number(q.get("motionR") ?? 1.08);
 
 /** Scale a frame's level in place (the synth rebuilds it every update). @param {any} a @param {number} g */
 function applyGain(a, g) {
   for (const k of ["waveform", "spectrum", "bands", "left", "right"]) if (a[k]) for (let i = 0; i < a[k].length; i++) a[k][i] *= g;
   a.rms *= g;
   a.peak *= g;
+}
+
+/** Silence as the host sends it: no level, no onsets. @param {any} a */
+function applySilence(a) {
+  applyGain(a, 0);
+  for (const k of ["bass", "mid", "treb", "bassAtt", "midAtt", "trebAtt", "onsetStrength", "flux", "centroid"]) a[k] = 0;
+  a.onset = false;
+  a.silent = true;
 }
 
 const bgEl = /** @type {HTMLElement} */ (document.getElementById("bg"));
@@ -203,6 +218,42 @@ async function main() {
   probe.width = 32;
   probe.height = 18;
   const pg = /** @type {CanvasRenderingContext2D} */ (probe.getContext("2d", { willReadFrequently: true }));
+  /** @type {number[]} */ const motion = [];
+  /** @type {number[]} */ const beats = [];
+  const mp = document.createElement("canvas");
+  mp.width = 320;
+  mp.height = 180;
+  const mg = /** @type {CanvasRenderingContext2D} */ (mp.getContext("2d", { willReadFrequently: true }));
+  const prevLum = new Float32Array(mp.width * mp.height);
+  /** @type {Uint8Array | null} */ let mask = null;
+  /** @param {any} audio */
+  const recordMotion = (audio) => {
+    const W = mp.width, H = mp.height;
+    if (!mask) {
+      // The probe is stretched to the canvas: measure the radius in canvas pixels.
+      mask = new Uint8Array(W * H);
+      const R = (motionR * Math.min(size.width, size.height)) / 2;
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) {
+          const dx = ((x + 0.5) / W - 0.5) * size.width, dy = ((y + 0.5) / H - 0.5) * size.height;
+          mask[y * W + x] = dx * dx + dy * dy > R * R ? 1 : 0;
+        }
+    }
+    mg.clearRect(0, 0, W, H);
+    mg.drawImage(canvas, 0, 0, W, H);
+    const d = mg.getImageData(0, 0, W, H).data;
+    let s = 0, n = 0;
+    for (let i = 0; i < W * H; i++) {
+      const l = 0.2126 * d[4 * i] + 0.7152 * d[4 * i + 1] + 0.0722 * d[4 * i + 2];
+      if (mask[i]) {
+        s += Math.abs(l - prevLum[i]);
+        n++;
+      }
+      prevLum[i] = l;
+    }
+    motion.push(n ? s / n : 0);
+    beats.push(audio.onset ? audio.onsetStrength : 0);
+  };
   const time = { now: 0, dt: 0, frame: 0 };
   let running = true;
   let last = performance.now();
@@ -221,6 +272,7 @@ async function main() {
     time.frame = frames++;
     const audio = synth.update(time.now, time.dt);
     if (gain !== 1) applyGain(audio, gain);
+    if (silentQ) applySilence(audio);
     const t0 = performance.now();
     try {
       for (let r = 0; r < rep; r++) {
@@ -240,6 +292,7 @@ async function main() {
       for (let i = 0; i < d.length; i += 4) s += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
       lum.push(s / (d.length / 4) / 255);
     }
+    if (measureMotion) recordMotion(audio);
     if (still && frames >= still) {
       w.__still = true;
       return;
@@ -267,6 +320,8 @@ async function main() {
       intervalP99: pct(intervals, 0.99),
       size: [size.width, size.height],
       lum,
+      motion,
+      beats,
       errors,
     };
   };

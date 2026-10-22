@@ -5,6 +5,10 @@ Serve the repo root first (python3 -m http.server <port> --bind 127.0.0.1), then
     uv run python plugins/_harness/run.py --port <port> --shots DIR [--tag after]
         deterministic stills of each visualizer over black and over a light, busy backdrop
         (plus the backdrop alone), for checking transparency; no timing.
+    uv run python plugins/_harness/run.py --port <port> --motion [eclipse ...]
+        background motion (mean |delta luminance| outside the centre circle, harness.js motion=1)
+        over 5 s of deterministic frames in silence, a quiet passage and loud music, plus the beat
+        response (motion in the 150 ms after a strong onset / the 150 ms before).
 """
 
 import argparse
@@ -56,6 +60,45 @@ def flashes_per_second(lum: list[float], fps: float, threshold: float) -> float:
     return best
 
 
+MOTION_CASES = {
+    "silence": "audio=music&silent=1",
+    "quiet": "audio=music&gain=0.12",
+    "loud": "audio=music",
+}
+WARM, WINDOW, BEAT = 60, 300, 9  # frames at 60 Hz: 1 s warm-up, 5 s window, 150 ms
+
+
+def beat_response(motion: list[float], beats: list[float], strong: float = 0.8) -> float:
+    """Mean motion in the BEAT frames from each strong onset over the BEAT frames before it."""
+    after, before = [], []
+    for i, b in enumerate(beats):
+        if b >= strong and i >= BEAT and i + BEAT <= len(motion):
+            after.append(sum(motion[i : i + BEAT]) / BEAT)
+            before.append(sum(motion[i - BEAT : i]) / BEAT)
+    if not after:
+        return 0.0
+    return (sum(after) / len(after)) / max(sum(before) / len(before), 1e-6)
+
+
+def motion_stats(page, base: str, q: str, radius: float) -> dict:
+    out = {}
+    for name, audio in MOTION_CASES.items():
+        page.goto(f"{base}?{q}&{audio}&motion=1&motionR={radius}&still={WARM + WINDOW}")
+        page.wait_for_function(
+            "window.__still === true || window.__errors.length > 0", timeout=120000
+        )
+        s = page.evaluate("window.__stats()")
+        m, b = s["motion"][WARM:], s["beats"][WARM:]
+        out[name] = {
+            "mean": round(sum(m) / max(len(m), 1), 4),
+            "beat_response": round(beat_response(m, b), 3),
+            "errors": s["errors"],
+        }
+    out["loud_over_silence"] = round(out["loud"]["mean"] / max(out["silence"]["mean"], 1e-3), 2)
+    out["loud_over_quiet"] = round(out["loud"]["mean"] / max(out["quiet"]["mean"], 1e-3), 2)
+    return out
+
+
 def run(page, url: str, seconds: float) -> dict:
     page.goto(url)
     page.wait_for_function("window.__ready === true", timeout=20000)
@@ -98,6 +141,8 @@ def main() -> None:
     ap.add_argument("--shots", type=Path, help="write backdrop stills here instead of timing")
     ap.add_argument("--tag", default="after", help="file-name tag for --shots")
     ap.add_argument("--prefix", default="", help="plugin folder prefix under /plugins/")
+    ap.add_argument("--motion", action="store_true", help="measure background motion instead")
+    ap.add_argument("--radius", type=float, default=1.08, help="--motion: excluded centre radius")
     args = ap.parse_args()
     OUT.mkdir(exist_ok=True)
     base = f"http://127.0.0.1:{args.port}/plugins/_harness/index.html"
@@ -107,6 +152,18 @@ def main() -> None:
         if args.shots:
             shots(browser, base, args.viz, args.shots, args.tag, args.prefix)
             browser.close()
+            return
+        if args.motion:
+            for viz in args.viz:
+                page = browser.new_page(
+                    viewport={"width": 1280, "height": 720}, device_scale_factor=2
+                )
+                q = f"repo={args.prefix}{VIZ[viz]}&viz={viz}&{args.query}"
+                results[viz] = motion_stats(page, base, q, args.radius)
+                print(viz, json.dumps(results[viz]), flush=True)
+                page.close()
+            browser.close()
+            (OUT / f"motion-{args.browser}.json").write_text(json.dumps(results, indent=2))
             return
         for viz in args.viz:
             page = browser.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=2)
