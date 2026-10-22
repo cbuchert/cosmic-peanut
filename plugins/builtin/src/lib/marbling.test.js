@@ -621,7 +621,7 @@ describe("currents (flow field)", () => {
       expect(Math.hypot(a[0] - b[0], a[1] - b[1]) / (2 * h)).toBeLessThanOrEqual(FLOW_MAX_GRAD);
       flowDisp(f, x, y, p);
       flowInverse(f, x + p[0], y + p[1], back);
-      expect(Math.hypot(back[0] - x, back[1] - y)).toBeLessThan(1e-5);
+      expect(Math.hypot(back[0] - x, back[1] - y)).toBeLessThan(2e-6);
     }
   });
 });

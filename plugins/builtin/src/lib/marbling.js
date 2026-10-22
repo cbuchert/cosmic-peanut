@@ -163,10 +163,10 @@ export function flowDisp(f, x, y, out) {
 
 /**
  * Largest steepness (Jacobian norm of the displacement) a batch of flow may build up before it is
- * baked, so FLOW_ITERS fixed-point steps of {@link flowInverse} land within ~1e-5 page.
+ * baked; FLOW_ITERS Newton steps of {@link flowInverse} then land within ~1e-6 page.
  */
-export const FLOW_MAX_GRAD = 0.12;
-export const FLOW_ITERS = 4;
+export const FLOW_MAX_GRAD = 0.5;
+export const FLOW_ITERS = 2;
 
 /**
  * An upper bound on the Jacobian norm of {@link flowDisp}: each vortex's is 2k|A|·max(1, |1 − 2kr²|)
@@ -179,22 +179,51 @@ export function flowBound(f) {
   return b;
 }
 
+const jac = new Float64Array(4);
+
 /**
- * Inverse of p ↦ p + flowDisp(p): where the paint now at p came from, by the fixed-point
- * iteration q ← p − flowDisp(q) (a contraction while flowBound < 1). Mirrored in events.glsl.
+ * Inverse of p ↦ p + flowDisp(p): where the paint now at p came from, by Newton's method on
+ * q + d(q) = p from q = p (I + ∇d is well conditioned while flowBound ≤ FLOW_MAX_GRAD).
+ * Mirrored in events.glsl.
  * @param {ArrayLike<number>} f
  * @param {number} px
  * @param {number} py
  * @param {Float64Array | number[]} out
  */
 export function flowInverse(f, px, py, out) {
-  out[0] = px;
-  out[1] = py;
-  for (let i = 0; i < FLOW_ITERS; i++) {
-    flowDisp(f, out[0], out[1], out);
-    out[0] = px - out[0];
-    out[1] = py - out[1];
+  let x = px - f[0];
+  let y = py - f[1];
+  for (let n = 0; n < FLOW_ITERS; n++) {
+    let dx = f[0];
+    let dy = f[1];
+    jac[0] = 1;
+    jac[1] = 0;
+    jac[2] = 0;
+    jac[3] = 1;
+    for (let i = 2; i < FLOW_LEN; i += 4) {
+      const a = f[i + 3];
+      if (a === 0) continue;
+      const rx = x - f[i];
+      const ry = y - f[i + 1];
+      const k = f[i + 2];
+      const g = 2 * k * a * Math.exp(-k * (rx * rx + ry * ry));
+      const k2 = 2 * k * g;
+      dx -= g * ry;
+      dy += g * rx;
+      jac[0] += k2 * rx * ry;
+      jac[1] += k2 * ry * ry - g;
+      jac[2] += g - k2 * rx * rx;
+      jac[3] -= k2 * rx * ry;
+    }
+    // Residual r = q + d(q) − p; q ← q − (I + ∇d)⁻¹ r.
+    const r0 = x + dx - px;
+    const r1 = y + dy - py;
+    const det = jac[0] * jac[3] - jac[1] * jac[2];
+    x -= (jac[3] * r0 - jac[1] * r1) / det;
+    y -= (jac[0] * r1 - jac[2] * r0) / det;
   }
+  out[0] = x;
+  out[1] = y;
   return out;
 }
 
