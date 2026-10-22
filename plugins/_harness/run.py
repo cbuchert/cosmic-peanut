@@ -165,7 +165,9 @@ def main() -> None:
     with sync_playwright() as p:
         browser = getattr(p, args.browser).launch()
         if args.motion:
-            res = {v: motion(browser, base, v, args.prefix, args.mask, args.query) for v in args.viz}
+            res = {
+                v: motion(browser, base, v, args.prefix, args.mask, args.query) for v in args.viz
+            }
             browser.close()
             (OUT / f"motion-{args.tag}.json").write_text(json.dumps(res, indent=2))
             print(json.dumps({v: {k: r[k] for k in r if "over" in k} for v, r in res.items()}))
