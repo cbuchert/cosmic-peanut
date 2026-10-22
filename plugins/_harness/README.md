@@ -31,3 +31,12 @@ Headless Chromium falls back to software GL here; use WebKit numbers.
 `run.py --shots DIR [--tag after] [--prefix path/]` writes deterministic stills of each visualizer
 over black and over the light backdrop (plus the backdrop alone) to check transparency; `--prefix`
 points at another plugin tree under `/plugins/`, e.g. an older commit extracted with `git archive`.
+
+`run.py --motion [viz…]` measures background motion (`bgmotion=1`: mean |Δ| per frame, 0–255, on
+a 320×180 probe) over `--seconds` windows after `--warm` s of `audio=music`, in silence (`gain=0`),
+a quiet passage (`gain=0.1`) and loud music, with the beat response (150 ms after strong onsets vs
+the 150 ms before) and motion on frames where the visualizer began no drop or stroke (it reports
+`debug.events`/`debug.drops`). `run.py --edges 60,120 marbling` measures edge sharpness (mean mixed-pixel
+run between two pure palette colours, `edges=1`) on deterministic stills. `warm=S` plays the audio
+unscaled for S seconds before `gain` applies.
+

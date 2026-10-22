@@ -24,7 +24,7 @@
  *             measure a quiet passage or silence)
  *   edges=1   with still=N: measure edge sharpness (__edges, palette from `debug.colors`, tol=0.06) on
  *             the last frame into window.__edgeResult
- *   motion=1  record per-frame background motion: mean |Δ| of the canvas (0–255 levels, on a
+ *   bgmotion=1  record per-frame background motion: mean |Δ| of the canvas (0–255 levels, on a
  *             320×180 probe) against the previous frame, with the frame's onset / onsetStrength
  *             and, when the visualizer exposes `debug.events` (events started this frame), that
  */
@@ -44,7 +44,7 @@ const w = /** @type {any} */ (window);
 const still = Number(q.get("still") ?? 0);
 const gain = Number(q.get("gain") ?? 1);
 const warm = Number(q.get("warm") ?? 0);
-const measureMotion = q.get("motion") === "1";
+const measureMotion = q.get("bgmotion") === "1";
 
 /** Scale a frame's level in place (the synth rebuilds it every update). @param {any} a @param {number} g */
 function applyGain(a, g) {

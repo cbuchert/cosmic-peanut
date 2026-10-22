@@ -111,7 +111,7 @@ def motion(
         for name, gain in MOTION_CONDITIONS:
             page = browser.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=2)
             page.goto(
-                f"{base}?repo={prefix}{VIZ[viz]}&viz={viz}&audio=music&warm={warm}&gain={gain}&motion=1&{query}"
+                f"{base}?repo={prefix}{VIZ[viz]}&viz={viz}&audio=music&warm={warm}&gain={gain}&bgmotion=1&{query}"
             )
             page.wait_for_function("window.__ready === true", timeout=20000)
             page.wait_for_function(
