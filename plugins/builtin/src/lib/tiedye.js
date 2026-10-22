@@ -328,3 +328,97 @@ export function createIntensity() {
     },
   };
 }
+
+/**
+ * @typedef {object} FlowInput
+ * @property {number} rms `audio.rms`
+ * @property {number} bassAtt `audio.bassAtt`
+ * @property {boolean} onset `audio.onset`
+ * @property {number} onsetStrength `audio.onsetStrength`
+ * @property {number} bpm `audio.bpm` (0 until confident)
+ * @property {number} beatPhase `audio.beatPhase`
+ * @property {number} reactivity the Reactivity param
+ * @property {number} motion the Motion param
+ * @property {number} speed the Speed param
+ * @property {boolean} reduceMotion `ctx.reduceMotion`
+ */
+
+/** Manifest default of the Motion param. */
+export const DEFAULT_MOTION = 1;
+
+/**
+ * Speed × Motion, or the gentler REDUCED_SPEED under Reduce motion while both are at their
+ * defaults (a value the user picked is respected).
+ * @param {{ speed: number, motion: number, reduceMotion: boolean }} o
+ */
+export function motionScale(o) {
+  if (o.reduceMotion && o.speed === DEFAULT_SPEED && o.motion === DEFAULT_MOTION) return REDUCED_SPEED;
+  return Math.max(0, o.speed) * Math.max(0, o.motion);
+}
+
+/** Outward flow of the dye (unit radii per second at Speed 1): a calm drift, plus the music. */
+const FLOW_BASE = 0.03;
+const FLOW_ENERGY = 0.28;
+/** Extra speed at the crest of a full-strength beat's surge (scaled by how loud the music is). */
+const FLOW_SURGE = 0.6;
+/** Fastest flow at Speed, Motion and Reactivity 1. */
+export const FLOW_MAX = FLOW_BASE + FLOW_ENERGY + FLOW_SURGE;
+/** Seconds for the energy behind the flow to follow the level. */
+const ENERGY_TAU = 0.3;
+/** A beat's kick decays over SURGE_DECAY; the surge follows it through two SURGE_ATTACK stages. */
+const SURGE_DECAY = 0.25;
+const SURGE_ATTACK = 0.05;
+/** Without a confident tempo, onsets at least this strong count as beats. */
+export const BEAT_STRENGTH = 0.6;
+/** The kick of a tempo beat (on each beatPhase wrap). */
+const TEMPO_KICK = 0.8;
+
+/**
+ * Loudness 0–1 from rms: −40 dBFS and below → 0, −10 dBFS and above → 1.
+ * @param {number} rms
+ */
+export function loudness(rms) {
+  const db = 20 * Math.log10(Math.max(rms, 1e-6));
+  return Math.max(0, Math.min(1, (db + 40) / 30));
+}
+
+/**
+ * The dye's outward flow. `flow` is an odometer (unit radii travelled): the shader moves the
+ * pattern and the dye record outward by it, so new dye appears at the knot and wicks outward.
+ */
+export function createFlow() {
+  let kick = 0;
+  let mid = 0;
+  let phase = 0;
+  const s = {
+    /** True on the frame of a beat: a beatPhase wrap with a confident tempo, else a strong onset. */
+    beat: false,
+    /** The beat surge envelope, 0–1. */
+    surge: 0,
+    /** Smoothed loudness and bass, 0–1. */
+    energy: 0,
+    /** Current speed, unit radii per second. */
+    speed: 0,
+    /** Unwrapped distance travelled. */
+    flow: 0,
+    /** @param {number} dt @param {FlowInput} o */
+    step(dt, o) {
+      const level = Math.min(1, loudness(o.rms) + 0.3 * Math.max(0, Math.min(1, o.bassAtt - 1)));
+      s.energy += (level - s.energy) * (1 - Math.exp(-dt / ENERGY_TAU));
+      kick *= Math.exp(-dt / SURGE_DECAY);
+      if (o.onset) kick = Math.max(kick, Math.max(0, Math.min(1, o.onsetStrength)));
+      const tempo = o.bpm > 0;
+      s.beat = tempo ? o.beatPhase < phase - 0.5 : o.onset && o.onsetStrength >= BEAT_STRENGTH;
+      phase = tempo ? o.beatPhase : 0;
+      if (tempo && s.beat) kick = Math.max(kick, TEMPO_KICK);
+      const ka = 1 - Math.exp(-dt / SURGE_ATTACK);
+      mid += (kick - mid) * ka;
+      s.surge += (mid - s.surge) * ka;
+      const react = Math.max(0, Math.min(2, o.reactivity));
+      s.speed = motionScale(o) * (FLOW_BASE + react * (FLOW_ENERGY * s.energy + FLOW_SURGE * s.surge * (0.35 + 0.65 * s.energy)));
+      s.flow += s.speed * dt;
+      return s;
+    },
+  };
+  return s;
+}

@@ -17,7 +17,9 @@ import {
   edgesFromWidths,
   createBandWidths,
   createIntensity,
-  PULSE_MAX, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH } from "./tiedye.js";
+  PULSE_MAX, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH,
+  createFlow, FLOW_MAX,
+} from "./tiedye.js";
 
 describe("createBandWidths", () => {
   it("gives even bands for a silent track", () => {
@@ -367,3 +369,111 @@ describe("createIntensity", () => {
     expect(off.max).toBeGreaterThan(1 + PULSE_MAX / 2);
   });
 });
+
+/** @param {Partial<import('./tiedye.js').FlowInput>} o */
+const flowIn = (o = {}) => ({
+  rms: 0, bassAtt: 1, onset: false, onsetStrength: 0, bpm: 0, beatPhase: 0,
+  reactivity: 1, motion: 1, speed: DEFAULT_SPEED, reduceMotion: false, ...o,
+});
+/** Run a flow for `s` seconds at `hz` with input `o` (a function of the frame, or fixed). */
+const runFlow = (/** @type {ReturnType<typeof createFlow>} */ fl, /** @type {number} */ s, /** @type {any} */ o, hz = 60) => {
+  for (let f = 0; f < s * hz; f++) fl.step(1 / hz, typeof o === "function" ? o(f, hz) : o);
+  return fl;
+};
+
+describe("createFlow", () => {
+  it("drifts outward slowly in silence and streams several times faster when loud", () => {
+    const quiet = runFlow(createFlow(), 3, flowIn());
+    const q0 = quiet.flow;
+    runFlow(quiet, 2, flowIn());
+    const loud = runFlow(createFlow(), 3, flowIn({ rms: 0.3, bassAtt: 1.3 }));
+    const l0 = loud.flow;
+    runFlow(loud, 2, flowIn({ rms: 0.3, bassAtt: 1.3 }));
+    expect(quiet.flow - q0).toBeGreaterThan(0.02);
+    expect(loud.flow - l0).toBeGreaterThan(4 * (quiet.flow - q0));
+  });
+
+  it("surges on each beat: a quick, smooth push scaled by onsetStrength, the same at 60 and 120 Hz", () => {
+    const loud = { rms: 0.3 };
+    /** Extra distance in the 0.4 s after a beat of `strength`, over a beatless run. */
+    const push = (/** @type {number} */ strength, hz = 60) => {
+      const a = runFlow(createFlow(), 2, flowIn(loud), hz);
+      const b = runFlow(createFlow(), 2, flowIn(loud), hz);
+      const a0 = a.flow;
+      const b0 = b.flow;
+      runFlow(a, 0.4, (/** @type {number} */ f) => flowIn({ ...loud, onset: f === 0, onsetStrength: strength }), hz);
+      runFlow(b, 0.4, flowIn(loud), hz);
+      return a.flow - a0 - (b.flow - b0);
+    };
+    expect(push(1)).toBeGreaterThan(0.06);
+    expect(push(0.4)).toBeLessThan(push(1) * 0.7);
+    expect(push(0.4)).toBeGreaterThan(0);
+    expect(push(1, 120)).toBeCloseTo(push(1, 60), 2);
+    // Bounded however strong, and smooth: the speed never jumps between frames.
+    const fl = runFlow(createFlow(), 2, flowIn(loud));
+    let v = fl.speed;
+    for (let f = 0; f < 120; f++) {
+      fl.step(1 / 60, flowIn({ ...loud, onset: f % 6 === 0, onsetStrength: 50 }));
+      expect(Math.abs(fl.speed - v)).toBeLessThan(0.08);
+      expect(fl.speed).toBeLessThanOrEqual(FLOW_MAX);
+      v = fl.speed;
+    }
+  });
+
+  /** Distance travelled over 4 s of loud beats every 0.5 s, after 1 s of settling. */
+  const travel = (/** @type {Partial<import('./tiedye.js').FlowInput>} */ o, hz = 60) => {
+    const beat = (/** @type {number} */ f, /** @type {number} */ h) => flowIn({ rms: 0.3, onset: f % (h / 2) === 0, onsetStrength: 0.9, ...o });
+    const fl = runFlow(createFlow(), 1, beat, hz);
+    const f0 = fl.flow;
+    return runFlow(fl, 4, beat, hz).flow - f0;
+  };
+
+  it("scales the music's part of the flow by Reactivity; the calm drift stays", () => {
+    const drift = travel({ rms: 0, onset: false });
+    expect(travel({ reactivity: 0 })).toBeCloseTo(drift, 3);
+    expect(travel({ reactivity: 2 })).toBeGreaterThan(travel({ reactivity: 1 }) * 1.5);
+    expect(travel({ reactivity: 1 })).toBeGreaterThan(drift * 4);
+  });
+
+  it("scales with Speed and Motion; Reduce motion at the defaults is gentler but still follows the music", () => {
+    const normal = travel({});
+    expect(travel({ speed: 2 })).toBeCloseTo(2 * normal, 2);
+    expect(travel({ motion: 0.5 })).toBeCloseTo(0.5 * normal, 2);
+    expect(travel({ motion: 0 })).toBe(0);
+    const reduced = travel({ reduceMotion: true });
+    expect(reduced).toBeLessThan(normal * 0.5);
+    expect(reduced).toBeGreaterThan(travel({ reduceMotion: true, rms: 0, onset: false }) * 3);
+    // A Speed or Motion the user picked is respected.
+    expect(travel({ reduceMotion: true, speed: 1.5 })).toBeCloseTo(travel({ speed: 1.5 }), 6);
+    expect(travel({ reduceMotion: true, motion: 1.5 })).toBeCloseTo(travel({ motion: 1.5 }), 6);
+  });
+
+  it("locks to a confident tempo: a beat (and a surge) on every beatPhase wrap; else on strong onsets", () => {
+    const fl = createFlow();
+    let beats = 0;
+    /** @type {number[]} */
+    const per = [];
+    let last = 0;
+    for (let f = 0; f < 600; f++) {
+      fl.step(1 / 60, flowIn({ rms: 0.3, bpm: 120, beatPhase: (f / 30) % 1 }));
+      if (fl.beat) {
+        beats++;
+        if (f > 120) per.push(fl.flow - last);
+        last = fl.flow;
+      }
+    }
+    expect(beats).toBeGreaterThanOrEqual(19);
+    expect(beats).toBeLessThanOrEqual(20);
+    // Every beat carries the dye the same distance (so new bands cross a radius once per beat).
+    for (const d of per) expect(d).toBeCloseTo(per[0], 3);
+    expect(per[0]).toBeGreaterThan(0.5 * travel({ onset: false }) / 8);
+    const nb = createFlow();
+    let n = 0;
+    for (let f = 0; f < 240; f++) {
+      nb.step(1 / 60, flowIn({ rms: 0.3, onset: f % 15 === 0, onsetStrength: f % 30 === 0 ? 0.9 : 0.3 }));
+      if (nb.beat) n++;
+    }
+    expect(n).toBe(8);
+  });
+});
+
