@@ -262,12 +262,12 @@ describe("createMarbler", () => {
       const m = createMarbler(5);
       let drops = 0;
       for (let f = 0; f < 600; f++) {
-        const onset = f % 6 === 0; // a flood of hits (10/s)
+        const onset = f % 15 === 0; // eighth notes at 120 BPM
         const lo = (f * 7) % 48;
         m.step(audioFrame({ rms, onset, onsetStrength: 1, bands: bandsHit(lo, lo + 16) }), DT, PARAMS, ENV);
         expect(m.count).toBeLessThanOrEqual(MAX_EVENTS);
-        for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === EV_DROP) drops++;
       }
+      drops = m.drops;
       return drops;
     };
     expect(poured(0.3)).toBeGreaterThan(1.8 * poured(0.02));
@@ -386,6 +386,17 @@ describe("renew", () => {
     expect(run(2, 60).maxSlice).toBeLessThan(0.0015);
   });
 
+  it("rests in silence: no drift and no clear drops, so a quiet page is still", () => {
+    const m = createMarbler(4);
+    for (let f = 0; f < 600; f++) m.step(audioFrame({ rms: 0.2 }), DT, { ...PARAMS, renew: 1 }, ENV);
+    let events = 0;
+    for (let f = 0; f < 120 * 60; f++) {
+      m.step(audioFrame({ silent: true }), DT, { ...PARAMS, renew: 1 }, ENV);
+      if (f > 180) events += m.count;
+    }
+    expect(events).toBe(0);
+  });
+
   it("stands still with Renew at 0", () => {
     const r = run(0, 60);
     expect(r.big).toBe(0);
@@ -500,18 +511,21 @@ describe("resize", () => {
     expect(m.evA[3]).toBeLessThan(r2 * k * k);
   });
 
-  it("flicks a spray of smaller drops around each hit, some of them vein ink (black ground)", () => {
+  it("flicks a spray of smaller drops around each loud hit, some of them vein ink (black ground)", () => {
     let spray = 0;
     let vein = 0;
     for (let seed = 1; seed <= 20; seed++) {
       const m = createMarbler(seed);
-      m.step(audioFrame(), DT, PARAMS, ENV);
-      m.step(audioFrame({ onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, PARAMS, ENV);
+      for (let f = 0; f < 120; f++) m.step(audioFrame({ rms: 0.3 }), DT, PARAMS, ENV);
+      m.step(audioFrame({ rms: 0.3, onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, PARAMS, ENV);
       const r = Math.sqrt(0.075 ** 2 * 2); // generous bound on the main drop's radius
+      const hx = m.evA[1];
+      const hy = m.evA[2];
       for (let i = 1; i < m.count; i++) {
         if (m.evA[i * 4] !== EV_DROP) continue;
+        // Spray lands around the hit (the beat's other drops land elsewhere, and are bigger).
+        if (Math.hypot(m.evA[i * 4 + 1] - hx, m.evA[i * 4 + 2] - hy) >= 4 * r) continue;
         spray++;
-        expect(Math.hypot(m.evA[i * 4 + 1] - m.evA[1], m.evA[i * 4 + 2] - m.evA[2])).toBeLessThan(4 * r);
         if (m.evC[i * 4] === 1) vein++;
       }
     }
@@ -801,5 +815,70 @@ describe("marbler and currents", () => {
     for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === EV_DROP || m.evA[i * 4] === EV_DRAG) ev++;
     expect(m.started).toBe(ev);
     expect(m.drops).toBeGreaterThan(1);
+  });
+});
+
+describe("pour follows the music", () => {
+  /** Centres of drops that started this frame (first slice: R² equals what the pour emits first). */
+  const newDrops = (/** @type {ReturnType<typeof createMarbler>} */ m, /** @type {Set<string>} */ seen) => {
+    const out = [];
+    for (let i = 0; i < m.count; i++) {
+      if (m.evA[i * 4] !== EV_DROP) continue;
+      const key = `${m.evA[i * 4 + 1]},${m.evA[i * 4 + 2]}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push([m.evA[i * 4 + 1], m.evA[i * 4 + 2], i]);
+    }
+    return out;
+  };
+
+  it("pours on every beat, not only the strong ones", () => {
+    const m = createMarbler(2);
+    let hits = 0;
+    let poured = 0;
+    for (let f = 0; f < 600; f++) {
+      const onset = f % 15 === 0; // eighth notes at 120 BPM
+      const before = m.drops;
+      m.step(audioFrame({ rms: 0.12, onset, onsetStrength: f % 30 === 0 ? 0.9 : 0.4, bands: bandsHit(0, 40) }), DT, PARAMS, ENV);
+      if (onset && f > 60) {
+        hits++;
+        if (m.drops > before) poured++;
+      }
+    }
+    expect(poured).toBe(hits);
+  });
+
+  it("pours several drops on a loud beat and one on a quiet one", () => {
+    /** Hit drops (scale-1 drops with satellites aside: count distinct new centres the onset frame). */
+    const perBeat = (/** @type {number} */ rms, /** @type {number} */ strength) => {
+      const m = createMarbler(6);
+      for (let f = 0; f < 240; f++) m.step(audioFrame({ rms }), DT, PARAMS, ENV);
+      let mains = 0;
+      for (let b = 0; b < 8; b++) {
+        m.step(audioFrame({ rms, onset: true, onsetStrength: strength, bands: bandsHit(0, 6) }), DT, PARAMS, ENV);
+        mains += m.hits;
+        for (let f = 0; f < 29; f++) m.step(audioFrame({ rms }), DT, PARAMS, ENV);
+      }
+      return mains / 8;
+    };
+    expect(perBeat(0.02, 0.4)).toBe(1);
+    expect(perBeat(0.4, 1)).toBeGreaterThanOrEqual(3);
+    expect(perBeat(0.4, 1)).toBeLessThanOrEqual(4);
+  });
+
+  it("feeds the page with a stream of small drops at a rate that follows the loudness, none in silence", () => {
+    const rate = (/** @type {object} */ o) => {
+      const m = createMarbler(8);
+      for (let f = 0; f < 300; f++) m.step(audioFrame(o), DT, PARAMS, ENV);
+      const d0 = m.drops;
+      for (let f = 0; f < 600; f++) m.step(audioFrame(o), DT, PARAMS, ENV);
+      return (m.drops - d0) / 10; // per second
+    };
+    const loud = rate({ rms: 0.4, bands: bandsHit(0, 64) });
+    const quiet = rate({ rms: 0.03, bands: bandsHit(0, 64) });
+    expect(rate({ silent: true })).toBe(0);
+    expect(quiet).toBeGreaterThan(1.5);
+    expect(loud).toBeGreaterThan(6);
+    expect(loud).toBeGreaterThan(2 * quiet);
   });
 });

@@ -484,7 +484,7 @@ function loudestRegion(bands) {
 /** Events applied per frame (uniform array length in sim.frag). */
 export const MAX_EVENTS = 16;
 /** Drops being poured at once (each emits one DROP slice per frame). */
-export const MAX_POURS = 14;
+export const MAX_POURS = 24;
 export const EV_DROP = 1;
 export const EV_DRAG = 2;
 export const EV_SHIFT = 3;
@@ -549,6 +549,11 @@ const CLEAR_POUR = 2.5;
 /** Seconds a ground (vein-ink) drop takes to bloom. */
 const GROUND_POUR = 1.2;
 
+/** Shortest gap between hit drops (s): every beat pours, a double-trigger doesn't. */
+const BEAT_GAP = 0.06;
+/** Dropper drops per second at full loudness (Pour 1). */
+const DROPPER_RATE = 7;
+
 /** @param {number} x */
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
@@ -603,6 +608,7 @@ export function createMarbler(seed) {
   let kick = 0;
   let clearClock = 0;
   let nextClear = CLEAR_EVERY;
+  let act = 0;
 
   /**
    * Queue a drop. Returns the slot, or -1 when every slot is busy (the drop is skipped: the cap).
@@ -631,23 +637,25 @@ export function createMarbler(seed) {
   }
 
   /**
-   * A drop (plus maybe satellites) for a hit in `region`, sized by the hit and the params.
+   * A drop (plus maybe satellites) for a hit in `region` at (x, y), sized by the hit and the
+   * params. x < 0: anywhere in the region's spread.
    * @param {number} region @param {number} scale @param {PourAudio} audio
-   * @param {PourParams} params @param {PourEnv} env
+   * @param {PourParams} params @param {PourEnv} env @param {number} x @param {number} y
    */
-  function dropFrom(region, scale, audio, params, env) {
-    lastDrop = now;
+  function dropFrom(region, scale, audio, params, env, x = -1, y = -1) {
     const rc = RECIPES[region];
     const hit = clamp01(0.5 * audio.onsetStrength + 0.5 * (region === 0 ? audio.bassAtt / 2 : 0.5));
     const r = scale * rc.radius * params.size * (0.7 + 0.6 * params.reactivity * hit);
-    const x = env.aspect * (0.5 + (rand() - 0.5) * rc.spread);
-    const y = 0.5 + (rand() - 0.5) * rc.spread;
+    if (x < 0) {
+      x = env.aspect * (0.5 + (rand() - 0.5) * rc.spread);
+      y = 0.5 + (rand() - 0.5) * rc.spread;
+    }
     if (rand() < rc.clear) spawn(x, y, r, 0, -1, -1, rc.pour, 0);
     else spawn(x, y, r, rc.rimT, rc.ink, rc.rimInk, rc.pour, 0);
     if (scale === 1) {
-      // A flick of the brush: a spray of smaller drops around the hit, a third of them vein ink
-      // that later gets squeezed into the dark ground between the cells.
-      const k = 1 + Math.floor(rand() * 3 + 3 * hit);
+      // A flick of the brush: a spray of smaller drops around the hit (more when loud), a third
+      // of them vein ink that later gets squeezed into the dark ground between the cells.
+      const k = Math.floor(rand() * 2 + 5 * hit * m.energy);
       for (let j = 0; j < k; j++) {
         const a = rand() * 2 * Math.PI;
         const d = r * (1.2 + 1.8 * rand());
@@ -694,6 +702,8 @@ export function createMarbler(seed) {
     count: 0,
     /** Drop slices and strokes among them (not drift). */
     started: 0,
+    /** Hit drops poured for this frame's beat. */
+    hits: 0,
     /** Paint (not clear) drops laid so far. */
     drops: 0,
     /** Smoothed loudness 0–1 that sets the pour rate. */
@@ -752,19 +762,28 @@ export function createMarbler(seed) {
       const pour = Math.max(0.05, params.pour);
 
       let region = -1;
-      let scale = 1;
-      if (audio.onset && !audio.silent && now - lastDrop >= (0.5 - 0.38 * energy) / pour) {
+      if (audio.onset && !audio.silent && now - lastDrop >= BEAT_GAP) {
         region = strongestRegion(bands, prevBands);
+        lastDrop = now;
       }
-      // Loud passages also drizzle smaller drops between the hits.
-      drizzle += dt * pour * (energy > 0.2 ? 4 * energy * energy : 0);
-      if (region < 0 && drizzle >= 1 && !audio.silent) {
+      m.hits = 0;
+      if (region >= 0) {
+        dropFrom(region, 1, audio, params, env);
+        // Loud beats pour several drops at once.
+        m.hits = 1 + Math.floor(3 * clamp01(energy * audio.onsetStrength * params.reactivity * Math.min(1, pour)));
+        for (let j = 1; j < m.hits; j++) dropFrom(region, 0.75, audio, params, env);
+      }
+      // The dropper: while music plays a stream of small drops feeds the page, at a rate that
+      // follows the loudness, from a nozzle the spectral centroid steers across the page; the ink
+      // is the loudest part of the spectrum's.
+      if (!audio.silent) drizzle += dt * pour * DROPPER_RATE * energy;
+      if (drizzle >= 1 && !audio.silent) {
         drizzle -= 1;
-        region = loudestRegion(bands);
-        scale = 0.6;
+        const nx = env.aspect * (0.12 + 0.76 * clamp01(centroidS * 2.5) + 0.12 * Math.sin(0.37 * now));
+        const ny = 0.5 + 0.32 * Math.sin(0.23 * now + 1);
+        dropFrom(loudestRegion(bands), 0.6, audio, params, env, nx + 0.04 * (rand() - 0.5), ny + 0.04 * (rand() - 0.5));
       }
       if (drizzle > 1) drizzle = 1;
-      if (region >= 0) dropFrom(region, scale, audio, params, env);
 
       // The dark ground: now and then a large vein-ink drop blooms, and the cells poured into it
       // squeeze it into the black veins and gaps between them.
@@ -784,7 +803,10 @@ export function createMarbler(seed) {
       // Renew. The page drifts slowly, by whole sim pixels only (an exact copy, no resampling
       // blur), pushing old paint off one edge and bringing fresh paper in at the other; and now
       // and then (sooner when it's quiet) a large clear drop blooms open over a few seconds.
-      const renew = Math.max(0, params.renew);
+      // Renewal rests in silence (and resumes with the music), so a silent page is still.
+      act += ((audio.silent ? 0 : 1) - act) * (1 - Math.exp(-dt / 0.5));
+      if (audio.silent && act < 0.02) act = 0;
+      const renew = Math.max(0, params.renew) * act;
       if (renew > 0) {
         const a = 0.9 + 0.05 * now;
         const speed = renew * DRIFT_SPEED * dt * env.pxPerUnit;
