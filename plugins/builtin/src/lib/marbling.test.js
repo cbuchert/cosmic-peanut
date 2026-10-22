@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createEventQueue, MAX_PENDING, resizeMap, toOldPage, DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
+import { FLOW_LEN, FLOW_MAX_GRAD, flowBound, flowDisp, flowInverse, createEventQueue, MAX_PENDING, resizeMap, toOldPage, DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
 
 const out = new Float64Array(2);
 
@@ -566,3 +566,62 @@ describe("ground", () => {
   });
 });
 
+
+describe("currents (flow field)", () => {
+  /** Drift (0.01, −0.004) and two vortices of opposite sense. */
+  const field = () => {
+    const f = new Float32Array(FLOW_LEN);
+    f[0] = 0.01;
+    f[1] = -0.004;
+    f.set([0.6, 0.4, 1 / 0.2 ** 2, 0.002, 1.2, 0.7, 1 / 0.1 ** 2, -0.001], 2);
+    return f;
+  };
+
+  it("is divergence-free: a smooth swirl plus drift that neither sources nor sinks paint", () => {
+    const f = field();
+    const h = 1e-4;
+    const a = new Float64Array(2);
+    const b = new Float64Array(2);
+    let maxDiv = 0;
+    let maxGrad = 0;
+    for (let i = 0; i < 400; i++) {
+      const x = (i * 0.618) % 1.7;
+      const y = (i * 0.414) % 1;
+      flowDisp(f, x + h, y, a);
+      flowDisp(f, x - h, y, b);
+      const dudx = (a[0] - b[0]) / (2 * h);
+      const dvdx = (a[1] - b[1]) / (2 * h);
+      flowDisp(f, x, y + h, a);
+      flowDisp(f, x, y - h, b);
+      const dudy = (a[0] - b[0]) / (2 * h);
+      const dvdy = (a[1] - b[1]) / (2 * h);
+      maxDiv = Math.max(maxDiv, Math.abs(dudx + dvdy));
+      maxGrad = Math.max(maxGrad, Math.abs(dudx), Math.abs(dudy), Math.abs(dvdx), Math.abs(dvdy));
+    }
+    expect(maxGrad).toBeGreaterThan(0.05); // it does swirl
+    expect(maxDiv / maxGrad).toBeLessThan(1e-4);
+  });
+
+  it("bounds its own steepness, and inverts (fixed point) to well under a texel within that bound", () => {
+    const f = field();
+    // Scale the swirl until the bound sits at the baking limit.
+    const scale = FLOW_MAX_GRAD / flowBound(f);
+    for (let i = 2; i < FLOW_LEN; i += 4) f[i + 3] *= scale;
+    expect(flowBound(f)).toBeCloseTo(FLOW_MAX_GRAD, 6);
+    const a = new Float64Array(2);
+    const b = new Float64Array(2);
+    const h = 1e-4;
+    const p = new Float64Array(2);
+    const back = new Float64Array(2);
+    for (let i = 0; i < 400; i++) {
+      const x = (i * 0.618) % 1.7;
+      const y = (i * 0.414) % 1;
+      flowDisp(f, x + h, y, a);
+      flowDisp(f, x - h, y, b);
+      expect(Math.hypot(a[0] - b[0], a[1] - b[1]) / (2 * h)).toBeLessThanOrEqual(FLOW_MAX_GRAD);
+      flowDisp(f, x, y, p);
+      flowInverse(f, x + p[0], y + p[1], back);
+      expect(Math.hypot(back[0] - x, back[1] - y)).toBeLessThan(1e-5);
+    }
+  });
+});

@@ -19,7 +19,12 @@
  *   silent=1  the synth outputs silence (all-zero frames, silent: true)
  *   still=N   deterministic: seeded Math.random, fixed 1/60 s steps, stop after N frames
  *   gain=G    scale the audio's level (waveform, rms, peak, spectrum, bands) by G, e.g. 0.05 for a
- *             quiet passage
+ *             quiet passage; gain=0 also marks frames silent
+ *   warm=S    play the audio unscaled for the first S seconds, then apply `gain` (pour first, then
+ *             measure a quiet passage or silence)
+ *   motion=1  record per-frame background motion: mean |Δ| of the canvas (0–255 levels, on a
+ *             320×180 probe) against the previous frame, with the frame's onset / onsetStrength
+ *             and, when the visualizer exposes `debug.events` (events started this frame), that
  */
 import { createDrums, createMelody, createMusic, createProtoDemo, createSynth, createTones } from "./synth.js";
 
@@ -36,12 +41,15 @@ const base = `/plugins/${repo}/`;
 const w = /** @type {any} */ (window);
 const still = Number(q.get("still") ?? 0);
 const gain = Number(q.get("gain") ?? 1);
+const warm = Number(q.get("warm") ?? 0);
+const measureMotion = q.get("motion") === "1";
 
 /** Scale a frame's level in place (the synth rebuilds it every update). @param {any} a @param {number} g */
 function applyGain(a, g) {
   for (const k of ["waveform", "spectrum", "bands", "left", "right"]) if (a[k]) for (let i = 0; i < a[k].length; i++) a[k][i] *= g;
   a.rms *= g;
   a.peak *= g;
+  if (g === 0) a.silent = true;
 }
 
 const bgEl = /** @type {HTMLElement} */ (document.getElementById("bg"));
@@ -199,6 +207,15 @@ async function main() {
   /** @type {number[]} */ const times = [];
   /** @type {number[]} */ const intervals = [];
   /** @type {number[]} */ const lum = [];
+  /** @type {number[]} */ const motion = [];
+  /** @type {number[]} */ const onsets = [];
+  /** @type {number[]} */ const events = [];
+  const mprobe = document.createElement("canvas");
+  mprobe.width = 320;
+  mprobe.height = 180;
+  const mg = /** @type {CanvasRenderingContext2D} */ (mprobe.getContext("2d", { willReadFrequently: true }));
+  /** @type {Uint8ClampedArray | null} */
+  let prevPx = null;
   const probe = document.createElement("canvas");
   probe.width = 32;
   probe.height = 18;
@@ -220,7 +237,7 @@ async function main() {
     time.dt = frames === 0 ? 1 / 60 : dt;
     time.frame = frames++;
     const audio = synth.update(time.now, time.dt);
-    if (gain !== 1) applyGain(audio, gain);
+    if (gain !== 1 && time.now >= warm) applyGain(audio, gain);
     const t0 = performance.now();
     try {
       for (let r = 0; r < rep; r++) {
@@ -240,6 +257,17 @@ async function main() {
       for (let i = 0; i < d.length; i += 4) s += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
       lum.push(s / (d.length / 4) / 255);
     }
+    if (measureMotion) {
+      mg.clearRect(0, 0, mprobe.width, mprobe.height);
+      mg.drawImage(canvas, 0, 0, mprobe.width, mprobe.height);
+      const d = mg.getImageData(0, 0, mprobe.width, mprobe.height).data;
+      let s = 0;
+      if (prevPx) for (let i = 0; i < d.length; i += 4) s += Math.abs(d[i] - prevPx[i]) + Math.abs(d[i + 1] - prevPx[i + 1]) + Math.abs(d[i + 2] - prevPx[i + 2]);
+      motion.push(prevPx ? s / ((d.length / 4) * 3) : 0);
+      prevPx = d;
+      onsets.push(audio.onset && !audio.silent ? Math.max(0.01, audio.onsetStrength) : 0);
+      events.push(viz.debug?.events ?? -1);
+    }
     if (still && frames >= still) {
       w.__still = true;
       return;
@@ -252,6 +280,58 @@ async function main() {
     times.length = 0;
     intervals.length = 0;
     lum.length = 0;
+    motion.length = 0;
+    onsets.length = 0;
+    events.length = 0;
+  };
+  /**
+   * Edge sharpness of the canvas as it is now: classify each pixel as one of `colors` (sRGB 0–1,
+   * within `tol` per channel) or mixed, and along every row and column measure the run of mixed
+   * pixels between two pure pixels of different colours. Returns the mean run (px) and count.
+   * @param {number[][]} colors @param {number} tol
+   */
+  w.__edges = (colors, tol) => {
+    const c2 = document.createElement("canvas");
+    c2.width = canvas.width;
+    c2.height = canvas.height;
+    const g2 = /** @type {CanvasRenderingContext2D} */ (c2.getContext("2d", { willReadFrequently: true }));
+    g2.drawImage(canvas, 0, 0);
+    const W = c2.width;
+    const H = c2.height;
+    const d = g2.getImageData(0, 0, W, H).data;
+    const cls = new Int8Array(W * H);
+    for (let i = 0; i < W * H; i++) {
+      cls[i] = -1;
+      for (let k = 0; k < colors.length; k++) {
+        const c = colors[k];
+        if (Math.abs(d[i * 4] / 255 - c[0]) <= tol && Math.abs(d[i * 4 + 1] / 255 - c[1]) <= tol && Math.abs(d[i * 4 + 2] / 255 - c[2]) <= tol) {
+          cls[i] = k;
+          break;
+        }
+      }
+    }
+    let sum = 0;
+    let n = 0;
+    /** @param {number} start @param {number} step @param {number} len */
+    const line = (start, step, len) => {
+      let last = -1;
+      let run = 0;
+      for (let j = 0; j < len; j++) {
+        const c = cls[start + j * step];
+        if (c < 0) run++;
+        else {
+          if (last >= 0 && c !== last) {
+            sum += run;
+            n++;
+          }
+          last = c;
+          run = 0;
+        }
+      }
+    };
+    for (let y = 0; y < H; y++) line(y * W, 1, W);
+    for (let x = 0; x < W; x++) line(x, W, H);
+    return { meanRun: n ? sum / n : -1, transitions: n };
   };
   w.__stats = () => {
     const pct = (/** @type {number[]} */ a, /** @type {number} */ p) => {
@@ -267,6 +347,11 @@ async function main() {
       intervalP99: pct(intervals, 0.99),
       size: [size.width, size.height],
       lum,
+      motion,
+      onsets,
+      events,
+      debug: viz.debug ?? null,
+      now: time.now,
       errors,
     };
   };

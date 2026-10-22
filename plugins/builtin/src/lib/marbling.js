@@ -124,6 +124,80 @@ export function clampDrag(invS2, v) {
   return v;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Currents: the water bath flows. A smooth divergence-free displacement field — a drift plus a few
+// Gaussian vortices — accumulated over a bake batch and applied (exactly inverted) like any event.
+// ---------------------------------------------------------------------------------------------
+
+/** Vortices in a flow field (two FLOW events of three each). */
+export const FLOW_VORTICES = 6;
+/** Flow field layout: [drift x, drift y, then per vortex (cx, cy, k = 1/σ², A)]. */
+export const FLOW_LEN = 2 + 4 * FLOW_VORTICES;
+
+/**
+ * The displacement of a flow field at p: the drift plus, per vortex, the curl of the stream
+ * function ψ = A·exp(−k|p − c|²), i.e. (∂ψ/∂y, −∂ψ/∂x) — divergence-free by construction, a swirl
+ * around c (counter-clockwise for A > 0) peaking at |p − c| = 1/√(2k). Mirrored in events.glsl.
+ * @param {ArrayLike<number>} f FLOW_LEN params
+ * @param {number} x
+ * @param {number} y
+ * @param {Float64Array | number[]} out
+ */
+export function flowDisp(f, x, y, out) {
+  let dx = f[0];
+  let dy = f[1];
+  for (let i = 2; i < FLOW_LEN; i += 4) {
+    const a = f[i + 3];
+    if (a === 0) continue;
+    const rx = x - f[i];
+    const ry = y - f[i + 1];
+    const k = f[i + 2];
+    const g = 2 * k * a * Math.exp(-k * (rx * rx + ry * ry));
+    dx -= g * ry;
+    dy += g * rx;
+  }
+  out[0] = dx;
+  out[1] = dy;
+  return out;
+}
+
+/**
+ * Largest steepness (Jacobian norm of the displacement) a batch of flow may build up before it is
+ * baked, so FLOW_ITERS fixed-point steps of {@link flowInverse} land within ~1e-5 page.
+ */
+export const FLOW_MAX_GRAD = 0.12;
+export const FLOW_ITERS = 4;
+
+/**
+ * An upper bound on the Jacobian norm of {@link flowDisp}: each vortex's is 2k|A|·max(1, |1 − 2kr²|)
+ * ·exp(−kr²) ≤ 2k|A|, and the drift has none.
+ * @param {ArrayLike<number>} f
+ */
+export function flowBound(f) {
+  let b = 0;
+  for (let i = 2; i < FLOW_LEN; i += 4) b += 2 * f[i + 2] * Math.abs(f[i + 3]);
+  return b;
+}
+
+/**
+ * Inverse of p ↦ p + flowDisp(p): where the paint now at p came from, by the fixed-point
+ * iteration q ← p − flowDisp(q) (a contraction while flowBound < 1). Mirrored in events.glsl.
+ * @param {ArrayLike<number>} f
+ * @param {number} px
+ * @param {number} py
+ * @param {Float64Array | number[]} out
+ */
+export function flowInverse(f, px, py, out) {
+  out[0] = px;
+  out[1] = py;
+  for (let i = 0; i < FLOW_ITERS; i++) {
+    flowDisp(f, out[0], out[1], out);
+    out[0] = px - out[0];
+    out[1] = py - out[1];
+  }
+  return out;
+}
+
 /**
  * Seeded PRNG (mulberry32): drop positions and choices are deterministic given the audio and time.
  * @param {number} seed

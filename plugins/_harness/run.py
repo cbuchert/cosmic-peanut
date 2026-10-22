@@ -5,6 +5,11 @@ Serve the repo root first (python3 -m http.server <port> --bind 127.0.0.1), then
     uv run python plugins/_harness/run.py --port <port> --shots DIR [--tag after]
         deterministic stills of each visualizer over black and over a light, busy backdrop
         (plus the backdrop alone), for checking transparency; no timing.
+    uv run python plugins/_harness/run.py --port <port> --motion [marbling ...]
+        background motion (mean |Δ| per frame, 0–255) in silence, a quiet passage and loud music
+        after --warm seconds of pouring, with beat response and motion between events.
+    uv run python plugins/_harness/run.py --port <port> --edges 60,120 marbling
+        edge sharpness (mean mixed-pixel run between two pure colours) of deterministic stills.
 """
 
 import argparse
@@ -65,6 +70,95 @@ def run(page, url: str, seconds: float) -> dict:
     return page.evaluate("window.__stats ? window.__stats() : {errors: window.__errors}")
 
 
+MOTION_CONDITIONS = (("silence", 0.0), ("quiet", 0.1), ("loud", 1.0))
+
+
+def motion_summary(s: dict, fps: float) -> dict:
+    """Mean motion, beat response (150 ms after strong onsets vs the 150 ms before) and motion on
+    frames where the visualizer started no event (when it reports `debug.events`)."""
+    m, on, ev = s["motion"][1:], s["onsets"][1:], s["events"][1:]
+    win = max(1, round(0.15 * fps))
+    after, before = [], []
+    for i, o in enumerate(on):
+        if o >= 0.8 and i >= win and i + win < len(m):
+            after.append(sum(m[i : i + win]) / win)
+            before.append(sum(m[i - win : i]) / win)
+    quiet = [x for x, e in zip(m, ev, strict=True) if e == 0]
+    mean = lambda a: sum(a) / len(a) if a else -1.0  # noqa: E731
+    r = {
+        "motion": round(mean(m), 4),
+        "beats": len(after),
+        "beat_after": round(mean(after), 4),
+        "beat_before": round(mean(before), 4),
+        "beat_response": round(mean(after) / mean(before), 3)
+        if before and mean(before) > 0
+        else -1,
+        "between_frames": f"{len(quiet)}/{len(m)}",
+        "between_motion": round(mean(quiet), 4),
+    }
+    d = s.get("debug") or {}
+    if "drops" in d:
+        r["debug"] = d
+    return r
+
+
+def motion(
+    browser, base: str, vizs: list[str], prefix: str, warm: float, seconds: float, query: str
+) -> dict:
+    out = {}
+    for viz in vizs:
+        res = {}
+        for name, gain in MOTION_CONDITIONS:
+            page = browser.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=2)
+            page.goto(
+                f"{base}?repo={prefix}{VIZ[viz]}&viz={viz}&audio=music&warm={warm}&gain={gain}&motion=1&{query}"
+            )
+            page.wait_for_function("window.__ready === true", timeout=20000)
+            page.wait_for_function(
+                f"window.__stats().now >= {warm + 0.5}", timeout=int(warm * 3000) + 20000
+            )
+            before = page.evaluate("window.__viz.debug ? {...window.__viz.debug} : null")
+            page.evaluate("window.__reset()")
+            page.wait_for_timeout(int(seconds * 1000))
+            s = page.evaluate("window.__stats()")
+            r = motion_summary(s, s["fps"])
+            if before and "drops" in before:
+                mins = seconds / 60
+                r["drops_per_min"] = round((s["debug"]["drops"] - before["drops"]) / mins, 1)
+            r["fps"] = round(s["fps"], 1)
+            r["errors"] = s["errors"]
+            res[name] = r
+            print(viz, name, json.dumps(r), flush=True)
+            page.close()
+        sil, loud = res["silence"]["motion"], res["loud"]["motion"]
+        res["loud_over_silence"] = round(loud / sil, 2) if sil > 0 else float("inf")
+        out[viz] = res
+    return out
+
+
+def edges(browser, base: str, vizs: list[str], prefix: str, at: list[int], query: str) -> dict:
+    """Deterministic stills after each of `at` seconds (fixed 60 Hz steps, music) and the mean
+    mixed-pixel run between pure colours; colours come from `window.__viz.debug.colors`."""
+    out = {}
+    for viz in vizs:
+        for sec in at:
+            page = browser.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=2)
+            page.goto(
+                f"{base}?repo={prefix}{VIZ[viz]}&viz={viz}&audio=music&still={sec * 60}&{query}"
+            )
+            page.wait_for_function(
+                "window.__still === true || window.__errors.length > 0",
+                timeout=(sec * 3 + 30) * 1000,
+            )
+            colors = page.evaluate("window.__viz.debug && window.__viz.debug.colors")
+            e = page.evaluate("([c, t]) => window.__edges(c, t)", [colors, 0.06])
+            page.screenshot(path=OUT / f"{viz}-edges-{sec}s.png")
+            out[f"{viz}@{sec}s"] = e
+            print(viz, sec, json.dumps(e), page.evaluate("window.__errors"), flush=True)
+            page.close()
+    return out
+
+
 def shots(browser, base: str, vizs: list[str], out: Path, tag: str, prefix: str) -> None:
     """Deterministic stills (`still=150`: 2.5 s of fixed 60 Hz steps) over each backdrop."""
     out.mkdir(parents=True, exist_ok=True)
@@ -98,12 +192,27 @@ def main() -> None:
     ap.add_argument("--shots", type=Path, help="write backdrop stills here instead of timing")
     ap.add_argument("--tag", default="after", help="file-name tag for --shots")
     ap.add_argument("--prefix", default="", help="plugin folder prefix under /plugins/")
+    ap.add_argument("--motion", action="store_true", help="background-motion measurement")
+    ap.add_argument("--warm", type=float, default=20, help="seconds of music before measuring")
+    ap.add_argument("--edges", help="comma-separated seconds for edge-sharpness stills")
     args = ap.parse_args()
     OUT.mkdir(exist_ok=True)
     base = f"http://127.0.0.1:{args.port}/plugins/_harness/index.html"
     results = {}
     with sync_playwright() as p:
         browser = getattr(p, args.browser).launch()
+        if args.motion or args.edges:
+            if args.motion:
+                res = motion(
+                    browser, base, args.viz, args.prefix, args.warm, args.seconds, args.query
+                )
+            else:
+                at = [int(x) for x in args.edges.split(",")]
+                res = edges(browser, base, args.viz, args.prefix, at, args.query)
+            kind = "motion" if args.motion else "edges"
+            (OUT / f"{kind}-{args.tag}.json").write_text(json.dumps(res, indent=2))
+            browser.close()
+            return
         if args.shots:
             shots(browser, base, args.viz, args.shots, args.tag, args.prefix)
             browser.close()
