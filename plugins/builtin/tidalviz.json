@@ -255,6 +255,7 @@
         { "id": "pour", "type": "number", "label": "Pour rate", "min": 0.2, "max": 2, "step": 0.01, "default": 1 },
         { "id": "size", "type": "number", "label": "Drop size", "min": 0.4, "max": 2, "step": 0.01, "default": 1 },
         { "id": "rake", "type": "number", "label": "Rake", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "currents", "type": "number", "label": "Currents", "min": 0, "max": 2, "step": 0.01, "default": 1 },
         { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
         { "id": "renew", "type": "number", "label": "Renew speed", "min": 0, "max": 3, "step": 0.01, "default": 1 }
       ]

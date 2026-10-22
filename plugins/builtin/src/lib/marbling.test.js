@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { FLOW_LEN, FLOW_MAX_GRAD, flowBound, flowDisp, flowInverse, createEventQueue, MAX_PENDING, resizeMap, toOldPage, DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
+import { FLOW_VORTICES, CURRENT_MAX_SPEED, createCurrents, FLOW_LEN, FLOW_MAX_GRAD, flowBound, flowDisp, flowInverse, createEventQueue, MAX_PENDING, resizeMap, toOldPage, DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
 
 const out = new Float64Array(2);
 
@@ -437,12 +437,13 @@ describe("effectiveParams", () => {
     const out = { ...DEFAULTS };
     effectiveParams({ pour: 1.5, size: "x" }, false, out);
     expect(out).toEqual({ ...DEFAULTS, pour: 1.5 });
-    expect(DEFAULTS).toEqual({ pour: 1, size: 1, rake: 1, reactivity: 1, renew: 1 });
+    expect(DEFAULTS).toEqual({ pour: 1, size: 1, rake: 1, reactivity: 1, renew: 1, currents: 1 });
   });
 
-  it("calms pour, rake and renew under Reduce motion while they sit at their defaults", () => {
+  it("calms pour, rake, renew and currents under Reduce motion while they sit at their defaults", () => {
     const out = { ...DEFAULTS };
     effectiveParams({ ...DEFAULTS }, true, out);
+    expect(out.currents).toBeLessThan(0.6);
     expect(out.pour).toBeLessThan(0.7);
     expect(out.rake).toBeLessThan(0.5);
     expect(out.renew).toBeLessThan(0.6);
@@ -623,5 +624,133 @@ describe("currents (flow field)", () => {
       flowInverse(f, x + p[0], y + p[1], back);
       expect(Math.hypot(back[0] - x, back[1] - y)).toBeLessThan(2e-6);
     }
+  });
+});
+
+describe("createCurrents", () => {
+  const CP = { pour: 1, size: 1, rake: 1, reactivity: 1, renew: 1, currents: 1 };
+  /** Music-ish frame: every band at `level`, rms from it. @param {number} level @param {object} [o] */
+  const music = (level, o = {}) => audioFrame({ rms: level * 0.4, bands: new Float32Array(64).fill(level), ...o });
+  /** Fastest the rate field moves paint anywhere on the page (page heights / s). @param {Float32Array} f */
+  const maxSpeed = (f) => {
+    const v = new Float64Array(2);
+    let best = 0;
+    for (let i = 0; i <= 40; i++)
+      for (let j = 0; j <= 24; j++) {
+        flowDisp(f, (i / 40) * ENV.aspect, j / 24, v);
+        best = Math.max(best, Math.hypot(v[0], v[1]));
+      }
+    return best;
+  };
+
+  it("flows while music plays and settles to exactly still in silence", () => {
+    const c = createCurrents(1);
+    for (let i = 0; i < 300; i++) c.step(music(0.7), 0.8, DT, CP, ENV);
+    expect(maxSpeed(c.rate)).toBeGreaterThan(0.01);
+    for (let i = 0; i < 600; i++) c.step(audioFrame({ silent: true }), 0, DT, CP, ENV);
+    expect(maxSpeed(c.rate)).toBe(0);
+    c.reset();
+    c.step(audioFrame({ silent: true }), 0, DT, CP, ENV);
+    expect(c.active).toBe(false);
+  });
+
+  it("runs faster the louder the music, up to a bounded speed", () => {
+    const speedAt = (/** @type {number} */ e, /** @type {object} */ p = CP) => {
+      const c = createCurrents(4);
+      let best = 0;
+      for (let i = 0; i < 600; i++) {
+        c.step(music(e), e, DT, /** @type {any} */ (p), ENV);
+        if (i > 300) best = Math.max(best, maxSpeed(c.rate));
+      }
+      return best;
+    };
+    const speeds = [0.05, 0.2, 0.5, 1].map((e) => speedAt(e));
+    for (let i = 1; i < speeds.length; i++) expect(speeds[i]).toBeGreaterThan(speeds[i - 1] * 1.2);
+    expect(speeds[3]).toBeGreaterThan(0.04);
+    expect(speedAt(1, { ...CP, reactivity: 2, currents: 2 })).toBeLessThanOrEqual(CURRENT_MAX_SPEED);
+    expect(speedAt(1, { ...CP, reactivity: 0 })).toBeLessThan(0.1 * speeds[3]);
+    expect(speedAt(1, { ...CP, currents: 0 })).toBe(0);
+  });
+
+  it("swells the big swirls with the bass and spins a local vortex per part of the spectrum, low to high across the page", () => {
+    /** Run with only bands [lo, hi) sounding; return |A| per vortex (time-max) and final centres x. */
+    const run = (/** @type {number} */ lo, /** @type {number} */ hi) => {
+      const c = createCurrents(7);
+      const amp = new Float64Array(FLOW_VORTICES);
+      for (let i = 0; i < 900; i++) {
+        const b = new Float32Array(64);
+        for (let k = lo; k < hi; k++) b[k] = 0.9;
+        c.step(audioFrame({ rms: 0.2, bands: b }), 0.6, DT, CP, ENV);
+        for (let v = 0; v < FLOW_VORTICES; v++) amp[v] = Math.max(amp[v], Math.abs(c.rate[2 + v * 4 + 3]));
+      }
+      const xs = Array.from({ length: FLOW_VORTICES }, (_, v) => c.rate[2 + v * 4]);
+      const sig = Array.from({ length: FLOW_VORTICES }, (_, v) => 1 / Math.sqrt(c.rate[2 + v * 4 + 2]));
+      return { amp, xs, sig };
+    };
+    const bass = run(0, 16);
+    const highs = run(48, 64);
+    // Vortices 0 and 1 are the big ones (widest), the bass swells them.
+    for (let v = 2; v < FLOW_VORTICES; v++) expect(bass.sig[v]).toBeLessThan(bass.sig[0] * 0.6);
+    expect(bass.amp[0]).toBeGreaterThan(1.5 * highs.amp[0]);
+    expect(bass.amp[1]).toBeGreaterThan(1.5 * highs.amp[1]);
+    // Local vortex g follows band group g (16 bands each): the sounding group's spins hardest.
+    for (const [lo, g] of [[0, 0], [16, 1], [32, 2], [48, 3]]) {
+      const r = run(lo, lo + 16);
+      const local = Array.from(r.amp).slice(2);
+      expect(local.indexOf(Math.max(...local))).toBe(g);
+      expect(local[g]).toBeGreaterThan(3 * Math.max(...local.filter((_, i) => i !== g)));
+    }
+    // Their homes run low → high across the page (they wander, but stay in their lane).
+    for (let v = 3; v < FLOW_VORTICES; v++) expect(bass.xs[v]).toBeGreaterThan(bass.xs[v - 1]);
+  });
+
+  it("surges on a beat and eases back within a second", () => {
+    const c = createCurrents(3);
+    for (let i = 0; i < 300; i++) c.step(music(0.6), 0.6, DT, CP, ENV);
+    const before = maxSpeed(c.rate);
+    c.step(music(0.6, { onset: true, onsetStrength: 1 }), 0.6, DT, CP, ENV);
+    let after = 0;
+    for (let i = 0; i < 9; i++) {
+      c.step(music(0.6), 0.6, DT, CP, ENV);
+      after = Math.max(after, maxSpeed(c.rate));
+    }
+    expect(after).toBeGreaterThan(1.4 * before);
+    for (let i = 0; i < 60; i++) c.step(music(0.6), 0.6, DT, CP, ENV);
+    expect(maxSpeed(c.rate)).toBeLessThan(1.15 * before);
+  });
+
+  it("accumulates the batch's displacement at frozen centres, asking to be baked before it gets too steep", () => {
+    const c = createCurrents(5);
+    const P2 = { ...CP, reactivity: 2, currents: 2 };
+    let fulls = 0;
+    let sumDrift = 0;
+    for (let i = 0; i < 1200; i++) {
+      const centres = Array.from(c.acc.subarray(2, 6));
+      c.step(music(1, { onset: i % 30 === 0, onsetStrength: 1 }), 1, DT, P2, ENV);
+      sumDrift += c.rate[0] * DT;
+      expect(Array.from(c.acc.subarray(2, 5))).toEqual(centres.slice(0, 3)); // frozen
+      expect(flowBound(c.acc)).toBeLessThanOrEqual(FLOW_MAX_GRAD);
+      expect(c.acc[0]).toBeCloseTo(sumDrift, 6);
+      if (c.full()) {
+        fulls++;
+        c.reset();
+        sumDrift = 0;
+        expect(flowBound(c.acc)).toBe(0);
+      }
+    }
+    expect(fulls).toBeGreaterThan(5);
+  });
+
+  it("is deterministic given the seed and the audio", () => {
+    const run = () => {
+      const c = createCurrents(9);
+      const trace = [];
+      for (let i = 0; i < 240; i++) {
+        c.step(music(0.3 + 0.3 * Math.sin(i / 20), { onset: i % 25 === 0, onsetStrength: 0.8 }), 0.5, DT, CP, ENV);
+        trace.push(...c.rate);
+      }
+      return trace;
+    };
+    expect(run()).toEqual(run());
   });
 });

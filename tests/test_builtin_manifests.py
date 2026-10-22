@@ -475,16 +475,26 @@ def test_marbling_manifest():
         "thumbs/marbling.jpg",
     )
     params = {p["id"]: p for p in v["params"]}
-    assert list(params) == ["palette", "paper", "pour", "size", "rake", "reactivity", "renew"]
+    assert list(params) == [
+        "palette",
+        "paper",
+        "pour",
+        "size",
+        "rake",
+        "currents",
+        "reactivity",
+        "renew",
+    ]
     assert params["palette"]["options"] == ["beast", "indigo", "emerald", "gold"]
     assert params["palette"]["default"] == "beast"
     assert params["paper"]["options"] == ["cream", "none"]
     assert params["paper"]["default"] == "cream"
-    # lib/marbling.js DEFAULTS: Reduce motion calms pour/rake/renew only while they sit here.
-    for pid in ("pour", "size", "rake", "reactivity", "renew"):
+    # lib/marbling.js DEFAULTS: Reduce motion calms pour/rake/renew/currents only while they sit here.
+    for pid in ("pour", "size", "rake", "currents", "reactivity", "renew"):
         assert params[pid]["type"] == "number"
         assert params[pid]["default"] == 1, pid
     assert params["rake"]["min"] == 0
+    assert params["currents"]["min"] == 0
     assert params["renew"]["min"] == 0
     for f in (
         "fullscreen.vert",

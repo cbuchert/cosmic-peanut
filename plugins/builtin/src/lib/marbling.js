@@ -227,6 +227,140 @@ export function flowInverse(f, px, py, out) {
   return out;
 }
 
+/** Currents: the two big swirls' widths (σ, page) and stream amplitude at full strength (page²/s:
+ * peak speed ≈ 2.9·A for σ 0.3), and the gentle drift's speed (page/s). */
+const BIG_SIGMA = [0.3, 0.26];
+const BIG_A = 0.0175;
+/** The four local vortices, one per 16-band group (low → high across the page): σ and amplitude
+ * (peak speed ≈ 6.6·A). */
+const LOCAL_SIGMA = 0.13;
+const LOCAL_A = 0.005;
+const FLOW_DRIFT = 0.006;
+/** Fastest the currents may ever move paint (page heights / s), whatever the params. */
+export const CURRENT_MAX_SPEED = 0.2;
+
+/**
+ * The bath's currents: a smooth, divergence-free flow (see {@link flowDisp}) whose strength follows
+ * the music and settles to exactly still in silence. `rate` is the field's velocity (page/s) right
+ * now; `acc` accumulates its displacement since the last {@link reset} (the last bake), with the
+ * vortex centres frozen at that moment, ready to be applied as the newest event.
+ * @param {number} seed
+ */
+export function createCurrents(seed) {
+  const rand = createRng(seed);
+  const rate = new Float32Array(FLOW_LEN);
+  const acc = new Float32Array(FLOW_LEN);
+  /** Per vortex: wander phases and rates (rad/s). */
+  const ph = new Float64Array(FLOW_VORTICES * 4);
+  for (let i = 0; i < ph.length; i += 4) {
+    ph[i] = rand() * 2 * Math.PI;
+    ph[i + 1] = rand() * 2 * Math.PI;
+    ph[i + 2] = 0.08 + 0.08 * rand();
+    ph[i + 3] = 0.06 + 0.08 * rand();
+  }
+  let t = 0;
+  let en = 0;
+  let bassS = 0;
+  let surge = 0;
+  let lastStep = 0;
+  /** Smoothed level of each 16-band group. */
+  const lv = new Float64Array(4);
+
+  /** Move the vortex centres along their slow wander. @param {number} aspect */
+  function place(aspect) {
+    for (let v = 0; v < FLOW_VORTICES; v++) {
+      const o = 2 + v * 4;
+      const p = v * 4;
+      const sigma = v < 2 ? BIG_SIGMA[v] : LOCAL_SIGMA;
+      const home = v < 2 ? 0.5 : 0.14 + 0.24 * (v - 2);
+      const reach = v < 2 ? 0.3 : 0.08;
+      rate[o] = aspect * (home + reach * Math.sin(ph[p] + ph[p + 2] * t));
+      rate[o + 1] = 0.5 + 0.28 * Math.sin(ph[p + 1] + ph[p + 3] * t);
+      rate[o + 2] = 1 / (sigma * sigma);
+    }
+  }
+
+  const c = {
+    rate,
+    acc,
+    /** The accumulated displacement is non-zero (something to bake). */
+    active: false,
+    /**
+     * @param {PourAudio} audio
+     * @param {number} energy the marbler's 0–1 loudness
+     * @param {number} dt
+     * @param {PourParams} params
+     * @param {PourEnv} env
+     */
+    step(audio, energy, dt, params, env) {
+      t += dt;
+      const target = audio.silent ? 0 : energy;
+      en += (target - en) * (1 - Math.exp(-dt / (target > en ? 0.4 : 1)));
+      if (target === 0 && en < 0.004) en = 0;
+      const s = en * Math.min(2, Math.max(0, params.reactivity) * Math.max(0, params.currents));
+      const bands = audio.bands;
+      const quiet = audio.silent;
+      let low = 0;
+      for (let i = REGIONS[0]; i < REGIONS[1]; i++) low += quiet ? 0 : bands[i];
+      bassS += (low / (REGIONS[1] - REGIONS[0]) - bassS) * (1 - Math.exp(-dt / 0.25));
+      for (let g = 0; g < 4; g++) {
+        let sum = 0;
+        for (let i = g * 16; i < g * 16 + 16; i++) sum += quiet ? 0 : bands[i];
+        lv[g] += (sum / 16 - lv[g]) * (1 - Math.exp(-dt / 0.12));
+      }
+      place(env.aspect);
+      const th = 0.9 + 0.05 * t;
+      rate[0] = FLOW_DRIFT * s * Math.cos(th);
+      rate[1] = FLOW_DRIFT * s * Math.sin(th);
+      // A beat surges the whole bath for a moment.
+      surge = audio.onset && !quiet ? Math.max(surge, clamp01(audio.onsetStrength)) : surge * Math.exp(-dt / 0.2);
+      const boost = 1 + 1.2 * surge;
+      const swell = 0.25 + 0.75 * clamp01(bassS / 0.8);
+      rate[2 + 3] = BIG_A * s * swell * boost;
+      rate[6 + 3] = -BIG_A * s * swell * boost;
+      for (let g = 0; g < 4; g++) {
+        const p = (2 + g) * 4;
+        // Each local vortex slowly reverses (its own period, 10–20 s) so paint swirls back and forth.
+        const turn = Math.cos(ph[p] * 3 + (0.3 + 0.03 * g) * t);
+        rate[2 + (2 + g) * 4 + 3] = LOCAL_A * s * clamp01(lv[g] * 1.2) * turn * boost;
+      }
+      // Bound the speed: each vortex peaks at |A|·√(2k)·e^−½, the drift is uniform.
+      let top = Math.hypot(rate[0], rate[1]);
+      for (let o = 2; o < FLOW_LEN; o += 4) top += Math.abs(rate[o + 3]) * Math.sqrt(2 * rate[o + 2]) * 0.6065;
+      if (top > CURRENT_MAX_SPEED) {
+        const k = CURRENT_MAX_SPEED / top;
+        rate[0] *= k;
+        rate[1] *= k;
+        for (let o = 2; o < FLOW_LEN; o += 4) rate[o + 3] *= k;
+      }
+      // Accumulate this frame's displacement at the batch's frozen centres — never past the
+      // steepness the inverse handles (the caller bakes when `full`, so this rarely trims).
+      lastStep = flowBound(rate) * dt;
+      const room = FLOW_MAX_GRAD - flowBound(acc);
+      const k = lastStep > room ? Math.max(0, room) / lastStep : 1;
+      let any = false;
+      for (let i = 0; i < FLOW_LEN; i++) {
+        if (i >= 2 && (i - 2) % 4 !== 3) continue;
+        acc[i] += rate[i] * dt * k;
+        if (acc[i] !== 0) any = true;
+      }
+      c.active = any;
+    },
+    /** Bake now: another frame or two would make the batch too steep. */
+    full() {
+      return flowBound(acc) + 3 * lastStep >= FLOW_MAX_GRAD;
+    },
+    /** Start a new batch: zero the accumulated flow and freeze the current centres into it. */
+    reset() {
+      for (let i = 0; i < FLOW_LEN; i++) acc[i] = i >= 2 && (i - 2) % 4 !== 3 ? rate[i] : 0;
+      c.active = false;
+    },
+  };
+  place(1);
+  c.reset();
+  return c;
+}
+
 /**
  * Seeded PRNG (mulberry32): drop positions and choices are deterministic given the audio and time.
  * @param {number} seed
@@ -386,6 +520,7 @@ const RECIPES = [
  * @property {number} rake stylus (stroke) amount
  * @property {number} reactivity how strongly hits scale drops
  * @property {number} renew renew-speed multiplier
+ * @property {number} currents strength of the bath's currents
  */
 /**
  * @typedef {object} PourEnv
@@ -727,9 +862,10 @@ export function createMarbler(seed) {
 }
 
 /** Manifest defaults of the numeric params (tests/test_builtin_manifests.py pins them). */
-export const DEFAULTS = Object.freeze({ pour: 1, size: 1, rake: 1, reactivity: 1, renew: 1 });
-/** What Reduce motion uses instead of a default: a calmer pour, a gentler rake, slower renewal. */
-const REDUCED = { pour: 0.6, rake: 0.4, renew: 0.5 };
+export const DEFAULTS = Object.freeze({ pour: 1, size: 1, rake: 1, reactivity: 1, renew: 1, currents: 1 });
+/** What Reduce motion uses instead of a default: a calmer pour, a gentler rake, slower renewal,
+ * gentler currents. */
+const REDUCED = { pour: 0.6, rake: 0.4, renew: 0.5, currents: 0.5 };
 const PARAM_KEYS = /** @type {(keyof PourParams)[]} */ (Object.keys(DEFAULTS));
 
 /**
@@ -750,6 +886,7 @@ export function effectiveParams(params, reduceMotion, out) {
     if (out.pour === DEFAULTS.pour) out.pour = REDUCED.pour;
     if (out.rake === DEFAULTS.rake) out.rake = REDUCED.rake;
     if (out.renew === DEFAULTS.renew) out.renew = REDUCED.renew;
+    if (out.currents === DEFAULTS.currents) out.currents = REDUCED.currents;
   }
   return out;
 }
