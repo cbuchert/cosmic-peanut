@@ -320,7 +320,8 @@ export function createCurrents(seed) {
       rate[0] = FLOW_DRIFT * s * Math.cos(th);
       rate[1] = FLOW_DRIFT * s * Math.sin(th);
       // The bath ebbs between beats and surges on each one.
-      surge = audio.onset && !quiet ? Math.max(surge, clamp01(audio.onsetStrength)) : surge * Math.exp(-dt / 0.12);
+      // (Strong beats surge far more than the weak ones between them.)
+      surge = audio.onset && !quiet ? Math.max(surge, clamp01(audio.onsetStrength) ** 2) : surge * Math.exp(-dt / 0.12);
       const boost = 0.3 + 3.7 * surge;
       const swell = 0.25 + 0.75 * clamp01(bassS / 0.8);
       rate[2 + 3] = BIG_A * s * swell * boost * (1 + 1.5 * stir);
@@ -924,7 +925,7 @@ export function createMarbler(seed) {
     step(audio, dt, params, env) {
       now += dt;
       const drops0 = m.drops;
-      pulse = audio.onset && !audio.silent ? 1 : pulse * Math.exp(-dt / PULSE_TAU);
+      pulse = audio.onset && !audio.silent ? Math.max(pulse, clamp01(audio.onsetStrength)) : pulse * Math.exp(-dt / PULSE_TAU);
       const combs0 = m.combs;
       const flicks0 = m.flicks;
       const bands = audio.bands;
