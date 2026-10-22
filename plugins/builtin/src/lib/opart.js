@@ -26,32 +26,57 @@ export const FIELD_MAX = 2.8;
  */
 export const FLOW_SENS = 1;
 
-/** Most stripe inversions per second any pixel may see with reduceFlashing (WCAG: 3 flashes/s). */
-export const MAX_INVERSIONS = 3;
 /**
- * Phase-rate budget (rad/s) at the worst pixel with reduceFlashing, split between the drive and a
- * fixed reserve for the waveform bend (WAVE_RESERVE). An inversion is π of phase; 10% headroom.
+ * Fastest any pixel may alternate black → white → black with reduceFlashing (WCAG: 3 flashes/s).
+ * One alternation is 2π of stripe phase.
  */
-export const RATE_BUDGET = 0.9 * MAX_INVERSIONS * Math.PI;
-/** Part of RATE_BUDGET kept for the waveform bend (see createWaveBend). */
-export const WAVE_RESERVE = 1.5;
-/** How much bassAtt breathes the stripe frequency (±, at Reactivity 1). */
-export const BREATHE = 0.14;
-/** Seconds for the frequency to follow the bass (before any rate limit). */
-const BREATHE_TAU = 0.35;
-/** Flow (units/s) at Speed 1 and average energy; the warp field evolves with it. */
-export const FLOW_RATE = 0.12;
-/** Global phase drift (rad/s) at Speed 1: the stripes stream outward. */
-export const DRIFT = 1.4;
+export const MAX_ALT_HZ = 3;
+/** Phase-rate budget (rad/s) at the worst pixel with reduceFlashing: MAX_ALT_HZ with 10% headroom. */
+export const RATE_BUDGET = 0.9 * 2 * Math.PI * MAX_ALT_HZ;
+/** How much more the budget allows with reduceFlashing off. */
+export const FREE_FACTOR = 2.5;
+/**
+ * Parts of RATE_BUDGET kept for the local effects, each bounded where it's made: the waveform bend
+ * (createWaveBend), beat ripples (createRipples), the spectrum bulge (createBulge), the emitters
+ * (createEmitters) and the stripe thickness (createThickness). The drive (createStripeDrive) gets
+ * the rest, so the sum at any pixel stays within RATE_BUDGET.
+ */
+export const WAVE_RESERVE = 2;
+export const RIPPLE_RESERVE = 4.5;
+export const BULGE_RESERVE = 1.2;
+export const EMIT_RESERVE = 1.6;
+export const DUTY_RESERVE = 0.4;
+export const DRIVE_BUDGET = RATE_BUDGET - WAVE_RESERVE - RIPPLE_RESERVE - BULGE_RESERVE - EMIT_RESERVE - DUTY_RESERVE;
+/** Most of the drive's budget the shape changes (flow, twist, breathing) may take before the drift. */
+const SHAPE_SHARE = 0.5;
+/** Most of the shape budget the twist may take. */
+const TWIST_SHARE = 0.8;
+/** How much bassAtt breathes the stripe frequency (±, at Reactivity 1), and how fast it may. */
+export const BREATHE = 0.08;
+const BREATHE_TAU = 0.5;
+const BREATHE_SLEW = 0.4; // rad per unit of field, per second
+/** Flow (units/s) at Speed 1 and full energy; the marble warp evolves with it. */
+export const FLOW_RATE = 0.04;
+/** Outward drift (rad/s of phase) at Speed 1: idle (silence) and added at full energy. */
+export const DRIFT_IDLE = 0.45;
+export const DRIFT_GAIN = 3.5;
+/** Extra drift a full beat surge adds, as a fraction of DRIFT_GAIN. */
+export const SURGE_DRIFT = 0.8;
+/** Fastest the whirlpool's twist may change (rad/s) before the budget. */
+const TWIST_SLEW = 0.35;
 
 /** @param {number} x @param {number} lo @param {number} hi */
 const clamp = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
 
 /**
- * The stripes' global motion: phase drift, frequency breathing with the bass, and the warp flow.
- * With reduceFlashing, the three rates are scaled down together so the fastest-changing pixel
- * (field value FIELD_MAX, flow sensitivity FLOW_SENS·warp) stays within RATE_BUDGET − WAVE_RESERVE:
- * no pixel inverts more than MAX_INVERSIONS times a second and the field can never flip at once.
+ * The stripes' global motion: the outward drift (new loops are born at the skull and the emitters
+ * and grow off the screen), the frequency breathing with the bass, the marble flow, and the
+ * whirlpool's twist. Energy speeds the drift and the flow and tightens the whirlpool, a beat surge
+ * kicks the drift, and the twist turns with the phrase direction (`dir`).
+ *
+ * Anti-strobe: the worst pixel's phase rate, |dk|·FIELD_MAX + drift + freq·(FLOW_SENS·warp·flow' +
+ * TWIST_SENS·|twist'|), stays within DRIVE_BUDGET (×FREE_FACTOR with reduceFlashing off). The shape
+ * changes take at most SHAPE_SHARE of it; the drift gets the rest.
  */
 export function createStripeDrive() {
   const d = {
@@ -61,11 +86,14 @@ export function createStripeDrive() {
     freq: BASE_K,
     /** Warp-field clock. */
     flow: 0,
+    /** Whirlpool angle at the centre (rad), signed by the swirl direction. */
+    twist: 0,
     /** Stripe threshold (thickness): see createThickness. */
     duty: 0,
     /**
      * @param {number} dt
-     * @param {{ density: number, speed: number, warp: number, reactivity: number, bass: number, bassAtt: number, energy: number }} input
+     * @param {{ density: number, speed: number, warp: number, reactivity: number, bassAtt: number,
+     *   energy: number, surge: number, dir: number }} input
      * @param {boolean} reduceFlashing
      */
     step(dt, input, reduceFlashing) {
@@ -74,24 +102,36 @@ export function createStripeDrive() {
       const speed = clamp(input.speed, 0, 3);
       const warp = clamp(input.warp, 0, 3);
       const react = clamp(input.reactivity, 0, 2);
-      const energy = clamp(input.energy || 0, 0, 2);
+      const energy = clamp(input.energy || 0, 0, 1.5);
+      const surge = clamp(input.surge || 0, 0, 1);
+      const dir = clamp(input.dir || 0, -1, 1);
+      const budget = DRIVE_BUDGET * (reduceFlashing ? 1 : FREE_FACTOR) * dt;
+
       const target = BASE_K * density * (1 + BREATHE * react * 0.5 * clamp((input.bassAtt || 0) - 1, -1, 1));
-      let dk = (target - d.freq) * (1 - Math.exp(-dt / BREATHE_TAU));
-      let dphase = DRIFT * speed * (0.6 + 0.4 * energy) * dt;
-      let dflow = FLOW_RATE * speed * (0.5 + 0.5 * energy) * dt;
-      if (reduceFlashing) {
-        const worst = Math.abs(dk) * FIELD_MAX + dphase + (d.freq + Math.abs(dk)) * FLOW_SENS * warp * dflow;
-        const allowed = (RATE_BUDGET - WAVE_RESERVE) * dt;
-        if (worst > allowed) {
-          const s = allowed / worst;
-          dk *= s;
-          dphase *= s;
-          dflow *= s;
-        }
+      let dk = clamp((target - d.freq) * (1 - Math.exp(-dt / BREATHE_TAU)), -BREATHE_SLEW * dt, BREATHE_SLEW * dt);
+      let dflow = FLOW_RATE * speed * (0.25 + 0.75 * Math.min(1, react * energy) + 0.2 * react * surge) * dt;
+      const twistTarget = dir * warp * TWIST_MAX * (0.25 + 0.6 * Math.min(1, react * energy));
+      let dtwist = clamp(twistTarget - d.twist, -TWIST_SLEW * dt, TWIST_SLEW * dt);
+      const k = d.freq + Math.abs(dk);
+      // The twist goes first (a reversal shouldn't crawl), then the breathing and the flow share
+      // what's left of the shape budget.
+      const shapeMax = SHAPE_SHARE * budget;
+      const twistCost = k * TWIST_SENS * Math.abs(dtwist);
+      if (twistCost > TWIST_SHARE * shapeMax) dtwist *= (TWIST_SHARE * shapeMax) / twistCost;
+      const twistUsed = Math.min(twistCost, TWIST_SHARE * shapeMax);
+      const rest = Math.abs(dk) * FIELD_MAX + k * FLOW_SENS * warp * dflow;
+      if (rest > shapeMax - twistUsed) {
+        const s = (shapeMax - twistUsed) / rest;
+        dk *= s;
+        dflow *= s;
       }
+      const used = twistUsed + Math.min(rest, shapeMax - twistUsed);
+      const dphase = Math.min(DRIFT_IDLE * speed * dt + DRIFT_GAIN * speed * react * (energy + SURGE_DRIFT * surge) * dt, budget - used);
+
       d.freq += dk;
       d.phase += dphase;
       d.flow += dflow;
+      d.twist += dtwist;
       return d;
     },
   };
@@ -328,7 +368,9 @@ function smin(/** @type {number} */ a, /** @type {number} */ b, /** @type {numbe
 }
 
 /** Most twist (radians at the skull's centre) per unit of Warp: the whirlpool at its tightest. */
-export const TWIST_MAX = 2;
+export const TWIST_MAX = 1.3;
+/** How fast the twist falls off with distance from the skull (1/screen units). */
+export const TWIST_FALLOFF = 0.8;
 /** Largest |∂field/∂twist| outside the skull's bounding circle (checked against the mirror). */
 export const TWIST_SENS = 0.65;
 /** Smooth-min width (screen units) where an emitter's loops merge with the skull's. */
@@ -355,7 +397,7 @@ export function opField(x, y, st) {
   let qx = x + warp * 0.42 * (ox * 2 - 1);
   let qy = y + warp * 0.42 * (oy * 2 - 1);
   const r = Math.hypot(qx, qy);
-  const a = twist * Math.exp(-0.8 * r);
+  const a = twist * Math.exp(-TWIST_FALLOFF * r);
   const c = Math.cos(a);
   const s = Math.sin(a);
   [qx, qy] = [c * qx - s * qy, s * qx + c * qy];

@@ -8,6 +8,9 @@ import {
   createStripeDrive,
   createThickness,
   createWaveBend,
+  DRIVE_BUDGET,
+  MAX_ALT_HZ,
+  RATE_BUDGET,
   createEnergy,
   createPhrase,
   PHRASE_BEATS,
@@ -47,49 +50,60 @@ describe("stripe (anti-aliased sign of sin)", () => {
   });
 });
 
-/** Violent, random drive input (max params, pumping bass and energy). */
-function violentInput() {
+/**
+ * Violent, random drive input: pumping bass and energy, beat surges, the swirl flipping direction.
+ * @param {{ density?: number, speed?: number, warp?: number }} [knobs] max params by default
+ */
+function violentInput(knobs = {}) {
   let seed = 11;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  const input = { density: 2, speed: 2, warp: 2, reactivity: 2, bass: 1, bassAtt: 1, energy: 1 };
+  const input = { density: 2, speed: 2, warp: 2, reactivity: 2, bassAtt: 1, energy: 1, surge: 0, dir: 1, ...knobs };
   return {
     input,
     next() {
-      input.bass = rnd() * 4;
       input.bassAtt = rnd() < 0.5 ? 0 : 3;
       input.energy = rnd() * 3;
+      input.surge = rnd() < 0.2 ? 1 : input.surge * 0.9;
+      if (rnd() < 0.01) input.dir = -input.dir;
     },
   };
 }
 
 /**
- * Most stripe inversions any pixel sees in a 1 s window. A pixel at field value F, whose field
- * moves with the flow at s·FLOW_SENS·warp per unit of flow, has phase P = freq·f − phase.
+ * Most stripe inversions (black↔white flips) any pixel sees in a 1 s window from the drive. A pixel
+ * at field value F has phase P = freq·F − phase; its field moves with the flow at up to
+ * FLOW_SENS·warp per unit of flow and with the twist at up to TWIST_SENS per radian (either sign).
+ * @param {number} hz @param {number} seconds @param {boolean} reduceFlashing
+ * @param {{ density?: number, speed?: number, warp?: number }} [knobs]
  */
-/** @param {number} hz @param {number} seconds @param {boolean} reduceFlashing */
-function worstInversions(hz, seconds, reduceFlashing) {
+function worstInversions(hz, seconds, reduceFlashing, knobs) {
   let worst = 0;
   for (const F of [0, 0.5 * FIELD_MAX, FIELD_MAX]) {
     for (const s of [-1, 0, 1]) {
-      const d2 = createStripeDrive();
-      const v2 = violentInput();
-      let P = 0.1; // just off an edge
-      const flips = [];
-      let prev = { phase: d2.phase, freq: d2.freq, flow: d2.flow };
-      for (let f = 0; f < hz * seconds; f++) {
-        v2.next();
-        d2.step(1 / hz, v2.input, reduceFlashing);
-        const dP = (d2.freq - prev.freq) * F + d2.freq * s * FLOW_SENS * v2.input.warp * (d2.flow - prev.flow) - (d2.phase - prev.phase);
-        const before = Math.floor(P / Math.PI);
-        P += dP;
-        const after = Math.floor(P / Math.PI);
-        for (let n = 0; n < Math.abs(after - before); n++) flips.push(f / hz);
-        prev = { phase: d2.phase, freq: d2.freq, flow: d2.flow };
-      }
-      for (let i = 0; i < flips.length; i++) {
-        let n = 0;
-        while (i + n < flips.length && flips[i + n] - flips[i] < 1) n++;
-        worst = Math.max(worst, n);
+      for (const t of [-1, 1]) {
+        const d2 = createStripeDrive();
+        const v2 = violentInput(knobs);
+        let P = 0.1; // just off an edge
+        const flips = [];
+        let prev = { phase: d2.phase, freq: d2.freq, flow: d2.flow, twist: d2.twist };
+        for (let f = 0; f < hz * seconds; f++) {
+          v2.next();
+          d2.step(1 / hz, v2.input, reduceFlashing);
+          const dP =
+            (d2.freq - prev.freq) * F +
+            d2.freq * (s * FLOW_SENS * v2.input.warp * (d2.flow - prev.flow) + t * TWIST_SENS * (d2.twist - prev.twist)) -
+            (d2.phase - prev.phase);
+          const before = Math.floor(P / Math.PI);
+          P += dP;
+          const after = Math.floor(P / Math.PI);
+          for (let n = 0; n < Math.abs(after - before); n++) flips.push(f / hz);
+          prev = { phase: d2.phase, freq: d2.freq, flow: d2.flow, twist: d2.twist };
+        }
+        for (let i = 0; i < flips.length; i++) {
+          let n = 0;
+          while (i + n < flips.length && flips[i + n] - flips[i] < 1) n++;
+          worst = Math.max(worst, n);
+        }
       }
     }
   }
@@ -97,23 +111,28 @@ function worstInversions(hz, seconds, reduceFlashing) {
 }
 
 describe("createStripeDrive anti-strobe", () => {
-  it("with reduceFlashing, no pixel's stripe inverts more than 3 times a second, even at max params", () => {
-    for (const hz of [60, 120]) expect(worstInversions(hz, 8, true), `${hz} Hz`).toBeLessThanOrEqual(3);
+  it("with reduceFlashing, keeps every pixel within DRIVE_BUDGET of phase a second at any density, speed and warp", () => {
+    const most = Math.floor(DRIVE_BUDGET / Math.PI) + 1; // flips a 1 s window can hold at that rate
+    expect(2 * MAX_ALT_HZ * Math.PI * 0.9).toBeCloseTo(RATE_BUDGET, 9);
+    for (const density of [0.5, 1, 2])
+      for (const speed of [0, 1, 2])
+        for (const warp of [0, 1, 2])
+          for (const hz of [60, 120]) expect(worstInversions(hz, 4, true, { density, speed, warp }), `${density} ${speed} ${warp} ${hz} Hz`).toBeLessThanOrEqual(most);
   });
 
   it("without reduceFlashing, max params may flow faster", () => {
-    expect(worstInversions(60, 8, false)).toBeGreaterThan(3);
+    expect(worstInversions(60, 4, false)).toBeGreaterThan(Math.floor(DRIVE_BUDGET / Math.PI) + 1);
   });
 });
 
 describe("createStripeDrive breathing", () => {
   it("packs the stripes tighter on heavy bass and loosens them when it drops, within ±BREATHE/2", () => {
     const d = createStripeDrive();
-    const input = { density: 1, speed: 1, warp: 1, reactivity: 1, bass: 1, bassAtt: 2, energy: 1 };
-    for (let f = 0; f < 180; f++) d.step(1 / 60, input, true);
+    const input = { density: 1, speed: 1, warp: 0, reactivity: 1, bassAtt: 2, energy: 1, surge: 0, dir: 1 };
+    for (let f = 0; f < 480; f++) d.step(1 / 60, input, true);
     const hi = d.freq;
     input.bassAtt = 0;
-    for (let f = 0; f < 180; f++) d.step(1 / 60, input, true);
+    for (let f = 0; f < 480; f++) d.step(1 / 60, input, true);
     expect(hi).toBeGreaterThan(BASE_K * (1 + 0.4 * BREATHE));
     expect(hi).toBeLessThanOrEqual(BASE_K * (1 + 0.5 * BREATHE) + 1e-9);
     expect(d.freq).toBeLessThan(BASE_K * (1 - 0.4 * BREATHE));
@@ -440,5 +459,64 @@ describe("createPhrase without a tempo", () => {
     }
     expect(flips).toBe(1);
     expect(d).toBe(-1);
+  });
+});
+
+/** Drift (rad/s) the drive settles to for steady input. @param {Partial<{ energy: number, surge: number, reactivity: number, speed: number, warp: number }>} over */
+function settledDrift(over) {
+  const d = createStripeDrive();
+  const input = { density: 1, speed: 1, warp: 1, reactivity: 1, bassAtt: 1, energy: 0, surge: 0, dir: 1, ...over };
+  for (let f = 0; f < 60 * 30; f++) d.step(1 / 60, input, true);
+  const before = d.phase;
+  for (let f = 0; f < 60; f++) d.step(1 / 60, input, true);
+  return d.phase - before;
+}
+
+describe("createStripeDrive energy", () => {
+  it("grows slowly and steadily in silence, several times faster in loud music, faster still on a beat surge", () => {
+    const silence = settledDrift({ energy: 0 });
+    const quiet = settledDrift({ energy: 0.3 });
+    const loud = settledDrift({ energy: 1 });
+    const surge = settledDrift({ energy: 1, surge: 1 });
+    expect(silence).toBeGreaterThan(0.2); // never frozen
+    expect(quiet).toBeGreaterThan(1.5 * silence);
+    expect(loud).toBeGreaterThan(6 * silence);
+    expect(surge).toBeGreaterThan(1.2 * loud);
+    expect(surge).toBeLessThanOrEqual(DRIVE_BUDGET + 1e-9);
+  });
+});
+
+describe("createStripeDrive whirlpool", () => {
+  it("tightens with energy, relaxes when quiet, turns with the phrase direction, bounded and smooth", () => {
+    const d = createStripeDrive();
+    const input = { density: 1, speed: 1, warp: 1, reactivity: 1, bassAtt: 1, energy: 0, surge: 0, dir: 1 };
+    /** @param {number} seconds */
+    const run = (seconds) => {
+      let prev = d.twist;
+      for (let f = 0; f < 60 * seconds; f++) {
+        d.step(1 / 60, input, true);
+        expect(Math.abs(d.twist)).toBeLessThanOrEqual(TWIST_MAX * input.warp + 1e-9);
+        expect(Math.abs(d.twist - prev)).toBeLessThan(0.02); // no jumps
+        prev = d.twist;
+      }
+      return d.twist;
+    };
+    const calm = run(20);
+    input.energy = 1;
+    const loud = run(20);
+    expect(calm).toBeGreaterThan(0.2);
+    expect(loud).toBeGreaterThan(2.5 * calm);
+    input.dir = -1;
+    expect(run(16)).toBeCloseTo(-loud, 2); // reversed within a phrase (32 beats at 120 BPM)
+    input.energy = 0;
+    expect(run(20)).toBeCloseTo(-calm, 2);
+  });
+});
+
+describe("createStripeDrive reactivity", () => {
+  it("at Reactivity 0 ignores the music (idle growth only); higher Reactivity reacts more", () => {
+    expect(settledDrift({ energy: 1, surge: 1, reactivity: 0 })).toBeCloseTo(settledDrift({ energy: 0 }), 6);
+    expect(settledDrift({ energy: 0.5, reactivity: 2 })).toBeGreaterThan(1.3 * settledDrift({ energy: 0.5, reactivity: 1 }));
+    expect(settledDrift({ energy: 0.5, reactivity: 0.5 })).toBeLessThan(0.8 * settledDrift({ energy: 0.5, reactivity: 1 }));
   });
 });
