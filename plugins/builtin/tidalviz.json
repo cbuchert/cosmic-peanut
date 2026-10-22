@@ -244,7 +244,7 @@
     {
       "id": "marbling",
       "name": "Marbling",
-      "description": "Live marbled paper poured by the music: beats drop paint that packs into cells with dark veins, nested with smaller drops, while a stylus following the melody rakes cream rivers through it.",
+      "description": "Live marbled paper poured by the music: every beat drops paint where it sits in the spectrum, packing into veined, nested cells; the bath swirls with the bass and the bands, a stylus rakes the melody, and combs sweep the page in time with the bars.",
       "author": "Tidalviz",
       "entry": "src/marbling.js",
       "renderer": "webgl2",

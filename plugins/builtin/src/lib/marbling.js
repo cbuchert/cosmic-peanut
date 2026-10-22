@@ -1,7 +1,8 @@
 // @ts-check
 /**
  * Marbling's pure logic, mirrored by shaders/marbling/sim.frag: the mathematical-marbling maps
- * (Jaffer et al.) and their exact inverses, the per-frame pour scheduler, palettes, renew, resize.
+ * (Jaffer et al.) and their exact inverses, the bath's currents and the comb, the per-frame pour
+ * scheduler (beats, dropper, stones, stylus, flicks, tempo combs), palettes, renew, resize.
  *
  * Coordinates are "page units": y from 0 (bottom) to 1 (top), x from 0 to the aspect ratio.
  */

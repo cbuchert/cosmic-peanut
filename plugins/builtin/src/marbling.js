@@ -5,17 +5,24 @@
  * A GPU feedback simulation of the mathematical-marbling maps (Jaffer et al.): a ping-pong RGBA8
  * texture holds the amount of each of four inks per pixel (paper = the rest). Each frame the pour
  * scheduler (lib/marbling.js) turns the audio into at most 16 events — slices of drops being
- * poured, a stylus step, a whole-pixel drift — appended to a queue of up to 48 pending events.
- * composite.frag shows the texture pushed through all pending events (walking each pixel back
+ * poured, stylus and flick steps, a comb step, a whole-pixel drift — appended to a queue of up
+ * to 48 pending events (the bath's currents ride along as the newest one). composite.frag shows the texture pushed through all pending events (walking each pixel back
  * through their exact inverse maps, events.glsl) and colours the inks with the palette over cream
- * (or clear) paper; only when the queue is full does sim.frag bake them into the other texture,
+ * (or clear) paper; only when the queue is full (or the currents get steep) does sim.frag bake them into the other texture,
  * resampling it sharply (sample.glsl). Baking ~10× less often than every frame is what keeps the
  * veins crisp. The cost per frame is bounded however much has been poured.
  *
- * Beats drop paint (the spectral region that hit picks the size and ink; kicks bring satellite
- * drops → nested cells), a stylus following the spectral centroid rakes clear paper rivers
- * through it, loudness sets the pour rate, and slow drift plus occasional large clear drops renew
- * the page.
+ * The music drives all of it. Every beat pours — several drops on loud beats, landing where the
+ * hit sits in the spectrum (bass left … highs right) in the ink of the part that hit; a dropper
+ * steered by the spectral centroid feeds a stream of small drops at a rate that follows the
+ * loudness, let go on the beats; each bar's downbeat drops a big stone. The bath has currents
+ * (createCurrents: big swirls swelled by the bass, a local vortex per quarter of the spectrum
+ * across the page, a gentle drift; ebbing between beats and surging on them, a central stir on
+ * build-ups) applied as the newest event and baked with the batch, so the paper keeps flowing
+ * between drops and stands still in silence. A stylus following the centroid rakes clear rivers,
+ * snares and hats flick quick strokes, and when the tempo is known a comb sweeps the page every
+ * two or four bars, direction alternating, comb and stylus lurching forward on each beat. Slow
+ * drift and large clear drops renew the page while music plays.
  */
 import { createProgram } from "./lib/gl.js";
 import {
