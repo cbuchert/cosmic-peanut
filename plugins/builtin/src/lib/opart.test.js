@@ -9,6 +9,7 @@ import {
   createThickness,
   createWaveBend,
   DRIVE_BUDGET,
+  DUTY_RESERVE,
   MAX_ALT_HZ,
   RATE_BUDGET,
   createEnergy,
@@ -23,6 +24,11 @@ import {
   opField,
   resolveLook,
   RIPPLE_SPEED,
+  RIPPLE_BIRTH,
+  RIPPLE_PHASE,
+  RIPPLE_RESERVE,
+  RIPPLE_SUM,
+  ripplePhase,
   TWIST_MAX,
   TWIST_SENS,
   stripe,
@@ -166,29 +172,35 @@ describe("createRipples ring buffer", () => {
     const r = createRipples(4);
     r.spawn(1);
     const seen = [];
-    for (let f = 0; f < 60 * 4; f++) {
+    for (let f = 0; f < 60 * 6; f++) {
       r.step(1 / 60);
       seen.push([r.data[0], r.data[1]]);
     }
-    expect(seen[59][0]).toBeCloseTo(RIPPLE_SPEED * 1, 5);
-    expect(seen[119][0]).toBeCloseTo(RIPPLE_SPEED * 2, 5);
+    expect(seen[59][0]).toBeCloseTo(RIPPLE_BIRTH + RIPPLE_SPEED * 1, 5);
+    expect(seen[119][0]).toBeCloseTo(RIPPLE_BIRTH + RIPPLE_SPEED * 2, 5);
     expect(seen[0][1]).toBeGreaterThan(0.9);
     for (let i = 1; i < seen.length; i++) expect(seen[i][1]).toBeLessThanOrEqual(seen[i - 1][1]);
     expect(seen[seen.length - 1][1]).toBe(0);
   });
 
-  it("keeps at most `cap` rings, replacing the oldest", () => {
+  it("keeps at most `cap` rings and never cuts a live one off: with no free slot or strength left, a beat launches none", () => {
     const r = createRipples(4);
     for (let i = 0; i < 6; i++) {
-      r.spawn(1);
+      r.spawn(0.2);
       r.step(0.1);
     }
     const radii = [];
     for (let i = 0; i < 4; i++) radii.push(r.data[2 * i]);
     radii.sort((a, b) => a - b);
     expect(r.data.length).toBe(8);
-    expect(radii[0]).toBeCloseTo(RIPPLE_SPEED * 0.1, 5);
-    expect(radii[3]).toBeCloseTo(RIPPLE_SPEED * 0.4, 5);
+    expect(radii[0]).toBeCloseTo(RIPPLE_BIRTH + RIPPLE_SPEED * 0.3, 5); // the 5th and 6th were skipped
+    expect(radii[3]).toBeCloseTo(RIPPLE_BIRTH + RIPPLE_SPEED * 0.6, 5);
+    const big = createRipples(8);
+    big.spawn(1);
+    big.spawn(1);
+    let sum = 0;
+    for (let i = 0; i < 8; i++) sum += big.data[2 * i + 1];
+    expect(sum).toBeLessThanOrEqual(RIPPLE_SUM + 1e-6);
   });
 });
 
@@ -518,5 +530,60 @@ describe("createStripeDrive reactivity", () => {
     expect(settledDrift({ energy: 1, surge: 1, reactivity: 0 })).toBeCloseTo(settledDrift({ energy: 0 }), 6);
     expect(settledDrift({ energy: 0.5, reactivity: 2 })).toBeGreaterThan(1.3 * settledDrift({ energy: 0.5, reactivity: 1 }));
     expect(settledDrift({ energy: 0.5, reactivity: 0.5 })).toBeLessThan(0.8 * settledDrift({ energy: 0.5, reactivity: 1 }));
+  });
+});
+
+describe("createThickness edge speed", () => {
+  it("moves the stripe edges no faster than DUTY_RESERVE (rad/s of phase), yet still swells on a bass hit", () => {
+    for (const hz of [60, 120]) {
+      const t = createThickness();
+      let prev = Math.asin(0);
+      let most = 0;
+      for (let f = 0; f < hz * 4; f++) {
+        const bass = f % Math.round(hz / 10) === 0 ? 3 : 0.2; // 10 Hz bass strobe
+        const edge = Math.asin(t.step(bass, 2, 1 / hz, true));
+        expect(Math.abs(edge - prev) * hz).toBeLessThanOrEqual(DUTY_RESERVE + 1e-9);
+        most = Math.max(most, edge);
+        prev = edge;
+      }
+      expect(Math.sin(most)).toBeGreaterThan(0.3 * DUTY_MAX);
+    }
+  });
+});
+
+describe("createRipples anti-strobe", () => {
+  it("under any barrage of beats, no point's ripple phase changes faster than RIPPLE_RESERVE; rings cross the screen", () => {
+    for (const hz of [60, 120]) {
+      const r = createRipples(8);
+      let seed = 7;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      const ds = Array.from({ length: 200 }, (_, i) => (i / 199) * 2.4); // the skull's edge to a 21:9 corner
+      let prev = ds.map((d) => ripplePhase(d, r.data));
+      for (let f = 0; f < hz * 6; f++) {
+        if (rnd() < 0.3) r.spawn(rnd() < 0.5 ? 1 : rnd());
+        r.step(1 / hz);
+        const now = ds.map((d) => ripplePhase(d, r.data));
+        for (let i = 0; i < ds.length; i++) expect(Math.abs(now[i] - prev[i]) * hz).toBeLessThanOrEqual(RIPPLE_RESERVE + 1e-6);
+        prev = now;
+      }
+    }
+    const one = createRipples(8);
+    one.spawn(1);
+    let t = 0;
+    while (one.data[0] < 1.8) {
+      one.step(1 / 60);
+      t += 1 / 60;
+    }
+    expect(one.data[1]).toBeGreaterThan(0.15); // still a clear ring at the screen's edge
+    expect(RIPPLE_PHASE * one.data[1]).toBeGreaterThan(0.3);
+  });
+});
+
+describe("createRippleTrigger strength", () => {
+  it("sizes each ripple by its onset's strength: a full-strength beat launches a full ripple, a weak one a faint ring", () => {
+    const full = createRippleTrigger().step(true, 1, 1, 1 / 60, true);
+    const weak = createRippleTrigger().step(true, 0.3, 1, 1 / 60, true);
+    expect(full).toBeCloseTo(1, 5);
+    expect(weak).toBeCloseTo(0.3, 5);
   });
 });

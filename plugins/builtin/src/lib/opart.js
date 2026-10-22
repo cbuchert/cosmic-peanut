@@ -41,16 +41,16 @@ export const FREE_FACTOR = 2.5;
  * (createEmitters) and the stripe thickness (createThickness). The drive (createStripeDrive) gets
  * the rest, so the sum at any pixel stays within RATE_BUDGET.
  */
-export const WAVE_RESERVE = 2;
-export const RIPPLE_RESERVE = 4.5;
-export const BULGE_RESERVE = 1.2;
-export const EMIT_RESERVE = 1.6;
+export const WAVE_RESERVE = 1.6;
+export const RIPPLE_RESERVE = 6;
+export const BULGE_RESERVE = 1;
+export const EMIT_RESERVE = 1.4;
 export const DUTY_RESERVE = 0.4;
 export const DRIVE_BUDGET = RATE_BUDGET - WAVE_RESERVE - RIPPLE_RESERVE - BULGE_RESERVE - EMIT_RESERVE - DUTY_RESERVE;
 /** Most of the drive's budget the shape changes (flow, twist, breathing) may take before the drift. */
 const SHAPE_SHARE = 0.5;
 /** Most of the shape budget the twist may take. */
-const TWIST_SHARE = 0.8;
+const TWIST_SHARE = 0.85;
 /** How much bassAtt breathes the stripe frequency (±, at Reactivity 1), and how fast it may. */
 export const BREATHE = 0.08;
 const BREATHE_TAU = 0.5;
@@ -142,13 +142,15 @@ export function createStripeDrive() {
 export const DUTY_MAX = 0.25;
 
 /**
- * Stripe thickness from bass hits: the black bands fatten on a hit and relax (a whole-field
- * brightness change, so it goes through the shared flash limiter: with reduceFlashing at most
- * 3 new swells a second).
+ * Stripe thickness from bass hits: the black bands fatten on a hit and relax. A whole-field
+ * brightness change, so it goes through the shared flash limiter (with reduceFlashing at most
+ * 3 new swells a second), and it's slewed so the stripe edges (at asin(threshold) of phase) move
+ * no faster than DUTY_RESERVE rad/s: a swell, not a flicker.
  */
 export function createThickness() {
   const flash = createFlashLimiter();
   let env = 0;
+  let out = 0;
   return {
     /**
      * @param {number} bass `audio.bass` (1 = average)
@@ -158,24 +160,43 @@ export function createThickness() {
      * @returns {number} threshold for stripe(), 0 to DUTY_MAX
      */
     step(bass, reactivity, dt, reduceFlashing) {
-      env *= Math.exp(-dt / 0.15);
+      if (!(dt > 0)) return out;
+      env *= Math.exp(-dt / 0.4);
       env = Math.max(env, clamp(((bass || 0) - 1) * 0.5 * clamp(reactivity, 0, 2), 0, 1));
-      return DUTY_MAX * clamp(flash.step(env, dt, reduceFlashing), 0, 1);
+      const target = DUTY_MAX * clamp(flash.step(env, dt, reduceFlashing), 0, 1);
+      // d(asin x)/dt = x'/√(1 − x²) ≤ x'/√(1 − DUTY_MAX²)
+      const max = DUTY_RESERVE * Math.sqrt(1 - DUTY_MAX * DUTY_MAX) * dt;
+      out += clamp(target - out, -max, max);
+      return out;
     },
   };
 }
 
-/** Ripple ring speed (screen units/s, half the short side = 1). */
-export const RIPPLE_SPEED = 0.9;
-
-/** Seconds for a ripple's amplitude to fall to 1/e. */
-export const RIPPLE_TAU = 0.7;
+/** Ripple ring speed (screen units/s, half the short side = 1), width and fade (s to 1/e). */
+export const RIPPLE_SPEED = 0.75;
+export const RIPPLE_WIDTH = 0.3;
+export const RIPPLE_TAU = 2;
+/** Phase (rad) a full-strength ripple shifts the stripes by at its crest. */
+export const RIPPLE_PHASE = 2;
+/**
+ * Rings are born this far inside the skull's silhouette (in units of the outline distance, which is
+ * negative inside), so they rise out from under the skull instead of popping up at its edge.
+ */
+export const RIPPLE_BIRTH = -2.2 * RIPPLE_WIDTH;
 /** A ripple ends past this radius (off any screen) or below 1% amplitude. */
 const RIPPLE_END_R = 3.2;
+/**
+ * Most total ripple strength alive at once. A ring's phase at distance d is
+ * RIPPLE_PHASE·a·exp(−x²), x = (d − radius)/RIPPLE_WIDTH, so it changes at most
+ * RIPPLE_PHASE·a·(√(2/e)·RIPPLE_SPEED/RIPPLE_WIDTH + 1/RIPPLE_TAU) rad/s: capping Σa keeps every
+ * point within RIPPLE_RESERVE.
+ */
+export const RIPPLE_SUM = RIPPLE_RESERVE / (RIPPLE_PHASE * (Math.sqrt(2 / Math.E) * (RIPPLE_SPEED / RIPPLE_WIDTH) + 1 / RIPPLE_TAU));
 
 /**
- * Beat ripples: a preallocated ring of `cap` rings expanding from the skull. `data` holds
- * (radius, amplitude) per ring, ready for a vec2 uniform array; ended rings have amplitude 0.
+ * Beat ripples: a preallocated ring of `cap` rings expanding from the skull across the screen.
+ * `data` holds (radius, amplitude) per ring, ready for a vec2 uniform array; ended rings have
+ * amplitude 0. A spawn is cut down to what the RIPPLE_SUM cap leaves.
  * @param {number} cap
  */
 export function createRipples(cap) {
@@ -186,17 +207,27 @@ export function createRipples(cap) {
     data: new Float32Array(cap * 2),
     /** @param {number} s amplitude, 0–1 */
     spawn(s) {
+      let alive = 0;
+      let free = -1;
+      for (let k = 0; k < cap; k++) {
+        const i = (next + k) % cap;
+        alive += r.data[2 * i + 1];
+        if (free < 0 && r.data[2 * i + 1] === 0) free = i;
+      }
+      const a = clamp(Math.min(s, RIPPLE_SUM - alive), 0, 1);
+      if (free < 0 || !(a > 0.05)) return; // never cut a live ring off: that would jump
+      next = free;
       age[next] = 0;
-      strength[next] = s;
-      r.data[2 * next] = 0;
-      r.data[2 * next + 1] = s;
+      strength[next] = a;
+      r.data[2 * next] = RIPPLE_BIRTH;
+      r.data[2 * next + 1] = a;
       next = (next + 1) % cap;
     },
     /** @param {number} dt */
     step(dt) {
       for (let i = 0; i < cap; i++) {
         age[i] += dt;
-        const radius = age[i] * RIPPLE_SPEED;
+        const radius = RIPPLE_BIRTH + age[i] * RIPPLE_SPEED;
         const amp = strength[i] * Math.exp(-age[i] / RIPPLE_TAU);
         const alive = radius < RIPPLE_END_R && amp > 0.01 * strength[i];
         r.data[2 * i] = alive ? radius : 0;
@@ -205,6 +236,20 @@ export function createRipples(cap) {
     },
   };
   return r;
+}
+
+/**
+ * opart.glsl ripplePhase(): the phase (rad) the rings add at outline distance `d` from the skull
+ * (negative inside it, where the skull covers the stripes).
+ * @param {number} d @param {Float32Array} data createRipples data
+ */
+export function ripplePhase(d, data) {
+  let s = 0;
+  for (let i = 0; i + 1 < data.length; i += 2) {
+    const x = (d - data[i]) / RIPPLE_WIDTH;
+    s += data[i + 1] * Math.exp(-x * x);
+  }
+  return RIPPLE_PHASE * s;
 }
 
 /**
@@ -227,7 +272,7 @@ export function createRippleTrigger() {
      */
     step(onset, onsetStrength, gain, dt, reduceFlashing) {
       env *= Math.exp(-dt / 0.08);
-      if (onset) env = clamp((0.5 + 0.5 * clamp(onsetStrength || 0, 0, 1)) * clamp(gain, 0, 2) * 0.5, 0, 1);
+      if (onset) env = clamp(clamp(onsetStrength || 0, 0, 1) * clamp(gain, 0, 2), 0, 1);
       const v = flash.step(env, dt, reduceFlashing);
       const launch = onset && v > prev + 1e-6 ? v : 0;
       prev = v;
@@ -237,8 +282,8 @@ export function createRippleTrigger() {
 }
 
 /** Waveform bend: most phase (rad) it shifts a stripe by, and how fast (units/s) it may change. */
-export const WAVE_PHASE = 1;
-export const WAVE_SLEW = 1.5;
+export const WAVE_PHASE = 2;
+export const WAVE_SLEW = 0.8;
 
 /**
  * The waveform, block-averaged into `n` points and slew-limited, for bending the stripes around
@@ -368,7 +413,7 @@ function smin(/** @type {number} */ a, /** @type {number} */ b, /** @type {numbe
 }
 
 /** Most twist (radians at the skull's centre) per unit of Warp: the whirlpool at its tightest. */
-export const TWIST_MAX = 1.3;
+export const TWIST_MAX = 1.2;
 /** How fast the twist falls off with distance from the skull (1/screen units). */
 export const TWIST_FALLOFF = 0.8;
 /** Largest |∂field/∂twist| outside the skull's bounding circle (checked against the mirror). */
