@@ -323,15 +323,17 @@ export function edgesFromWidths(w, n, out) {
  * @param {number} x @param {number} y unit-radius coordinates
  * @param {number} twist spiral twist, turns across the unit radius
  * @param {number} turns rotation, turns
+ * @param {number} [flow] the flow odometer: bands move outward by it
+ * @param {number} [arms] spiral arms
  */
-export function bandCoord(pattern, x, y, twist, turns) {
+export function bandCoord(pattern, x, y, twist, turns, flow = 0, arms = SPIRAL_ARMS) {
   const r = Math.hypot(x, y);
   const fract = (/** @type {number} */ v) => v - Math.floor(v);
-  if (pattern === 0) return fract(SPIRAL_ARMS * (Math.atan2(y, x) / (2 * Math.PI) + turns + twist * r));
-  if (pattern === 1) return fract(RINGS * r - RING_DRIFT * turns);
+  if (pattern === 0) return fract(arms * (Math.atan2(y, x) / (2 * Math.PI) - turns + twist * (r - flow)));
+  if (pattern === 1) return fract(RINGS * (r - flow) - RING_DRIFT * turns);
   if (pattern === 3) {
     const th = 2 * Math.PI * FOLD_TILT * turns;
-    const u = x * Math.cos(th) + y * Math.sin(th);
+    const u = Math.abs(x * Math.cos(th) + y * Math.sin(th)) - flow;
     return Math.abs(fract(u / FOLD + 0.5) * 2 - 1);
   }
   return 0;
@@ -407,16 +409,16 @@ export function motionScale(o) {
 
 /** Outward flow of the dye (unit radii per second at Speed 1): a calm drift, plus the music. */
 const FLOW_BASE = 0.03;
-const FLOW_ENERGY = 0.28;
+const FLOW_ENERGY = 0.2;
 /** Extra speed at the crest of a full-strength beat's surge (scaled by how loud the music is). */
-const FLOW_SURGE = 0.6;
+const FLOW_SURGE = 1.1;
 /** Fastest flow at Speed, Motion and Reactivity 1. */
 export const FLOW_MAX = FLOW_BASE + FLOW_ENERGY + FLOW_SURGE;
 /** Seconds for the energy behind the flow to follow the level. */
 const ENERGY_TAU = 0.3;
 /** A beat's kick decays over SURGE_DECAY; the surge follows it through two SURGE_ATTACK stages. */
-const SURGE_DECAY = 0.25;
-const SURGE_ATTACK = 0.05;
+const SURGE_DECAY = 0.16;
+const SURGE_ATTACK = 0.035;
 /** Without a confident tempo, onsets at least this strong count as beats. */
 export const BEAT_STRENGTH = 0.6;
 /** The kick of a tempo beat (on each beatPhase wrap). */
@@ -455,7 +457,7 @@ export function createFlow() {
       const level = Math.min(1, loudness(o.rms) + 0.3 * Math.max(0, Math.min(1, o.bassAtt - 1)));
       s.energy += (level - s.energy) * (1 - Math.exp(-dt / ENERGY_TAU));
       kick *= Math.exp(-dt / SURGE_DECAY);
-      if (o.onset) kick = Math.max(kick, Math.max(0, Math.min(1, o.onsetStrength)));
+      if (o.onset) kick = Math.max(kick, Math.max(0, Math.min(1, o.onsetStrength)) ** 1.5);
       const tempo = o.bpm > 0;
       s.beat = tempo ? o.beatPhase < phase - 0.5 : o.onset && o.onsetStrength >= BEAT_STRENGTH;
       phase = tempo ? o.beatPhase : 0;

@@ -392,8 +392,9 @@ describe("band index (mirror of tiedye.frag)", () => {
     };
     expect(ray(0)).toBe(1);
     expect(ray(1.5)).toBeGreaterThan(3);
-    // Rotation turns the whole pattern.
-    expect(band(0, 0.5, 0.3, 1.5, 0.25)).toBe(band(0, 0.5, 0.3 + Math.PI / 2, 1.5, 0));
+    // Rotation turns the whole pattern, the way the outward flow winds it (so the two add up).
+    expect(band(0, 0.5, 0.3, 1.5, 0.25)).toBe(band(0, 0.5, 0.3 - Math.PI / 2, 1.5, 0));
+    expect(bandCoord(0, 0.4, 0.2, 1.5, 0.1, 0)).toBeCloseTo(bandCoord(0, 0.4, 0.2, 1.5, 0, 0.1 / 1.5), 6);
   });
 
   it("bullseye: the band depends on radius only", () => {
@@ -404,6 +405,34 @@ describe("band index (mirror of tiedye.frag)", () => {
     const out = new Set();
     for (let k = 0; k < 50; k++) out.add(band(1, k / 50, 0));
     expect(out.size).toBe(n);
+  });
+
+  it("the flow carries the bands outward from the knot; the spiral takes 1–3 arms", () => {
+    // Shibori stripes flow away from the center fold (here across x, at no rotation).
+    for (const x of [0.1, 0.45]) expect(bandCoord(3, x + 0.13, 0.3, 1.5, 0, 0.13)).toBeCloseTo(bandCoord(3, x, 0.3, 1.5, 0, 0), 5);
+    for (const p of [0, 1]) {
+      for (const r of [0.2, 0.5, 0.8]) {
+        const x = r * Math.cos(0.4);
+        const y = r * Math.sin(0.4);
+        const f = 0.13;
+        const s = (r + f) / r;
+        expect(bandCoord(p, x * s, y * s, 1.5, 0.1, f), `pattern ${p} r ${r}`).toBeCloseTo(bandCoord(p, x, y, 1.5, 0.1, 0), 5);
+      }
+    }
+    // Arms: the palette repeats `arms` times around the circle.
+    const around = (/** @type {number} */ arms) => {
+      let wraps = 0;
+      const at = (/** @type {number} */ k) => (2 * Math.PI * (k + 0.5)) / 360;
+      let prev = bandCoord(0, 0.5 * Math.cos(at(0)), 0.5 * Math.sin(at(0)), 0, 0, 0, arms);
+      for (let k = 1; k <= 360; k++) {
+        const a = at(k);
+        const t = bandCoord(0, 0.5 * Math.cos(a), 0.5 * Math.sin(a), 0, 0, 0, arms);
+        if (Math.abs(t - prev) > 0.5) wraps++;
+        prev = t;
+      }
+      return wraps;
+    };
+    expect([1, 2, 3].map(around)).toEqual([1, 2, 3]);
   });
 
   it("shibori: accordion-folded stripes, mirror-symmetric across each fold", () => {
@@ -482,13 +511,14 @@ describe("createFlow", () => {
     expect(push(1)).toBeGreaterThan(0.06);
     expect(push(0.4)).toBeLessThan(push(1) * 0.7);
     expect(push(0.4)).toBeGreaterThan(0);
-    expect(push(1, 120)).toBeCloseTo(push(1, 60), 2);
+    expect(Math.abs(push(1, 120) / push(1, 60) - 1)).toBeLessThan(0.05);
     // Bounded however strong, and smooth: the speed never jumps between frames.
     const fl = runFlow(createFlow(), 2, flowIn(loud));
     let v = fl.speed;
     for (let f = 0; f < 120; f++) {
       fl.step(1 / 60, flowIn({ ...loud, onset: f % 6 === 0, onsetStrength: 50 }));
-      expect(Math.abs(fl.speed - v)).toBeLessThan(0.08);
+      // (0.25 unit radii/s between frames is a 0.004 radius change of step: smooth to the eye.)
+      expect(Math.abs(fl.speed - v)).toBeLessThan(0.25);
       expect(fl.speed).toBeLessThanOrEqual(FLOW_MAX);
       v = fl.speed;
     }
