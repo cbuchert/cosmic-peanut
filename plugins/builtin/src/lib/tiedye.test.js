@@ -188,7 +188,7 @@ describe("createBlooms", () => {
     const b = createBlooms(1);
     for (let f = 0; f < 30; f++) b.step(false, 0, 1 / 60);
     expect(active(b)).toBe(0);
-    b.step(true, 1, 1 / 60);
+    b.step(true, 0.5, 1 / 60);
     b.step(false, 0, 1 / 60);
     expect(active(b)).toBe(1);
   });
@@ -199,7 +199,7 @@ describe("createBlooms", () => {
     /** @type {number[]} */
     const out = [];
     for (let k = 0; k < n; k++) {
-      b.step(true, 1, 1 / 60);
+      b.step(true, 0.5, 1 / 60);
       out.push(b.data[k * 4], b.data[k * 4 + 1]);
       for (let f = 0; f < 30; f++) b.step(false, 0, 1 / 60);
     }
@@ -217,7 +217,7 @@ describe("createBlooms", () => {
   it("caps the pool, recycling the oldest bloom", () => {
     const b = createBlooms(1);
     for (let k = 0; k < 20; k++) {
-      b.step(true, 1, 1 / 60);
+      b.step(true, 0.5, 1 / 60);
       b.step(false, 0, 1 / 60);
     }
     expect(b.data.length).toBe(BLOOM_CAP * 4);
@@ -225,8 +225,32 @@ describe("createBlooms", () => {
     // Slot 20 % CAP holds the oldest (spawned 2 × CAP frames ago); the next onset replaces it.
     const oldest = (20 % BLOOM_CAP) * 4;
     const before = b.data[oldest + 2];
-    b.step(true, 1, 1 / 60);
+    b.step(true, 0.5, 1 / 60);
     expect(b.data[oldest + 2]).toBeLessThan(before);
+  });
+
+  it("scales with onsetStrength: a strong beat drops two big blooms, a weak onset one small one", () => {
+    /** Count and mean final size of blooms from one onset of `st`. */
+    const drop = (/** @type {number} */ st) => {
+      const b = createBlooms(4);
+      b.step(true, st, 1 / 60);
+      for (let f = 0; f < 60; f++) b.step(false, 0, 1 / 60);
+      let n = 0;
+      let size = 0;
+      for (let i = 0; i < BLOOM_CAP; i++) if (b.data[i * 4 + 3] > 0) (n++, (size += b.data[i * 4 + 2]));
+      return { n, size: size / n };
+    };
+    expect(drop(1).n).toBe(2);
+    expect(drop(0.3).n).toBe(1);
+    expect(drop(1).size).toBeGreaterThan(1.6 * drop(0.3).size);
+  });
+
+  it("rides outward with the flow", () => {
+    const b = createBlooms(2);
+    b.step(true, 0.3, 1 / 60, 0);
+    const r0 = Math.hypot(b.data[0], b.data[1]);
+    for (let f = 0; f < 30; f++) b.step(false, 0, 1 / 60, 0.01);
+    expect(Math.hypot(b.data[0], b.data[1])).toBeCloseTo(r0 + 0.3, 4);
   });
 
   it("bleeds outward (radius grows) and fades out within ~2 s", () => {

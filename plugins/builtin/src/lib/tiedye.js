@@ -111,9 +111,11 @@ export function createSpin() {
 }
 
 /** Dye blooms in the pool (uniform array size in the shader). */
-export const BLOOM_CAP = 8;
+export const BLOOM_CAP = 12;
 /** Seconds a bloom lives: it bleeds outward, then fades into the pattern. */
-export const BLOOM_LIFE = 1.8;
+export const BLOOM_LIFE = 2.2;
+/** Onsets at least this strong drop a pair of blooms. */
+const BLOOM_PAIR = 0.7;
 /** Blooms land within this radius (unit = half the shorter screen side). */
 export const BLOOM_SPREAD = 0.75;
 const BLOOM_GROW_TAU = 0.45;
@@ -153,10 +155,22 @@ export function createBlooms(seed) {
      * @param {boolean} onset `audio.onset`
      * @param {number} onsetStrength `audio.onsetStrength`
      * @param {number} dt seconds
+     * @param {number} [drift] how far the dye flowed outward this step (unit radii)
      */
-    step(onset, onsetStrength, dt) {
-      for (let i = 0; i < BLOOM_CAP; i++) age[i] += dt;
-      if (onset) {
+    step(onset, onsetStrength, dt, drift = 0) {
+      for (let i = 0; i < BLOOM_CAP; i++) {
+        age[i] += dt;
+        const x = b.data[i * 4];
+        const y = b.data[i * 4 + 1];
+        const r = Math.hypot(x, y);
+        if (drift > 0 && r > 1e-6) {
+          b.data[i * 4] = x * (1 + drift / r);
+          b.data[i * 4 + 1] = y * (1 + drift / r);
+        }
+      }
+      const os = Math.max(0, Math.min(1, onsetStrength));
+      const count = !onset ? 0 : os >= BLOOM_PAIR ? 2 : 1;
+      for (let c = 0; c < count; c++) {
         const i = next;
         next = (next + 1) % BLOOM_CAP;
         const r = BLOOM_SPREAD * Math.sqrt(rand());
@@ -164,9 +178,8 @@ export function createBlooms(seed) {
         b.data[i * 4] = r * Math.cos(a);
         b.data[i * 4 + 1] = r * Math.sin(a);
         b.color[i] = rand();
-        const st = Math.min(1, 0.5 + Math.max(0, onsetStrength));
-        strength[i] = st;
-        size[i] = (0.1 + 0.12 * rand()) * (0.6 + 0.4 * st);
+        strength[i] = Math.min(1, 0.5 + os);
+        size[i] = (0.1 + 0.08 * rand()) * (0.45 + 1.1 * os);
         age[i] = 0;
       }
       for (let i = 0; i < BLOOM_CAP; i++) {
