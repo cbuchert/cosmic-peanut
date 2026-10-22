@@ -1,8 +1,14 @@
 // @ts-check
 /**
  * Skull Trip's op-art stripes, mirrored from shaders/skull/opart.glsl: the anti-aliased stripe,
- * the stripe drive (phase, frequency, flow, thickness) with its anti-strobe budget, the beat
- * ripples and the colours. Nothing allocates per step.
+ * the music's energy and phrase, the stripe drive (outward drift, breathing, flow, whirlpool
+ * twist), the local effects (thickness, beat ripples, spectrum bulge, waveform bend, loop
+ * emitters) and the colours.
+ *
+ * Photosensitivity: every one of them moves stripes, so they share one per-pixel phase-rate budget
+ * (RATE_BUDGET: no pixel alternates black/white faster than MAX_ALT_HZ with reduceFlashing). Each
+ * local effect is capped by its reserve and reports the rate it used (`rate`); the drive takes the
+ * rest each frame. Tests check every bound against the mirrored field. Nothing allocates per step.
  */
 import { createFlashLimiter } from "./flash.js";
 

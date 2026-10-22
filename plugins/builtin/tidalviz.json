@@ -189,7 +189,7 @@
     {
       "id": "skull",
       "name": "Skull Trip",
-      "description": "A glossy candy-apple red metal skull in psychedelic op-art stripes: the jaw chomps on kicks, the head nods to the beat, the stripes breathe with the bass and ripple out on every hit.",
+      "description": "A glossy candy-apple red metal skull in psychedelic op-art stripes: closed loops pour out from behind it and from emitters the beats seed, growing off the screen in surges on every hit; the whirlpool tightens with the energy, the spectrum bulges the stripes round the skull, the jaw chomps on kicks and the head nods to the beat.",
       "author": "Tidalviz",
       "entry": "src/skull.js",
       "renderer": "webgl2",

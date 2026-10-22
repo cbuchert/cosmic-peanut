@@ -20,7 +20,10 @@ region: WebKit's `gl.finish()` returns without waiting, so use this to include G
 bright, busy backdrop behind the transparent canvas; default black like the shell), `nocanvas=1`,
 `still=N` (seeded `Math.random`, fixed 60 Hz steps, stop after N frames: deterministic stills),
 `gain=G` (scale the audio's level — waveform, rms, peak, spectrum, bands — e.g. `gain=0.05` for a
-quiet passage).
+quiet passage), `level=L` (like `gain`, but also bass/mid/treb and their Att, onsetStrength and flux;
+`level=0` is the host's silence: all zero, no onsets, `silent: true`), `bgm=R` (background-motion
+probe, with `still=N`: per-frame mean |Δ luminance| on a 320×180 copy outside a centre circle of
+radius R screen units, and per-pixel black/white alternation counts, in `__stats().bgm`).
 Contexts use the SDK's options (`alpha: true, premultipliedAlpha: true`, three clear alpha 0).
 
 `run.py` writes screenshots and `results-<browser>.json` to `out/` (git-ignored). For each
@@ -31,3 +34,9 @@ Headless Chromium falls back to software GL here; use WebKit numbers.
 `run.py --shots DIR [--tag after] [--prefix path/]` writes deterministic stills of each visualizer
 over black and over the light backdrop (plus the backdrop alone) to check transparency; `--prefix`
 points at another plugin tree under `/plugins/`, e.g. an older commit extracted with `git archive`.
+
+`run.py --motion [--mask R] VIZ…` measures background motion (deterministic, 1 s warm-up then 5 s)
+in silence (`level=0`), a quiet passage (`level=0.2`) and loud music (`audio=music`, reduceFlashing
+on and off): mean frame-to-frame change outside the centre circle, the beat response (mean change
+in the 150 ms after each strong onset over the 150 ms before it) and per-pixel alternation (black →
+white → black cycles in any 1 s window, Hz; p95/p99/max). Writes `out/motion-<tag>.json`.
