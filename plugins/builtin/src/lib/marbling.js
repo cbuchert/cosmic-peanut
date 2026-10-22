@@ -846,6 +846,12 @@ export function createMarbler(seed) {
     }
   }
 
+  // Where this frame's hit lands (allocation-free helpers for step).
+  let hitPos = 0.5;
+  let hitAspect = 1;
+  const hx = () => hitAspect * clamp01(0.1 + 0.8 * hitPos + 0.14 * (rand() - 0.5));
+  const hy = () => 0.5 + 0.8 * (rand() - 0.5);
+
   /** @param {Float32Array} arr @param {number} i @param {number} ink */
   function writeInk(arr, i, ink) {
     for (let k = 0; k < 4; k++) arr[i * 4 + k] = k === ink ? 1 : 0;
@@ -945,9 +951,8 @@ export function createMarbler(seed) {
       m.hits = 0;
       if (region >= 0) {
         // Where the hit sits in the spectrum sets where it lands: bass left … highs right.
-        const pos = risePosition(bands, prevBands);
-        const hx = () => env.aspect * clamp01(0.1 + 0.8 * pos + 0.14 * (rand() - 0.5));
-        const hy = () => 0.5 + 0.8 * (rand() - 0.5);
+        hitPos = risePosition(bands, prevBands);
+        hitAspect = env.aspect;
         dropFrom(region, 1, audio, params, env, hx(), hy());
         // Loud beats pour several drops at once.
         m.hits = 1 + Math.floor(3 * clamp01(energy * audio.onsetStrength * params.reactivity * Math.min(1, pour)));

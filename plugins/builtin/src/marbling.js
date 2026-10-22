@@ -124,7 +124,7 @@ export default async function create(ctx) {
     flowU[0] = f[0];
     flowU[1] = f[1];
     flowU[2] = currents.active ? 1 : 0;
-    flowU.set(f.subarray(2), 4);
+    for (let i = 2; i < f.length; i++) flowU[i + 2] = f[i];
     gl.uniform4fv(p.u.u_flow, flowU);
   }
 
