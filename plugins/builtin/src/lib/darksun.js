@@ -8,9 +8,11 @@ import { createFlashLimiter } from "./flash.js";
 
 /** Rim glow (multiplier) and corona reach (in sun radii past the rim) at rest and at full swell. */
 export const RIM_MIN = 0.5;
-export const RIM_MAX = 1;
+export const RIM_MAX = 1.5;
 export const REACH_MIN = 0.6;
-export const REACH_MAX = 1.6;
+export const REACH_MAX = 2.2;
+/** The disc's swell at full level (fraction of its radius). */
+export const SWELL = 0.1;
 /** Time constant (s) of the sun's swell: bass breathes it, kicks never pop it. */
 const SUN_TAU = 0.25;
 
@@ -18,8 +20,10 @@ const SUN_TAU = 0.25;
 const clamp = (v, hi) => (v > 0 ? (v < hi ? v : hi) : 0);
 
 /**
- * The sun's swell from `audio.bassAtt` (1 = average bass): drive = reactivity · 0.4 · bassAtt,
- * capped at 1, smoothed with SUN_TAU. Reactivity 0 leaves the sun at rest.
+ * The sun's swell from `audio.bassAtt` (1 = average bass): drive = reactivity · 0.4 · bassAtt ·
+ * (0.2 + 0.8 · energy), capped at 1, smoothed with SUN_TAU. The energy gate (createEnergy, default
+ * 1) keeps a quiet passage's sun calm, as bassAtt is relative. Reactivity 0 leaves the sun at rest.
+ * `scale` is the disc's radius multiplier, up to 1 + SWELL.
  */
 export function createSun() {
   const s = {
@@ -27,17 +31,21 @@ export function createSun() {
     level: 0,
     rim: RIM_MIN,
     reach: REACH_MIN,
+    scale: 1,
     /**
      * @param {number} bassAtt `audio.bassAtt`
      * @param {number} dt seconds
      * @param {number} reactivity 0–2
+     * @param {number} [energy] createEnergy's value, 0–1
      * @returns {number} the swell, 0–1
      */
-    step(bassAtt, dt, reactivity) {
-      const drive = clamp(0.4 * clamp(reactivity, 2) * clamp(bassAtt, 3), 1);
+    step(bassAtt, dt, reactivity, energy = 1) {
+      const gate = 0.2 + 0.8 * clamp(energy, 1);
+      const drive = clamp(0.4 * clamp(reactivity, 2) * clamp(bassAtt, 3) * gate, 1);
       s.level += (drive - s.level) * (1 - Math.exp(-dt / SUN_TAU));
       s.rim = RIM_MIN + (RIM_MAX - RIM_MIN) * s.level;
       s.reach = REACH_MIN + (REACH_MAX - REACH_MIN) * s.level;
+      s.scale = 1 + SWELL * s.level;
       return s.level;
     },
   };
@@ -82,8 +90,8 @@ const BEAM_ATTACK = 0.03;
 const BEAM_RELEASE = 0.3;
 
 /**
- * The narrow light falling from the range's centre. Drive = reactivity · (0.35 · bass + 1.5 · rms)
- * (bass is `audio.bass`, 1 = average; rms is `audio.rms`), capped at 1.
+ * The narrow light falling from the range's centre. Drive = reactivity · (0.35 · bass · (0.15 +
+ * 0.85 · energy) + 1.5 · rms) (bass is `audio.bass`, 1 = average; rms is `audio.rms`), capped at 1.
  */
 export function createBeam() {
   const b = {
@@ -95,9 +103,11 @@ export function createBeam() {
      * @param {number} rms `audio.rms`
      * @param {number} dt seconds
      * @param {number} reactivity 0–2
+     * @param {number} [energy] createEnergy's value, 0–1 (default 1): gates the relative bass
      */
-    step(bass, rms, dt, reactivity) {
-      const drive = clamp(clamp(reactivity, 2) * (0.35 * clamp(bass, 3) + 1.5 * clamp(rms, 1)), 1);
+    step(bass, rms, dt, reactivity, energy = 1) {
+      const bassIn = 0.35 * clamp(bass, 3) * (0.15 + 0.85 * clamp(energy, 1));
+      const drive = clamp(clamp(reactivity, 2) * (bassIn + 1.5 * clamp(rms, 1)), 1);
       const tau = drive > b.level ? BEAM_ATTACK : BEAM_RELEASE;
       b.level += (drive - b.level) * (1 - Math.exp(-dt / tau));
       b.width = BEAM_WIDTH[0] + (BEAM_WIDTH[1] - BEAM_WIDTH[0]) * b.level;
@@ -152,12 +162,13 @@ export function createSurge() {
 
 /**
  * The cover's composition, scaled by min(w, h) so it holds in landscape, portrait and small
- * windows: horizon at half height; the sun centred at 22 % from the top (lower if its corona would
- * clip the top edge); the range centred, `rangeWidth` of the width across, hanging up to
+ * windows: horizon at half height; the sun centred at 22 % from the top at the default rise (28 %
+ * sunk … 17 % risen; lower if its swollen rim would clip the top edge); the range centred, `rangeWidth` of the width across, hanging up to
  * 0.28 · min(w, h) · rangeDepth (typical levels sit well under 1) (never more than 80 % of the way to the bottom).
  * @param {number} w
  * @param {number} h
- * @param {{ sunSize: number, rangeWidth: number, rangeDepth: number }} o
+ * @param {{ sunSize: number, rangeWidth: number, rangeDepth: number, rise?: number }} o rise: createSunMood's
+ *   rise, 0–1 (default 0.5, the cover's height)
  * @param {Layout} out
  * @returns {Layout}
  */
@@ -169,7 +180,11 @@ export function layout(w, h, o, out) {
   out.horizon = horizon;
   out.sunX = 0.5 * w;
   out.sunR = r;
-  out.sunY = Math.max(0.22 * h, 1.2 * r);
+  // The sun rises with the song: 0.28 h at rise 0 (sunk toward the horizon), 0.17 h at rise 1,
+  // kept clear of the top edge and well above the horizon even fully swollen.
+  const rise = o.rise === undefined ? 0.5 : clamp(o.rise, 1);
+  const big = r * (1 + SWELL);
+  out.sunY = Math.min(Math.max((0.28 - 0.11 * rise) * h, 1.2 * big), horizon - 1.3 * big);
   out.rangeHalf = 0.5 * o.rangeWidth * w;
   out.rangeDepth = Math.min(0.28 * unit * o.rangeDepth, 0.8 * (h - horizon));
   out.beamWidth = 0.004 * unit;
@@ -276,8 +291,8 @@ export const GLOW_RANGE = [0.5, 1];
 const GLOW_TAU = 0.4;
 
 /**
- * The horizon glow: breathes with `audio.midAtt` (1 = average; drive = reactivity · 0.5 · midAtt,
- * capped at 1, smoothed over GLOW_TAU), plus half the surge, which the caller has already passed
+ * The horizon glow: breathes with `audio.midAtt` (1 = average; drive = reactivity · 0.5 · midAtt ·
+ * (0.15 + 0.85 · energy), capped at 1, smoothed over GLOW_TAU), plus half the surge, which the caller has already passed
  * through the flash limiter.
  */
 export function createGlow() {
@@ -289,9 +304,11 @@ export function createGlow() {
      * @param {number} surge 0–1, flash-limited
      * @param {number} dt seconds
      * @param {number} reactivity 0–2
+     * @param {number} [energy] createEnergy's value, 0–1 (default 1): gates the relative mids
      */
-    step(midAtt, surge, dt, reactivity) {
-      const drive = clamp(0.5 * clamp(reactivity, 2) * clamp(midAtt, 3), 1);
+    step(midAtt, surge, dt, reactivity, energy = 1) {
+      const gate = 0.15 + 0.85 * clamp(energy, 1);
+      const drive = clamp(0.5 * clamp(reactivity, 2) * clamp(midAtt, 3) * gate, 1);
       g.level += (drive - g.level) * (1 - Math.exp(-dt / GLOW_TAU));
       g.value = GLOW_RANGE[0] + (GLOW_RANGE[1] - GLOW_RANGE[0]) * g.level + 0.5 * clamp(surge, 1);
       return g.value;
@@ -464,4 +481,127 @@ export function createBreath() {
     },
   };
   return b;
+}
+
+/** Ripples alive at once, the smallest beatHit that spawns one, and their fade rate (1/s). */
+export const RIPPLES = 3;
+const RIPPLE_MIN = 0.05;
+const RIPPLE_DECAY = 1.6;
+
+/**
+ * Beat ripples: each beatHit above RIPPLE_MIN starts one (age 0, amplitude = the hit), replacing
+ * the oldest of RIPPLES. They age in seconds and fade at RIPPLE_DECAY. `rings` is
+ * [age, amplitude] × RIPPLES, ready for a vec2 uniform array; the shader turns age into radius.
+ */
+export function createRipples() {
+  const rings = new Float32Array(2 * RIPPLES).fill(0);
+  for (let k = 0; k < RIPPLES; k++) rings[2 * k] = 1e3;
+  const r = {
+    rings,
+    /** @param {number} hit beatHit, 0–1 @param {number} dt seconds */
+    step(hit, dt) {
+      const fade = Math.exp(-dt * RIPPLE_DECAY);
+      let oldest = 0;
+      for (let k = 0; k < RIPPLES; k++) {
+        rings[2 * k] += dt;
+        rings[2 * k + 1] *= fade;
+        if (rings[2 * k] > rings[2 * oldest]) oldest = k;
+      }
+      const h = clamp(hit, 1);
+      if (h >= RIPPLE_MIN) {
+        rings[2 * oldest] = 0;
+        rings[2 * oldest + 1] = h;
+      }
+      return rings;
+    },
+  };
+  return r;
+}
+
+/** The diamond spike's decay rate (1/s). */
+const SPIKE_DECAY = 7;
+
+/**
+ * The diamond ring's beat spike: a beatHit lifts the envelope to the hit, which decays at
+ * SPIKE_DECAY; the shared flash limiter lets at most 3 spikes a second start under reduceFlashing.
+ */
+export function createSpike() {
+  const flash = createFlashLimiter();
+  let env = 0;
+  return {
+    /**
+     * @param {number} hit beatHit, 0–1
+     * @param {number} dt seconds
+     * @param {boolean} reduceFlashing `ctx.reduceFlashing`
+     * @returns {number} 0–1
+     */
+    step(hit, dt, reduceFlashing) {
+      env *= Math.exp(-dt * SPIKE_DECAY);
+      const h = clamp(hit, 1);
+      if (h > env) env = h;
+      return flash.step(env, dt, reduceFlashing);
+    },
+  };
+}
+
+/** Corona rotation (rad/s) in silence; energy turns it up to (1 + CORONA_GAIN) × that. */
+export const CORONA_RATE = 0.03;
+const CORONA_GAIN = 4;
+/** Easing (s) of the halo's bloom and of the sun's rise; the shafts' attack and release. */
+const BLOOM_TAU = 1.5;
+const RISE_TAU = 4;
+const RAYS_ATTACK = 0.04;
+const RAYS_RELEASE = 0.25;
+
+/**
+ * The sun's slower moods. `bloom` (0–1): a soft halo for loud passages (reactivity · energy²,
+ * easing over BLOOM_TAU). `rise` (0–1): how high the sun stands, building with the song's energy
+ * over RISE_TAU and sinking toward the horizon as it falls (`motion` scales it). `rays` (0–1): the
+ * light shafts' pulse with `audio.bass` (1 = average), gated by energy^1.5, quick up, easy down.
+ * `corona`: the corona's rotation (rad), faster with energy.
+ */
+export function createSunMood() {
+  let rise = 0;
+  const m = {
+    bloom: 0,
+    rise: 0,
+    rays: 0,
+    corona: 0,
+    /**
+     * @param {number} energy createEnergy's value, 0–1
+     * @param {number} bass `audio.bass`
+     * @param {number} dt seconds
+     * @param {number} reactivity 0–2
+     * @param {number} motion 0–1
+     */
+    step(energy, bass, dt, reactivity, motion) {
+      const r = clamp(reactivity, 2);
+      const e = clamp(energy, 1);
+      const mo = clamp(motion, 1);
+      const drive = clamp(r * e, 1);
+      m.bloom += (clamp(r * e * e, 1) - m.bloom) * (1 - Math.exp(-dt / BLOOM_TAU));
+      rise += (drive - rise) * (1 - Math.exp(-dt / RISE_TAU));
+      m.rise = mo * rise;
+      const shafts = clamp(0.5 * r * clamp(bass, 3) * e ** 1.5, 1);
+      m.rays += (shafts - m.rays) * (1 - Math.exp(-dt / (shafts > m.rays ? RAYS_ATTACK : RAYS_RELEASE)));
+      m.corona += CORONA_RATE * mo * (1 + CORONA_GAIN * drive) * dt;
+      return m;
+    },
+  };
+  return m;
+}
+
+/** The ground's reflection of the range and the beam in silence (or at reactivity 0). */
+export const REFLECT_REST = 0.15;
+
+/**
+ * How strongly the range and the beam shimmer in the dark ground, 0–1: REFLECT_REST plus
+ * reactivity · (0.55 · energy + 0.3 · beam · √energy). Both inputs are already smooth.
+ * @param {number} energy createEnergy's value, 0–1
+ * @param {number} beam createBeam's level, 0–1
+ * @param {number} reactivity 0–2
+ */
+export function reflection(energy, beam, reactivity) {
+  const e = clamp(energy, 1);
+  return clamp(REFLECT_REST + clamp(reactivity, 2) * (0.55 * e + 0.3 * clamp(beam, 1) * Math.sqrt(e)), 1);
 }

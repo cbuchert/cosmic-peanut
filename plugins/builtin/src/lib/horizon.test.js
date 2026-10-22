@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createHorizon, createPeakEnvelope, F_MAX, F_MIN, HOLD, REST, shapeLevel } from "./horizon.js";
+import { createDrop, createHorizon, createPeakEnvelope, DROP_MAX, F_MAX, F_MIN, HOLD, REST, shapeLevel } from "./horizon.js";
 
 const SR = 48000;
 const BINS = 1024;
@@ -131,5 +131,39 @@ describe("shapeLevel: Reactivity as the range's contrast", () => {
       const v = shapeLevel(l, r);
       expect(v >= 0 && v <= 1, `${l} ${r}`).toBe(true);
     }
+  });
+});
+
+describe("createDrop: on a beat the range drops (a quick downward jolt) and springs back", () => {
+  /** @param {number} hz @param {number} secs @param {number} motion */
+  const trace = (hz, secs, motion = 1, d = createDrop()) => {
+    const out = [];
+    for (let i = 0; i < hz * secs; i++) out.push(d.step(i === 0 ? 1 : 0, 1 / hz, motion));
+    return out;
+  };
+  it("jolts down within ~0.1 s, overshoots a little, and settles within a second", () => {
+    const t = trace(60, 1.5);
+    const peak = Math.max(...t);
+    const at = t.indexOf(peak) / 60;
+    expect(peak).toBeGreaterThan(0.5);
+    expect(peak).toBeLessThanOrEqual(DROP_MAX);
+    expect(at).toBeLessThan(0.12);
+    expect(Math.min(...t)).toBeLessThan(0); // springs back past rest
+    expect(Math.min(...t)).toBeGreaterThan(-0.4 * peak);
+    expect(Math.abs(t[t.length - 1])).toBeLessThan(0.02);
+  });
+
+  it("is the same at 60 and 120 Hz, bounded under any beats, and gentler under Reduce motion", () => {
+    const a = trace(60, 0.5);
+    const b = trace(120, 0.5);
+    for (let i = 0; i < a.length; i++) expect(Math.abs(a[i] - b[2 * i + 1])).toBeLessThan(0.06);
+    const d = createDrop();
+    for (let i = 0; i < 600; i++) {
+      const v = d.step(i % 5 === 0 ? 1 : 0, 1 / 60, 1);
+      expect(v).toBeLessThanOrEqual(DROP_MAX);
+      expect(v).toBeGreaterThanOrEqual(-DROP_MAX);
+    }
+    expect(Math.max(...trace(60, 1, 0.4))).toBeLessThan(0.6 * Math.max(...trace(60, 1)));
+    expect(Math.max(...trace(60, 1, 0))).toBe(0);
   });
 });
