@@ -9,15 +9,16 @@
  * upsamples it and adds the cotton weave.
  *
  * The music (all in lib/tiedye.js): the dye streams outward from the knot (createFlow) faster
- * when loud and in a surge on every beat, locked to the tempo when it is confident. Each beat
+ * when loud and in a surge on every beat, locked to the tempo when it is confident (onsets then
+ * only accent, so a syncopated bass line doesn't pull the cloth off the beat). Each beat
  * lays a fresh band down at the knot (createRecord) whose color comes from the part of the
  * spectrum that stands out right then (createDominant), so the rings travelling outward record
  * the song. Pattern "auto" morphs between looks on phrase changes (createMorph) and the palette
  * drifts in hue (createPaletteDrift). Energy and tempo turn the cloth (createSpin), the spectrum
  * sets each band's width (createBandWidths), the waveform ripples the arms (createArmWarp,
  * warpAmount), mids and treble breathe the dye and its bleed (createBreath, createIntensity —
- * flash-limited), and onsets drop dye blooms (createBlooms). Everything reaches the GPU as
- * uniforms from preallocated arrays, so frame() allocates nothing.
+ * flash-limited, swelling on each beat), and onsets drop dye blooms (createBlooms). Everything
+ * reaches the GPU as uniforms from preallocated arrays, so frame() allocates nothing.
  */
 import { createProgram, createTarget } from "./lib/gl.js";
 import {
@@ -146,7 +147,8 @@ export default async function create(ctx) {
       const wave = warp.step(audio.waveform, dt);
       breath.step(dt, live ? audio.midAtt : 1, live ? audio.trebAtt : 1, react);
       blooms.step(ctx.params.bloom === true && flowIn.onset, audio.onsetStrength, dt, flow.flow - flowBefore);
-      const strength = intensity.step(flowIn.onset, audio.onsetStrength, dt, ctx.reduceFlashing, breath.dye);
+      // The dye swells on the beat (a tempo beat at full strength); onsets only accent the flow and drop blooms.
+      const strength = intensity.step(flow.beat, bpm > 0 ? 1 : audio.onsetStrength, dt, ctx.reduceFlashing, breath.dye);
       clock += dt * motionScale(spinIn);
 
       const fabric = fabricIndex(ctx.params.fabric);

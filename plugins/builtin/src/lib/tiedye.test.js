@@ -579,6 +579,26 @@ describe("createFlow", () => {
     }
     expect(n).toBe(8);
   });
+
+  it("with a confident tempo, moves on the beat: an off-beat onset (a syncopated bass hit) only accents", () => {
+    const locked = { rms: 0.3, bpm: 120 };
+    /** Extra distance in the 0.4 s after an event on frame 0 (`at` gives that frame's extra input), over none. */
+    const push = (/** @type {Partial<import('./tiedye.js').FlowInput>} */ at) => {
+      const run = (/** @type {boolean} */ on) => {
+        const fl = runFlow(createFlow(), 2, flowIn({ ...locked, beatPhase: 0.6 }));
+        const f0 = fl.flow;
+        // No phase wrap in the window unless `at` brings one (phase drops to 0, then stays below 0.5).
+        runFlow(fl, 0.4, (/** @type {number} */ f) => flowIn({ ...locked, beatPhase: 0.6, ...(on && f === 0 ? at : {}), ...(on && f > 0 && "beatPhase" in at ? { beatPhase: 0.1 } : {}) }));
+        return fl.flow - f0;
+      };
+      return run(true) - run(false);
+    };
+    const beat = push({ beatPhase: 0 });
+    const offBeat = push({ onset: true, onsetStrength: 1 });
+    expect(beat).toBeGreaterThan(0.06);
+    expect(offBeat).toBeGreaterThan(0);
+    expect(offBeat).toBeLessThan(0.3 * beat);
+  });
 });
 
 describe("createRecord", () => {
