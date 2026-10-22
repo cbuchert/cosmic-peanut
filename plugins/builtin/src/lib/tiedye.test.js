@@ -20,7 +20,7 @@ import {
   PULSE_MAX, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH,
   createFlow, FLOW_MAX, createRecord, REC_CAP, MIN_BAND, MAX_BAND, createDominant,
   createMorph, PHRASE_BEATS, LOOKS, MORPH_TIME, PHRASE_SECONDS,
-  driftPalette, createPaletteDrift, MAX_HUE_DRIFT,
+  driftPalette, createPaletteDrift, MAX_HUE_DRIFT, createBreath, BREATH_MAX,
 } from "./tiedye.js";
 
 describe("createBandWidths", () => {
@@ -683,6 +683,66 @@ describe("palette drift", () => {
     }
     expect(new Set(settled).size).toBeGreaterThanOrEqual(5);
     expect(Math.max(...settled.map(Math.abs))).toBeGreaterThan(MAX_HUE_DRIFT / 3);
+  });
+});
+
+describe("createBreath", () => {
+  const settled = (/** @type {number} */ midAtt, /** @type {number} */ trebAtt, reactivity = 1) => {
+    const b = createBreath();
+    for (let f = 0; f < 120; f++) b.step(1 / 60, midAtt, trebAtt, reactivity);
+    return { dye: b.dye, bleed: b.bleed };
+  };
+
+  it("deepens the dye with the mids and loosens the edges with the treble: monotonic, bounded", () => {
+    let prev = settled(0, 0);
+    for (const v of [0.5, 1, 1.5, 2, 5]) {
+      const cur = settled(v, v);
+      expect(cur.dye).toBeGreaterThanOrEqual(prev.dye);
+      expect(cur.bleed).toBeGreaterThanOrEqual(prev.bleed);
+      prev = cur;
+    }
+    expect(settled(1, 1)).toEqual({ dye: 0, bleed: 0 });
+    expect(settled(9, 9, 2).dye).toBeLessThanOrEqual(1);
+    expect(settled(0, 0, 2).dye).toBeGreaterThanOrEqual(-1);
+    expect(settled(9, 9, 2).bleed).toBeLessThanOrEqual(1);
+    expect(settled(9, 9, 2).bleed).toBeGreaterThan(0.5);
+    expect(settled(1.6, 1.6, 0)).toEqual({ dye: 0, bleed: 0 });
+  });
+
+  it("breathes smoothly: mids slamming every frame barely flicker it", () => {
+    const b = createBreath();
+    let prev = 0;
+    for (let f = 0; f < 120; f++) {
+      b.step(1 / 60, f % 2 ? 0 : 2, f % 2 ? 0 : 2, 2);
+      expect(Math.abs(b.dye - prev)).toBeLessThan(0.08);
+      prev = b.dye;
+    }
+  });
+});
+
+describe("createIntensity breathing", () => {
+  it("deepens with the breath, bounded, and a fast breath is still limited to 3 rises per second", () => {
+    const at = (/** @type {number} */ breath) => {
+      const it = createIntensity();
+      let v = 1;
+      for (let f = 0; f < 60; f++) v = it.step(false, 0, 1 / 60, true, breath);
+      return v;
+    };
+    expect(at(0)).toBeCloseTo(1, 6);
+    expect(at(1)).toBeCloseTo(1 + BREATH_MAX, 6);
+    expect(at(-1)).toBeCloseTo(1 - BREATH_MAX, 6);
+    expect(at(-1)).toBeGreaterThan(0.5);
+    const it = createIntensity();
+    let prev = 0;
+    let rising = false;
+    let rises = 0;
+    for (let f = 0; f < 240; f++) {
+      const v = it.step(f % 6 === 0, 1, 1 / 60, true, f % 6 < 3 ? 1 : -1);
+      if (v > prev + 1e-6 && !rising) rises++;
+      rising = v > prev + 1e-6;
+      prev = v;
+    }
+    expect(rises / 4).toBeLessThanOrEqual(3.25);
   });
 });
 

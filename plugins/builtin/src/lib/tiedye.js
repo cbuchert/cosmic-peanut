@@ -316,12 +316,15 @@ export function bandOf(t, edges, n) {
 /** Most a beat can strengthen the dye (full-frame, so it goes through the flash limiter). */
 export const PULSE_MAX = 0.15;
 
+/** Most the breathing (mids) deepens or thins the dye, also through the flash limiter. */
+export const BREATH_MAX = 0.2;
+
 /** Seconds for a beat's swell to decay. */
 const PULSE_DECAY = 0.25;
 
 /**
- * Global dye strength, 1 to 1 + PULSE_MAX: a beat swells it, and it decays back. The swell is
- * full-frame, so it passes through the flash limiter (≤ 3 new rises per second with Reduce
+ * Global dye strength, 1 ± BREATH_MAX + up to PULSE_MAX: a beat swells it and it decays back, and
+ * it breathes with the mids. It is full-frame, so it passes through the flash limiter (≤ 3 new rises per second with Reduce
  * flashing on).
  */
 export function createIntensity() {
@@ -331,10 +334,12 @@ export function createIntensity() {
     /**
      * @param {boolean} onset `audio.onset` @param {number} onsetStrength `audio.onsetStrength`
      * @param {number} dt seconds @param {boolean} reduceFlashing `ctx.reduceFlashing`
+     * @param {number} [breath] createBreath's `dye`, −1..1
      */
-    step(onset, onsetStrength, dt, reduceFlashing) {
+    step(onset, onsetStrength, dt, reduceFlashing, breath = 0) {
       kick = onset ? Math.max(kick, Math.min(1, 0.5 + Math.max(0, onsetStrength))) : kick * Math.exp(-dt / PULSE_DECAY);
-      return 1 + PULSE_MAX * flash.step(kick, dt, reduceFlashing);
+      const b = Math.max(-1, Math.min(1, breath));
+      return 1 + flash.step(PULSE_MAX * kick + BREATH_MAX * b, dt, reduceFlashing);
     },
   };
 }
@@ -671,4 +676,35 @@ export function createPaletteDrift(seed) {
       return hue;
     },
   };
+}
+
+/** Seconds per breathing stage (two stages: no flicker). */
+const BREATH_TAU = 0.2;
+const BREATH_GAIN = 0.8;
+
+/**
+ * The cloth breathing with the mix: `dye` (−1..1) from the mids deepens or thins the dye
+ * (createIntensity turns it into a flash-limited strength); `bleed` (0..1) from the treble loosens
+ * the band edges.
+ */
+export function createBreath() {
+  let dyeMid = 0;
+  let bleedMid = 0;
+  const b = {
+    dye: 0,
+    bleed: 0,
+    /** @param {number} dt @param {number} midAtt @param {number} trebAtt @param {number} reactivity */
+    step(dt, midAtt, trebAtt, reactivity) {
+      const react = Math.max(0, Math.min(2, reactivity));
+      const dye = Math.max(-1, Math.min(1, BREATH_GAIN * react * (midAtt - 1)));
+      const bleed = Math.max(0, Math.min(1, BREATH_GAIN * react * (trebAtt - 1)));
+      const k = 1 - Math.exp(-dt / BREATH_TAU);
+      dyeMid += (dye - dyeMid) * k;
+      b.dye += (dyeMid - b.dye) * k;
+      bleedMid += (bleed - bleedMid) * k;
+      b.bleed += (bleedMid - b.bleed) * k;
+      return b;
+    },
+  };
+  return b;
 }
