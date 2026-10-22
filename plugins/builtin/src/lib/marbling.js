@@ -663,6 +663,8 @@ const COMB_DIRS = [
   [0, -1],
 ];
 const COMB_W = 0.05;
+/** Decay (s) of the beat pulse that makes the rake lurch. */
+const PULSE_TAU = 0.1;
 /** Flicks: at most this many at once, each a straight stroke this long (s), this narrow. */
 const MAX_FLICKS = 2;
 const FLICK_DUR = 0.18;
@@ -735,6 +737,8 @@ export function createMarbler(seed) {
   let combD = 0;
   let combDir = 0;
   let lastComb = -1e9;
+  /** 0–1 envelope that jumps on each beat and decays fast: the rake moves in lurches with it. */
+  let pulse = 0;
   /** Quick strokes on snares and hats: per slot (x, y, dir x, dir y, speed, seconds left). */
   const flicks = new Float64Array(MAX_FLICKS * 6);
 
@@ -1044,9 +1048,12 @@ export function createMarbler(seed) {
         }
       }
 
+      pulse = audio.onset && !audio.silent ? 1 : pulse * Math.exp(-dt / PULSE_TAU);
+      // Mean ≈ 1 over a beat of eighth notes, ~2× right after a hit, ~0.35× just before the next.
+      const lurch = 0.35 + 1.8 * pulse;
       // The comb's step this frame: its front advances; the paint it passes moves by combD in all.
       if (combOn) {
-        const step = combSpeed * dt;
+        const step = combSpeed * dt * lurch;
         const amp = Math.min((combD * step * comb[1]) / Math.sqrt(Math.PI), (0.8 * COMB_MAX_AMP) / comb[1]);
         comb[0] += step;
         comb[2] = amp;
@@ -1075,7 +1082,7 @@ export function createMarbler(seed) {
       if (rake > 0 && !audio.silent && energy > 0.02) {
         const x0 = sx;
         const y0 = sy;
-        sx += dir * rake * (0.04 + 0.16 * energy) * dt;
+        sx += dir * rake * (0.04 + 0.16 * energy) * dt * lurch;
         if (sx > env.aspect + STYLUS_MARGIN) dir = -1;
         if (sx < -STYLUS_MARGIN) dir = 1;
         // Centroid sets the height; a slow meander carries the rivers over the whole page.

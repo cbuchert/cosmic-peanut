@@ -1036,4 +1036,42 @@ describe("comb", () => {
     expect(run(0, 6).flicks).toBe(0);
     expect(run(20, 40, { ...RAKE, rake: 0 }).flicks).toBe(0);
   });
+
+  it("moves the comb and the stylus in lurches on the beat", () => {
+    const m = createMarbler(5);
+    const RAKE = { ...PARAMS, rake: 1 };
+    let after = 0;
+    let before = 0;
+    let sAfter = 0;
+    let sBefore = 0;
+    let prevFront = NaN;
+    let prevS = NaN;
+    for (let f = 0; f < 30 * 40; f++) {
+      m.step(beatFrame(f, { rms: 0.4 }), DT, RAKE, ENV);
+      const ph = f % 30; // frames since the beat
+      for (let i = 0; i < m.count; i++) {
+        const t = m.evA[i * 4];
+        if (t === EV_COMB) {
+          const d = m.evA[i * 4 + 1] - prevFront;
+          if (d > 0 && d < 0.1) {
+            if (ph < 9) after += d;
+            else if (ph >= 21) before += d;
+          }
+          prevFront = m.evA[i * 4 + 1];
+        }
+        if (t === EV_DRAG && m.evA[i * 4 + 3] < 8000) {
+          // the stylus (σ 0.012), not a flick (σ 0.01)
+          const sx = m.evA[i * 4 + 1];
+          const d = Math.abs(sx - prevS);
+          if (d < 0.1) {
+            if (ph < 9) sAfter += d;
+            else if (ph >= 21) sBefore += d;
+          }
+          prevS = sx;
+        }
+      }
+    }
+    expect(after).toBeGreaterThan(2 * before);
+    expect(sAfter).toBeGreaterThan(2 * sBefore);
+  });
 });
