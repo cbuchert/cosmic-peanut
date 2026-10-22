@@ -11,6 +11,13 @@ import {
   createRing,
   cloudThreshold,
   createRipple,
+  createFlow,
+  createCloudBias,
+  createPulses,
+  createCloudLight,
+  createBillows,
+  BILLOWS,
+  PULSES,
   DEFAULT_REACTIVITY,
   DEFAULT_ROTATION,
   effectiveMotion,
@@ -219,6 +226,32 @@ describe("createGlare", () => {
     expect(strobe(true)).toBeLessThanOrEqual(3);
   });
 
+  it("also limits the background's brightening (clouds, rim light, rays) passed as `extra`", () => {
+    const count = (/** @type {boolean} */ limit) => {
+      const glare = createGlare();
+      const none = createFlares().data;
+      let rises = 0;
+      let prev = 0;
+      let lo = 0;
+      let rising = false;
+      for (let i = 0; i < 240; i++) {
+        glare.step(0, none, DT, limit, i % 6 < 3 ? 1 : 0);
+        const v = glare.level;
+        if (!rising && v - lo >= 0.05) {
+          rises++;
+          rising = true;
+        } else if (rising && v < prev) {
+          rising = false;
+          lo = v;
+        } else if (!rising) lo = Math.min(lo, v);
+        prev = v;
+      }
+      return rises / 4;
+    };
+    expect(count(false)).toBeGreaterThan(6);
+    expect(count(true)).toBeLessThanOrEqual(3);
+  });
+
   it("passes slow swells and a lone flare straight through", () => {
     const flares = createFlares();
     const glare = createGlare();
@@ -335,5 +368,237 @@ describe("cloudThreshold", () => {
       expect(th).toBeLessThanOrEqual(0.2);
     }
     expect(Math.abs(cloudThreshold(0.5, 0.51) - cloudThreshold(0.5, 0.5))).toBeLessThan(0.002);
+  });
+});
+
+/** Run `step` for `secs` at `dt`. @param {(dt: number, i: number) => void} step @param {number} secs @param {number} [dt] */
+const run = (step, secs, dt = DT) => {
+  const n = Math.round(secs / dt);
+  for (let i = 0; i < n; i++) step(dt, i);
+};
+
+describe("createFlow", () => {
+  it("the clouds' orbit speeds up with the music's energy: loud ≫ quiet, a slow drift in silence", () => {
+    const speed = (/** @type {number} */ rms, /** @type {number} */ bassAtt) => {
+      const f = createFlow();
+      run((dt) => f.step(rms, bassAtt, false, 0, dt, 1), 3);
+      return f.speed;
+    };
+    const silent = speed(0, 0);
+    const quiet = speed(0.03, 1);
+    const loud = speed(0.3, 1.6);
+    expect(silent).toBeGreaterThan(0);
+    expect(quiet).toBeGreaterThan(silent);
+    expect(loud).toBeGreaterThan(4 * quiet);
+    expect(loud).toBeLessThan(1); // rad/s: bounded
+  });
+
+  it("a beat surges the orbit: it rises smoothly within ~0.2 s, then settles back; bounded", () => {
+    const f = createFlow();
+    run((dt) => f.step(0.1, 1, false, 0, dt, 1), 3);
+    const base = f.speed;
+    let peak = base;
+    let prev = base;
+    let maxStep = 0;
+    run((dt, i) => {
+      f.step(0.1, 1, i === 0, 0.9, dt, 1);
+      peak = Math.max(peak, f.speed);
+      maxStep = Math.max(maxStep, Math.abs(f.speed - prev));
+      prev = f.speed;
+    }, 0.25);
+    expect(peak).toBeGreaterThan(base + 0.15);
+    expect(maxStep).toBeLessThan(0.4 * (peak - base)); // no one-frame jump
+    run((dt) => f.step(0.1, 1, false, 0, dt, 1), 2);
+    expect(f.speed).toBeCloseTo(base, 2);
+    // A drum roll can't run away.
+    run((dt) => f.step(0.3, 2, true, 1, dt, 2), 3);
+    expect(f.speed).toBeLessThan(1.5);
+  });
+
+  it("is frame-rate independent (60 vs 120 Hz), and Reactivity 0 leaves only the idle drift", () => {
+    const drive = (/** @type {number} */ dt, /** @type {number} */ react) => {
+      const f = createFlow();
+      const per = Math.round(0.5 / dt); // a beat every 0.5 s
+      run((d, i) => f.step(0.15 + 0.1 * Math.sin(i * d * 3), 1.2, i % per === 0, 0.9, d, react), 4, dt);
+      return f;
+    };
+    const a = drive(1 / 60, 1);
+    const b = drive(1 / 120, 1);
+    expect(Math.abs(a.angle - b.angle)).toBeLessThan(0.02);
+    expect(Math.abs(a.evolve - b.evolve)).toBeLessThan(0.02);
+    const still = drive(1 / 60, 0);
+    expect(still.speed).toBeCloseTo(drive(1 / 60, 0).speed, 9);
+    expect(still.speed).toBeLessThan(0.02);
+  });
+
+  it("the clouds' formation clock (births and deaths) runs faster with energy", () => {
+    const rate = (/** @type {number} */ rms) => {
+      const f = createFlow();
+      run((dt) => f.step(rms, 1, false, 0, dt, 1), 2);
+      const e0 = f.evolve;
+      run((dt) => f.step(rms, 1, false, 0, dt, 1), 1);
+      return f.evolve - e0;
+    };
+    expect(rate(0)).toBeGreaterThan(0);
+    expect(rate(0.3)).toBeGreaterThan(4 * rate(0));
+  });
+
+  it("Reduce motion's drift factor slows the orbit and the formation clock alike", () => {
+    const f = createFlow();
+    const g = createFlow();
+    run((dt, i) => {
+      f.step(0.2, 1.2, i % 30 === 0, 0.9, dt, 1);
+      g.step(0.2, 1.2, i % 30 === 0, 0.9, dt, 1, 0.4);
+    }, 2);
+    expect(g.speed).toBeCloseTo(0.4 * f.speed, 6);
+    expect(g.evolve).toBeCloseTo(0.4 * f.evolve, 6);
+  });
+});
+
+describe("createCloudBias", () => {
+  it("clouds billow out near loud angles and thin near quiet ones: bounded, broad, mirror-symmetric", () => {
+    const bias = createCloudBias();
+    const lv = new Float32Array(SECTORS);
+    const loud = 40;
+    for (let k = -4; k <= 4; k++) {
+      lv[loud + k] = 1;
+      lv[SECTORS - 1 - loud - k] = 1; // mirrored, like the corona
+    }
+    run((dt) => bias.step(lv, dt, 1), 1);
+    const b = bias.out;
+    expect(b[loud]).toBeGreaterThan(0.5);
+    expect(b[SECTORS / 2]).toBeLessThan(-0.05); // a quiet angle thins
+    expect(b[loud + 12]).toBeGreaterThan(0); // broad: neighbouring angles billow too
+    for (let i = 0; i < SECTORS; i++) {
+      expect(b[i]).toBeGreaterThanOrEqual(-1);
+      expect(b[i]).toBeLessThanOrEqual(1);
+      expect(b[i]).toBeCloseTo(b[SECTORS - 1 - i], 5);
+    }
+  });
+
+  it("moves smoothly (no jumps when the spectrum switches) and Reactivity 0 leaves it flat", () => {
+    const bias = createCloudBias();
+    const lv = new Float32Array(SECTORS);
+    for (let k = 30; k < 50; k++) lv[k] = lv[SECTORS - 1 - k] = 1;
+    bias.step(lv, DT, 1);
+    expect(bias.out[40]).toBeLessThan(0.25); // one frame moves only part-way
+    const flat = createCloudBias();
+    run((dt) => flat.step(lv, dt, 0), 1);
+    expect(Math.max(...flat.out.map(Math.abs))).toBe(0);
+  });
+});
+
+describe("createPulses", () => {
+  it("each onset sends a pulse outward through the sky (rays, cloud shockwave) that fades", () => {
+    const p = createPulses();
+    p.step(true, 0.9, DT, 1);
+    expect(p.data[1]).toBeGreaterThan(0.5);
+    expect(p.data[1]).toBeLessThanOrEqual(1);
+    let r = p.data[0];
+    let a = p.data[1];
+    run(() => {
+      p.step(false, 0, DT, 1);
+      if (p.data[1] > 0) {
+        expect(p.data[0]).toBeGreaterThan(r);
+        expect(p.data[1]).toBeLessThan(a);
+        r = p.data[0];
+        a = p.data[1];
+      }
+    }, 0.5);
+    run(() => p.step(false, 0, DT, 1), 3);
+    expect(p.data[1]).toBe(0); // gone
+  });
+
+  it("holds at most PULSES; Reactivity 0 sends none; amplitude scales with onset strength", () => {
+    const p = createPulses();
+    run((dt, i) => p.step(i % 5 === 0, 1, dt, 2), 2);
+    expect(p.data.length).toBe(2 * PULSES);
+    for (let i = 1; i < p.data.length; i += 2) expect(p.data[i]).toBeLessThanOrEqual(1);
+    const none = createPulses();
+    none.step(true, 1, DT, 0);
+    expect(Math.max(...none.data)).toBe(0);
+    const weak = createPulses();
+    const strong = createPulses();
+    weak.step(true, 0.2, DT, 1);
+    strong.step(true, 1, DT, 1);
+    expect(strong.data[1]).toBeGreaterThan(weak.data[1]);
+  });
+});
+
+describe("createCloudLight", () => {
+  it("the clouds brighten with the bass, smoothly and bounded; silence and Reactivity 0 leave them be", () => {
+    const at = (/** @type {number} */ bassAtt, /** @type {number} */ react) => {
+      const l = createCloudLight();
+      let prev = 0;
+      run((dt) => {
+        l.step(bassAtt, 0.2, false, 0, dt, react);
+        expect(Math.abs(l.bright - prev)).toBeLessThan(0.15);
+        prev = l.bright;
+      }, 2);
+      return l.bright;
+    };
+    expect(at(0, 1)).toBe(0);
+    expect(at(1.8, 1)).toBeGreaterThan(at(1, 1));
+    expect(at(1.8, 1)).toBeGreaterThan(0.5);
+    expect(at(2, 2)).toBeLessThanOrEqual(1);
+    expect(at(1.8, 0)).toBe(0);
+  });
+
+  it("a beat pulses the ring's rim light on the clouds: eased in, then fading", () => {
+    const l = createCloudLight();
+    l.step(1, 0.2, true, 0.9, DT, 1);
+    const first = l.rim;
+    let peak = 0;
+    run(() => {
+      l.step(1, 0.2, false, 0, DT, 1);
+      peak = Math.max(peak, l.rim);
+    }, 0.3);
+    expect(first).toBeLessThan(0.5 * peak);
+    expect(peak).toBeGreaterThan(0.4);
+    run(() => l.step(1, 0.2, false, 0, DT, 1), 2);
+    expect(l.rim).toBeLessThan(0.02);
+  });
+});
+
+describe("createBillows", () => {
+  const levels = new Float32Array(SECTORS);
+  for (let k = -3; k <= 3; k++) levels[60 + k] = levels[SECTORS - 1 - 60 - k] = 1;
+
+  it("a strong beat spawns a billow of ink at the ring's edge, at the loudest angle, drifting outward", () => {
+    const b = createBillows();
+    b.step(true, 0.9, levels, DT, 1);
+    const ang = b.data[0];
+    expect(Math.abs(Math.abs(ang) - Math.abs(angleOf(60)))).toBeLessThan(0.05);
+    expect(b.data[1]).toBeLessThan(0.1); // at the ring's edge
+    expect(b.data[2]).toBeLessThan(0.2); // it grows in (no pop)…
+    let peak = 0;
+    let r = b.data[1];
+    run(() => {
+      b.step(false, 0, levels, DT, 1);
+      peak = Math.max(peak, b.data[2]);
+      expect(b.data[1]).toBeGreaterThanOrEqual(r); // …drifts outward…
+      r = b.data[1];
+    }, 1.5);
+    expect(peak).toBeGreaterThan(0.5);
+    expect(r).toBeGreaterThan(0.15);
+    run(() => b.step(false, 0, levels, DT, 1), 8);
+    expect(b.data[2]).toBe(0); // …and dissolves
+  });
+
+  it("alternates sides of the mirrored spectrum; weak onsets and Reactivity 0 spawn none; bounded", () => {
+    const b = createBillows();
+    b.step(true, 0.9, levels, DT, 1);
+    run(() => b.step(false, 0, levels, DT, 1), 0.5);
+    b.step(true, 0.9, levels, DT, 1);
+    expect(Math.sign(b.data[0])).toBe(-Math.sign(b.data[4]));
+    const weak = createBillows();
+    weak.step(true, 0.3, levels, DT, 1);
+    const off = createBillows();
+    off.step(true, 1, levels, DT, 0);
+    expect(Math.max(...weak.data, ...off.data)).toBe(0);
+    const many = createBillows();
+    run((dt, i) => many.step(i % 10 === 0, 1, levels, dt, 2), 4);
+    expect(many.data.length).toBe(4 * BILLOWS);
+    for (let i = 2; i < many.data.length; i += 4) expect(many.data[i]).toBeLessThanOrEqual(1);
   });
 });

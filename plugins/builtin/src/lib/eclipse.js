@@ -175,7 +175,7 @@ const SWELL_WEIGHT = 0.5;
 
 /**
  * Photosensitivity: the frame's audio-driven extra brightness — the ring's bass swell (its glow
- * and width) plus the brightest flare — goes through the flash limiter (lib/flash.js). `scale`
+ * and width) plus the brightest flare plus the background's brightening — goes through the flash limiter (lib/flash.js). `scale`
  * (0–1) is what to multiply both by this frame: 1 unless the limiter is holding back a rise.
  */
 export function createGlare() {
@@ -189,11 +189,13 @@ export function createGlare() {
      * @param {Float32Array} flares createFlares().data
      * @param {number} dt seconds
      * @param {boolean} enabled `ctx.reduceFlashing`
+     * @param {number} [extra] the background's audio-driven brightening (clouds, rim light, sky
+     *   rays, the water's streak), in the same units; `scale` applies to it too
      */
-    step(swell, flares, dt, enabled) {
+    step(swell, flares, dt, enabled, extra = 0) {
       let top = 0;
       for (let i = 1; i < flares.length; i += 2) if (flares[i] > top) top = flares[i];
-      const target = SWELL_WEIGHT * swell + top;
+      const target = SWELL_WEIGHT * swell + top + (extra > 0 ? extra : 0);
       g.level = flash.step(target, dt, enabled);
       g.scale = target > 1e-6 ? Math.min(1, g.level / target) : 1;
     },
@@ -326,4 +328,285 @@ export function cloudThreshold(clouds, mid) {
   const c = clouds > 0 ? (clouds < 1 ? clouds : 1) : 0; // NaN → 0
   const m = mid > 0 ? (mid < 1 ? mid : 1) : 0;
   return 0.16 - 0.28 * c - 0.06 * m;
+}
+
+/** Clamp to 0–1 (NaN → 0). @param {number} x */
+const unit = (x) => (x > 0 ? (x < 1 ? x : 1) : 0);
+
+/** Loudness (raw `rms`) mapped to 0–1: ~0 below RMS_FLOOR, 1 at RMS_FULL. */
+const RMS_FLOOR = 0.005;
+const RMS_FULL = 0.25;
+/** Energy envelope (s): rises quickly with the music, settles slowly. */
+const ENERGY_ATTACK = 0.25;
+const ENERGY_RELEASE = 1.2;
+/** Cloud orbit (rad/s): a drift in silence, ORBIT_LOUD at full energy. */
+const ORBIT_IDLE = 0.012;
+const ORBIT_LOUD = 0.22;
+/** A beat's surge (rad/s at full strength): eased in over SURGE_RISE, fading over SURGE_DECAY. */
+const ORBIT_SURGE = 0.35;
+const SURGE_RISE = 0.06;
+const SURGE_DECAY = 0.4;
+/** The clouds' formation clock (noise-time units/s): masses form and dissolve this fast. */
+const EVOLVE_IDLE = 0.03;
+const EVOLVE_LOUD = 0.32;
+
+/**
+ * The clouds' orbital flow around the eclipse: `energy` (0–1) follows the raw loudness (`rms`,
+ * absolute — a quiet passage stays quiet) weighted by the bass, smoothed; `speed` (rad/s) is a
+ * slow drift plus energy plus a beat `surge` (0–1: each onset kicks an impulse that the surge
+ * eases toward and then follows down, so it never jumps); `angle` integrates it. `evolve` is the
+ * clouds' formation clock (the time axis of their noise): it runs faster with energy and beats,
+ * so masses grow, dissolve and re-form faster when the music is loud.
+ */
+export function createFlow() {
+  let kick = 0;
+  const f = {
+    surge: 0,
+    energy: 0,
+    speed: ORBIT_IDLE,
+    angle: 0,
+    evolve: 0,
+    /**
+     * @param {number} rms `audio.rms`
+     * @param {number} bassAtt `audio.bassAtt`
+     * @param {boolean} onset `audio.onset`
+     * @param {number} strength `audio.onsetStrength`
+     * @param {number} dt seconds
+     * @param {number} reactivity 0–2
+     * @param {number} [drift] effectiveMotion's drift: Reduce motion slows the flow by it
+     */
+    step(rms, bassAtt, onset, strength, dt, reactivity, drift = 1) {
+      const loud = unit((rms - RMS_FLOOR) / (RMS_FULL - RMS_FLOOR));
+      const target = loud * (0.6 + 0.4 * unit(bassAtt / 1.5));
+      const tau = target > f.energy ? ENERGY_ATTACK : ENERGY_RELEASE;
+      f.energy += (target - f.energy) * (1 - Math.exp(-dt / tau));
+      const react = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
+      kick *= Math.exp(-dt / SURGE_DECAY);
+      if (onset) kick = unit(kick + unit(strength));
+      f.surge += (kick - f.surge) * (1 - Math.exp(-dt / SURGE_RISE));
+      f.speed = (ORBIT_IDLE + (ORBIT_LOUD * f.energy + ORBIT_SURGE * f.surge) * react) * drift;
+      f.angle = (f.angle + f.speed * dt) % (2 * Math.PI);
+      const rate = EVOLVE_IDLE + EVOLVE_LOUD * (0.8 * f.energy + 0.4 * f.surge) * react;
+      f.evolve = (f.evolve + rate * drift * dt) % 1000;
+    },
+  };
+  return f;
+}
+
+/** Sectors the cloud bias is blurred over on each side (a triangle): broad banks, not wedges. */
+const BIAS_SPREAD = 16;
+/** Bias gain (× level above the ring's mean) and time constants (s). */
+const BIAS_GAIN = 2.5;
+const BIAS_ATTACK = 0.12;
+const BIAS_RELEASE = 0.5;
+
+/**
+ * The clouds' density bias by angle, echoing the corona: the corona levels (createCorona) blurred
+ * broadly around the ring, minus their mean, × Reactivity — positive where the spectrum is loud
+ * (the ink billows outward), negative where it's quiet (it thins). −1..1 per sector, smoothed.
+ * @param {number} [count]
+ */
+export function createCloudBias(count = SECTORS) {
+  const out = new Float32Array(count);
+  const blur = new Float32Array(count);
+  return {
+    out,
+    /**
+     * @param {Float32Array} levels createCorona().levels
+     * @param {number} dt seconds
+     * @param {number} reactivity 0–2
+     */
+    step(levels, dt, reactivity) {
+      let mean = 0;
+      const norm = BIAS_SPREAD + 1;
+      for (let i = 0; i < count; i++) {
+        let s = levels[i] * norm;
+        for (let k = 1; k <= BIAS_SPREAD; k++) {
+          const w = norm - k;
+          s += (levels[(i + k) % count] + levels[(i - k + count) % count]) * w;
+        }
+        blur[i] = s / (norm * norm);
+        mean += blur[i];
+      }
+      mean /= count;
+      const react = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
+      const ka = 1 - Math.exp(-dt / BIAS_ATTACK);
+      const kr = 1 - Math.exp(-dt / BIAS_RELEASE);
+      for (let i = 0; i < count; i++) {
+        let t = (blur[i] - mean) * BIAS_GAIN * react;
+        t = t > -1 ? (t < 1 ? t : 1) : t <= -1 ? -1 : 0; // NaN → 0
+        const d = t - out[i];
+        out[i] += d * (Math.abs(t) > Math.abs(out[i]) ? ka : kr);
+      }
+    },
+  };
+}
+
+/** Sky pulse pool size (uniform vec2 array length in the shaders). */
+export const PULSES = 4;
+/** Sky pulse speed (units/s), amplitude decay (s), and where it's gone (past the ring's edge). */
+const PULSE_SPEED = 0.7;
+const PULSE_DECAY = 0.7;
+const PULSE_END = 2.2;
+
+/**
+ * Sky pulses: each onset sends a wave outward from the ring's outer edge across the whole sky —
+ * the faint rays light up as it passes and it pushes the clouds outward (a shockwave). Like
+ * createFlares but slower, longer-lived and farther-reaching. `data` holds PULSES × (distance past
+ * the ring's outer edge, amplitude 0–1); amplitude 0 = free slot; a new onset takes a free slot,
+ * else the farthest pulse's.
+ */
+export function createPulses() {
+  const data = new Float32Array(2 * PULSES);
+  return {
+    data,
+    /**
+     * @param {boolean} onset `audio.onset`
+     * @param {number} strength `audio.onsetStrength` (≈0–1)
+     * @param {number} dt seconds
+     * @param {number} reactivity 0–2 (amplitude × min(1, reactivity))
+     */
+    step(onset, strength, dt, reactivity) {
+      const fade = Math.exp(-dt / PULSE_DECAY);
+      for (let i = 0; i < PULSES; i++) {
+        if (data[2 * i + 1] <= 0) continue;
+        data[2 * i] += PULSE_SPEED * dt;
+        data[2 * i + 1] *= fade;
+        if (data[2 * i + 1] < FLARE_MIN || data[2 * i] > PULSE_END) data[2 * i] = data[2 * i + 1] = 0;
+      }
+      if (!onset) return;
+      const amp = (0.3 + 0.7 * unit(strength)) * unit(reactivity);
+      if (amp < FLARE_MIN) return;
+      let slot = 0;
+      for (let i = 0; i < PULSES; i++) {
+        if (data[2 * i + 1] <= 0) {
+          slot = i;
+          break;
+        }
+        if (data[2 * i] > data[2 * slot]) slot = i;
+      }
+      data[2 * slot] = 0;
+      data[2 * slot + 1] = amp;
+    },
+  };
+}
+
+/** Cloud light time constants (s): bass brightening, and the beat rim pulse's rise and fall. */
+const BRIGHT_ATTACK = 0.12;
+const BRIGHT_RELEASE = 0.5;
+const RIM_RISE = 0.05;
+const RIM_DECAY = 0.3;
+
+/**
+ * The clouds' light: `bright` (0–1) follows the bass (`bassAtt` above ~0.6 of its average, gated
+ * by the raw level so silence stays dark) × Reactivity, smoothed; `rim` (0–1) is the ring's rim
+ * light on the clouds, which pulses on beats (an impulse the light eases toward, then fades).
+ * Both are part of the glare (createGlare `extra`), so they're flash-limited with the ring.
+ */
+export function createCloudLight() {
+  let kick = 0;
+  const l = {
+    bright: 0,
+    rim: 0,
+    /**
+     * @param {number} bassAtt `audio.bassAtt`
+     * @param {number} rms `audio.rms`
+     * @param {boolean} onset `audio.onset`
+     * @param {number} strength `audio.onsetStrength`
+     * @param {number} dt seconds
+     * @param {number} reactivity 0–2
+     */
+    step(bassAtt, rms, onset, strength, dt, reactivity) {
+      const react = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
+      const gate = unit((rms - RMS_FLOOR) / 0.05);
+      const target = unit(((bassAtt - 0.6) / 1.2) * gate * react);
+      const tau = target > l.bright ? BRIGHT_ATTACK : BRIGHT_RELEASE;
+      l.bright += (target - l.bright) * (1 - Math.exp(-dt / tau));
+      kick *= Math.exp(-dt / RIM_DECAY);
+      if (onset) kick = unit(Math.max(kick, unit(strength) * unit(react)));
+      l.rim += (kick - l.rim) * (1 - Math.exp(-dt / RIM_RISE));
+    },
+  };
+  return l;
+}
+
+/** Billow pool size (uniform vec4 array length in clouds.frag). */
+export const BILLOWS = 6;
+/** Onset strength a beat needs to spawn a billow (hats don't). */
+const BILLOW_MIN_STRENGTH = 0.5;
+/** Billow drift (units/s), rise (s), life (s, exponential), and where it's gone. */
+const BILLOW_SPEED = 0.18;
+const BILLOW_RISE = 0.6;
+const BILLOW_LIFE = 2.2;
+const BILLOW_END = 1.8;
+
+/**
+ * Beat billows: a strong onset spawns a new mass of ink at the ring's outer edge, at the angle
+ * where the spectrum is loudest (alternating between the mirrored sides), which swells in, drifts
+ * outward and dissolves. `data` holds BILLOWS × (angle rad as in createCorona, distance past the
+ * ring's outer edge, amplitude 0–1, seed 0–1); amplitude 0 = free slot; a new billow takes a free
+ * slot, else the oldest's.
+ */
+export function createBillows() {
+  const data = new Float32Array(4 * BILLOWS);
+  const age = new Float32Array(BILLOWS);
+  const peak = new Float32Array(BILLOWS);
+  let side = 1;
+  let spawned = 0;
+  return {
+    data,
+    /**
+     * @param {boolean} onset `audio.onset`
+     * @param {number} strength `audio.onsetStrength`
+     * @param {Float32Array} levels createCorona().levels
+     * @param {number} dt seconds
+     * @param {number} reactivity 0–2 (amplitude × min(1, reactivity))
+     */
+    step(onset, strength, levels, dt, reactivity) {
+      for (let i = 0; i < BILLOWS; i++) {
+        if (peak[i] <= 0) continue;
+        age[i] += dt;
+        const a = age[i];
+        const x = a < BILLOW_RISE ? a / BILLOW_RISE : 1;
+        data[4 * i + 1] += BILLOW_SPEED * dt;
+        data[4 * i + 2] = peak[i] * x * x * (3 - 2 * x) * Math.exp(-a / BILLOW_LIFE);
+        if ((a > BILLOW_RISE && data[4 * i + 2] < FLARE_MIN) || data[4 * i + 1] > BILLOW_END) {
+          peak[i] = age[i] = 0;
+          data[4 * i] = data[4 * i + 1] = data[4 * i + 2] = data[4 * i + 3] = 0;
+        }
+      }
+      if (!onset || !(strength >= BILLOW_MIN_STRENGTH)) return;
+      const amp = (0.35 + 0.65 * unit(strength)) * unit(reactivity);
+      if (amp < FLARE_MIN) return;
+      // The loudest sector on this side (sectors count/2… are the right half, angle > 0).
+      const n = levels.length;
+      const h = n >> 1;
+      let best = h;
+      let last = h; // the end of a plateau of equal maxima: spawn at its middle
+      let top = -1;
+      for (let i = h; i < n; i++) {
+        const v = side > 0 ? levels[i] : levels[n - 1 - i];
+        if (v > top) {
+          top = v;
+          best = last = i;
+        } else if (v === top && last === i - 1) last = i;
+      }
+      const ang = (((best + last) / 2 + 0.5) / n - 0.5) * 2 * Math.PI * side;
+      let slot = 0;
+      for (let i = 0; i < BILLOWS; i++) {
+        if (peak[i] <= 0) {
+          slot = i;
+          break;
+        }
+        if (age[i] > age[slot]) slot = i;
+      }
+      peak[slot] = amp;
+      age[slot] = 0;
+      data[4 * slot] = ang;
+      data[4 * slot + 1] = 0;
+      data[4 * slot + 2] = 0;
+      data[4 * slot + 3] = (spawned++ * 0.618034) % 1;
+      side = -side;
+    },
+  };
 }
