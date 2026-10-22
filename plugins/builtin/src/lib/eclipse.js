@@ -241,17 +241,39 @@ export function skyAlpha(name) {
 /** Margin around the composition's unit circle, as a fraction of min(width, height). */
 const MARGIN = 0.03;
 
+/** Water options, as in the manifest's `water` param (default low). */
+export const WATERS = ["off", "low", "mid"];
+/** Waterline height (fraction of the canvas height) per water option. */
+const WATERLINE = [0, 0.22, 0.36];
+/** With water, the eclipse's centre sits this many composition radii above the waterline. */
+const LIFT = 0.85;
+
 /**
  * Layout for any aspect: the composition's unit circle (the corona's full reach) is centred and
- * fits min(width, height) with a margin; clouds spill beyond it into the corners.
+ * fits min(width, height) with a margin; clouds spill beyond it into the corners. With water
+ * ("low", "mid"; unknown → "low"), `horizon` is the waterline in px from the bottom and the
+ * composition sits above it — its centre LIFT radii up, its top inside the canvas — so the ring
+ * stands clear of the water; "off" → horizon 0.
  * @param {number} width drawing-buffer px
  * @param {number} height
- * @param {{ cx: number, cy: number, radius: number }} out
+ * @param {{ cx: number, cy: number, radius: number, horizon?: number }} out
+ * @param {unknown} [water]
  */
-export function fitEclipse(width, height, out) {
+export function fitEclipse(width, height, out, water = "off") {
+  const wi = WATERS.indexOf(String(water));
+  const line = WATERLINE[wi < 0 ? 1 : wi];
   out.cx = width / 2;
-  out.cy = height / 2;
-  out.radius = Math.max(1, (Math.min(width, height) / 2) * (1 - 2 * MARGIN));
+  if (line === 0) {
+    out.cy = height / 2;
+    out.radius = Math.max(1, (Math.min(width, height) / 2) * (1 - 2 * MARGIN));
+    out.horizon = 0;
+    return out;
+  }
+  const horizon = line * height;
+  const m = MARGIN * Math.min(width, height);
+  out.radius = Math.max(1, Math.min(width / 2 - m, (height - horizon - m) / (1 + LIFT)));
+  out.cy = horizon + LIFT * out.radius;
+  out.horizon = horizon;
   return out;
 }
 
@@ -327,7 +349,7 @@ export function createRipple(count = SECTORS) {
 export function cloudThreshold(clouds, mid) {
   const c = clouds > 0 ? (clouds < 1 ? clouds : 1) : 0; // NaN → 0
   const m = mid > 0 ? (mid < 1 ? mid : 1) : 0;
-  return 0.16 - 0.28 * c - 0.06 * m;
+  return 0.18 - 0.26 * c - 0.12 * m;
 }
 
 /** Clamp to 0–1 (NaN → 0). @param {number} x */
@@ -609,4 +631,93 @@ export function createBillows() {
       side = -side;
     },
   };
+}
+
+/** Water ring pool size (uniform vec4 array length in water.frag). */
+export const RINGS = 4;
+/** Ripple level in silence, and the waveform rms that makes the water fully choppy. */
+const CHOP_IDLE = 0.06;
+const CHOP_FULL = 0.2;
+const CHOP_ATTACK = 0.08;
+const CHOP_RELEASE = 0.3;
+/** Bass swell envelope (s): long waves build up and die down slowly. */
+const SWELL_UP = 0.4;
+const SWELL_DOWN = 1.2;
+/** Rolling-wave phase speed (wave periods/s) at rest and added at full swell. */
+const ROLL_IDLE = 0.25;
+const ROLL_BASS = 0.9;
+/** The sun's streak on the water (its length follows the bass): rise and fall (s). */
+const STREAK_UP = 0.15;
+const STREAK_DOWN = 0.6;
+/** Beat rings: spread speed (water-plane units/s), amplitude decay (s), and where they're gone. */
+const RING_SPEED = 0.6;
+const RING_DECAY = 1.0;
+const RING_END = 4;
+
+/**
+ * The water's motion (shaders/eclipse/water.frag). `chop` (0–1): the waveform's level (rms of its
+ * newest 512 samples) keeps small ripples running — calm in silence, choppy when loud. `swell`
+ * (0–1): the bass builds long rolling waves, slowly; `roll` is their phase, advancing faster with
+ * the swell. `streak` (0–1): the length of the sun's vertical streak on the water, from the bass.
+ * `rings`: each onset drops a ring wave at a spot on the water (scattered round the sun's
+ * reflection) that spreads and fades — RINGS × (x, z, radius, amplitude 0–1) in water-plane units
+ * (z = depth, 1 at the canvas's bottom edge; x across, × z per screen height); amplitude 0 = free.
+ */
+export function createWater() {
+  const rings = new Float32Array(4 * RINGS);
+  let dropped = 0;
+  const w = {
+    rings,
+    chop: CHOP_IDLE,
+    swell: 0,
+    roll: 0,
+    streak: 0,
+    /**
+     * @param {ArrayLike<number>} wave `audio.waveform` (any length)
+     * @param {number} bassAtt `audio.bassAtt`
+     * @param {boolean} onset `audio.onset`
+     * @param {number} strength `audio.onsetStrength`
+     * @param {number} dt seconds
+     * @param {number} reactivity 0–2
+     */
+    step(wave, bassAtt, onset, strength, dt, reactivity) {
+      const react = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
+      const n = wave.length;
+      const from = n > 512 ? n - 512 : 0;
+      let sum = 0;
+      for (let i = from; i < n; i++) sum += wave[i] * wave[i];
+      const level = n > from ? Math.sqrt(sum / (n - from)) : 0;
+      const target = CHOP_IDLE + (1 - CHOP_IDLE) * unit((level / CHOP_FULL) * react);
+      const tau = target > w.chop ? CHOP_ATTACK : CHOP_RELEASE;
+      w.chop += (target - w.chop) * (1 - Math.exp(-dt / tau));
+      const bass = unit(((bassAtt - 0.5) / 1.2) * react);
+      w.swell += (bass - w.swell) * (1 - Math.exp(-dt / (bass > w.swell ? SWELL_UP : SWELL_DOWN)));
+      w.roll = (w.roll + (ROLL_IDLE + ROLL_BASS * w.swell) * dt) % 1000;
+      w.streak += (bass - w.streak) * (1 - Math.exp(-dt / (bass > w.streak ? STREAK_UP : STREAK_DOWN)));
+      const fade = Math.exp(-dt / RING_DECAY);
+      for (let i = 0; i < RINGS; i++) {
+        if (rings[4 * i + 3] <= 0) continue;
+        rings[4 * i + 2] += RING_SPEED * dt;
+        rings[4 * i + 3] *= fade;
+        if (rings[4 * i + 3] < FLARE_MIN || rings[4 * i + 2] > RING_END) rings.fill(0, 4 * i, 4 * i + 4);
+      }
+      if (!onset) return;
+      const amp = (0.3 + 0.7 * unit(strength)) * unit(react);
+      if (amp < FLARE_MIN) return;
+      let slot = 0;
+      for (let i = 0; i < RINGS; i++) {
+        if (rings[4 * i + 3] <= 0) {
+          slot = i;
+          break;
+        }
+        if (rings[4 * i + 2] > rings[4 * slot + 2]) slot = i;
+      }
+      const k = dropped++;
+      rings[4 * slot] = 0.45 * Math.sin(2.39996 * k);
+      rings[4 * slot + 1] = 1.5 + 1.5 * ((k * 0.618034) % 1);
+      rings[4 * slot + 2] = 0;
+      rings[4 * slot + 3] = amp;
+    },
+  };
+  return w;
 }

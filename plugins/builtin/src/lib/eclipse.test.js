@@ -17,6 +17,9 @@ import {
   createCloudLight,
   createBillows,
   BILLOWS,
+  WATERS,
+  createWater,
+  RINGS,
   PULSES,
   DEFAULT_REACTIVITY,
   DEFAULT_ROTATION,
@@ -307,6 +310,38 @@ describe("fitEclipse", () => {
     fitEclipse(0, 0, out);
     expect(out.radius).toBeGreaterThan(0); // never divides by zero
   });
+
+  it("with water, a waterline (px from the bottom) and the eclipse lifted above it, ring clear", () => {
+    expect(WATERS).toEqual(["off", "low", "mid"]);
+    const out = { cx: 0, cy: 0, radius: 0, horizon: -1 };
+    fitEclipse(2560, 1440, out, "off");
+    expect(out.horizon).toBe(0);
+    expect(out.cy).toBe(720);
+    let prev = 0;
+    for (const water of ["low", "mid"]) {
+      for (const [w, h] of [
+        [2560, 1440],
+        [1440, 2560],
+        [3440, 1440],
+      ]) {
+        fitEclipse(w, h, out, water);
+        expect(out.cx).toBe(w / 2);
+        expect(out.horizon).toBeGreaterThan(0.15 * h);
+        expect(out.horizon).toBeLessThan(0.45 * h);
+        expect(out.cy - (DISC + 0.25) * out.radius).toBeGreaterThan(out.horizon); // ring clears it
+        expect(out.cy + out.radius).toBeLessThanOrEqual(h); // the corona's reach fits above
+        expect(out.radius).toBeLessThanOrEqual(w / 2);
+        expect(out.radius).toBeGreaterThan(0.25 * Math.min(w, h));
+      }
+      fitEclipse(2560, 1440, out, water);
+      expect(out.horizon).toBeGreaterThan(prev); // mid sits higher than low
+      prev = out.horizon;
+    }
+    fitEclipse(2560, 1440, out, "bogus");
+    const low = { cx: 0, cy: 0, radius: 0, horizon: 0 };
+    fitEclipse(2560, 1440, low, "low");
+    expect(out).toEqual(low); // unknown → the default, low
+  });
 });
 
 describe("effectiveMotion", () => {
@@ -368,6 +403,10 @@ describe("cloudThreshold", () => {
       expect(th).toBeLessThanOrEqual(0.2);
     }
     expect(Math.abs(cloudThreshold(0.5, 0.51) - cloudThreshold(0.5, 0.5))).toBeLessThan(0.002);
+  });
+
+  it("the mids erode and spread the ink strongly: full mids shift the edge by ≥ 0.1", () => {
+    expect(cloudThreshold(0.45, 0) - cloudThreshold(0.45, 1)).toBeGreaterThanOrEqual(0.1);
   });
 });
 
@@ -600,5 +639,73 @@ describe("createBillows", () => {
     run((dt, i) => many.step(i % 10 === 0, 1, levels, dt, 2), 4);
     expect(many.data.length).toBe(4 * BILLOWS);
     for (let i = 2; i < many.data.length; i += 4) expect(many.data[i]).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("createWater", () => {
+  /** A waveform of amplitude `a` (a 110 Hz sine). @param {number} a */
+  const wave = (a) => Float32Array.from({ length: 2048 }, (_, i) => a * Math.sin((2 * Math.PI * 110 * i) / SR));
+
+  it("the waveform keeps small ripples running: calm in silence, choppy when loud; smooth, bounded", () => {
+    const chop = (/** @type {number} */ a) => {
+      const w = createWater();
+      const wf = wave(a);
+      let prev = 0;
+      run((dt, i) => {
+        w.step(wf, 1, false, 0, dt, 1);
+        if (i > 0) expect(Math.abs(w.chop - prev)).toBeLessThan(0.2);
+        prev = w.chop;
+      }, 1);
+      return w.chop;
+    };
+    expect(chop(0)).toBeLessThan(0.15);
+    expect(chop(0.05)).toBeGreaterThan(chop(0));
+    expect(chop(0.5)).toBeGreaterThan(0.6);
+    expect(chop(1)).toBeLessThanOrEqual(1);
+  });
+
+  it("bass swells long rolling waves (slowly) and stretches the sun's streak; frame-rate independent", () => {
+    const at = (/** @type {number} */ bassAtt, /** @type {number} */ dt) => {
+      const w = createWater();
+      const wf = wave(0.2);
+      run(() => w.step(wf, bassAtt, false, 0, dt, 1), 3, dt);
+      return w;
+    };
+    const calm = at(0, DT);
+    const big = at(1.8, DT);
+    expect(calm.swell).toBeLessThan(0.05);
+    expect(big.swell).toBeGreaterThan(0.6);
+    expect(big.swell).toBeLessThanOrEqual(1);
+    expect(big.roll).toBeGreaterThan(calm.roll); // the swells roll in faster
+    expect(big.streak).toBeGreaterThan(calm.streak + 0.4);
+    const b120 = at(1.8, 1 / 120);
+    expect(b120.swell).toBeCloseTo(big.swell, 2);
+    expect(b120.roll).toBeCloseTo(big.roll, 1);
+    // Slow: a bass hit doesn't jump the swell in a frame.
+    const w = createWater();
+    w.step(wave(0.2), 2, false, 0, DT, 1);
+    expect(w.swell).toBeLessThan(0.1);
+  });
+
+  it("beats send rings across the water: each spreads from a spot on the surface and fades", () => {
+    const w = createWater();
+    const wf = wave(0.2);
+    w.step(wf, 1, true, 0.9, DT, 1);
+    const [x, z, r0, a0] = w.rings.slice(0, 4);
+    expect(Math.abs(x)).toBeLessThan(1); // near the sun's reflection…
+    expect(z).toBeGreaterThan(1); // …out on the water (z = 1 at the bottom edge)
+    expect(a0).toBeGreaterThan(0.5);
+    run(() => w.step(wf, 1, false, 0, DT, 1), 1);
+    expect(w.rings[2]).toBeGreaterThan(r0 + 0.2);
+    expect(w.rings[3]).toBeLessThan(a0);
+    expect(w.rings[0]).toBe(x); // the spot stays put
+    run(() => w.step(wf, 1, false, 0, DT, 1), 6);
+    expect(w.rings[3]).toBe(0);
+    const many = createWater();
+    run((dt, i) => many.step(wf, 1, i % 7 === 0, 1, dt, 2), 3);
+    expect(many.rings.length).toBe(4 * RINGS);
+    const off = createWater();
+    off.step(wf, 1, true, 1, DT, 0);
+    expect(off.rings[3]).toBe(0);
   });
 });
