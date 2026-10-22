@@ -346,11 +346,16 @@ def test_tiedye_manifest():
         "speed",
         "bleed",
         "reactivity",
+        "motion",
         "bloom",
     ]
-    # Option order is the shader index order in lib/tiedye.js (PATTERNS, PALETTES, FABRICS).
-    assert params["pattern"]["options"] == ["spiral", "bullseye", "crumple", "shibori"]
-    assert params["pattern"]["default"] == "spiral"
+    # Option order is lib/tiedye.js PATTERN_OPTIONS ("auto", then the shader index order of
+    # PATTERNS), PALETTES, FABRICS. "auto" morphs between the patterns with the song.
+    assert params["pattern"]["options"] == ["auto", "spiral", "bullseye", "crumple", "shibori"]
+    assert params["pattern"]["default"] == "auto"
+    # lib/tiedye.js DEFAULT_MOTION: Reduce motion calms the flow only while Motion is at this default.
+    assert params["motion"]["default"] == 1
+    assert params["motion"]["min"] == 0
     assert params["palette"]["options"] == ["rainbow", "sunset", "ocean", "neon"]
     assert params["palette"]["default"] == "rainbow"
     assert params["fabric"]["options"] == ["white", "none"]

@@ -265,6 +265,9 @@ async function main() {
       for (const n in m) motion[n].push(m[n]);
       if (audio.onset && audio.onsetStrength >= 0.8) beats.push(motion[Object.keys(m)[0]].length - 1);
     }
+    // Measurement hook (e.g. motion.py injects one): runs right after the frame, while the canvas
+    // still holds it.
+    w.__afterFrame?.(canvas, audio, time);
     if (still && frames >= still) {
       w.__still = true;
       return;
