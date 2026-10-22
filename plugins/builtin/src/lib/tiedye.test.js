@@ -70,6 +70,16 @@ describe("createBandWidths", () => {
     expect(at[0]).toBeCloseTo(at[1], 2);
   });
 
+  it("answers the mix quickly and visibly: a region that comes in takes over within a quarter second", () => {
+    const bw = createBandWidths();
+    const quiet = new Float32Array(64);
+    for (let f = 0; f < 60; f++) bw.step(quiet, 6, 1 / 60, 1);
+    const loud = regionBands(6, 0, 1, 0);
+    let w = bw.step(loud, 6, 1 / 60, 1);
+    for (let f = 1; f < 15; f++) w = bw.step(loud, 6, 1 / 60, 1);
+    expect(w[0]).toBeGreaterThan(0.4);
+  });
+
   it("is monotonic in each region's energy", () => {
     for (let k = 0; k < 6; k++) {
       let prev = 0;
