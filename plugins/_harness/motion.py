@@ -37,12 +37,12 @@ WIN = 9  # 150 ms at 60 Hz
 
 
 def beat_response(m: list[float], beats: list[int]) -> float:
-    """Mean motion over the WIN frames after each beat / the WIN frames before it."""
+    """Mean motion over the WIN frames from each beat on / the WIN frames before it."""
     after, before = [], []
     for b in beats:
         if b - WIN < 0 or b + WIN >= len(m):
             continue
-        after += m[b + 1 : b + 1 + WIN]
+        after += m[b : b + WIN]  # the beat frame is the first drawn with the onset
         before += m[b - WIN : b]
     if not before:
         return 0.0

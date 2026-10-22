@@ -214,6 +214,7 @@ export const REDUCED_REACTIVITY = 0.6;
  * @property {number} beam
  * @property {number} sunSize
  * @property {number} motion scale for every slow drift and rotation
+ * @property {number} [rise] set per frame by the plugin (createSunMood), for layout
  */
 
 /**
@@ -350,7 +351,7 @@ export function createEnergy() {
 }
 
 /**
- * A beat's kick to the landscape, 0–1: reactivity · onset strength · an energy gate that leaves a
+ * A beat's kick to the landscape, 0–1: reactivity · onset strength² (weak transients barely count) · an energy gate that leaves a
  * quiet passage's beats a nudge (0.08 + 0.92 · energy^1.5). 0 without an onset; NaN reads as 0.
  * @param {boolean} onset `audio.onset`
  * @param {number} strength `audio.onsetStrength`
@@ -360,17 +361,18 @@ export function createEnergy() {
 export function beatHit(onset, strength, energy, reactivity) {
   if (!onset) return 0;
   const g = 0.08 + 0.92 * clamp(energy, 1) ** 1.5;
-  return clamp(clamp(reactivity, 2) * clamp(strength, 1) * g, 1);
+  const s = clamp(strength, 1);
+  return clamp(clamp(reactivity, 2) * s * s * g, 1);
 }
 
 /**
  * The washes' flow, in drift-clock units per second: REST in silence, up to REST + GAIN when loud,
  * plus up to SURGE for a moment after a beat; MAX bounds it.
  */
-export const FLOW = { REST: 0.7, GAIN: 3.3, SURGE: 3, MAX: 7 };
+export const FLOW = { REST: 0.7, GAIN: 2, SURGE: 9, MAX: 12 };
 /** Flow speed easing (s) and the beat surge's decay rate (1/s). */
-const FLOW_TAU = 0.12;
-const FLOW_DECAY = 4;
+const FLOW_TAU = 0.06;
+const FLOW_DECAY = 8;
 
 /**
  * The sky and ground washes' drift clock (`clock`, fed to the backdrop shader as its time) and
