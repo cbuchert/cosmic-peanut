@@ -299,3 +299,169 @@ export function createGlow() {
   };
   return g;
 }
+
+/** Loudness span (dBFS of `audio.rms`) mapped to 0–1: a quiet passage near 0, mastered music near 1. */
+export const LOUD_DB = [-42, -14];
+
+/**
+ * How loud the music is, absolutely: rms in dB across LOUD_DB, clamped to 0–1 (NaN → 0). The
+ * host's bass/mid/treb are relative to the last few seconds, so a long quiet passage reads as
+ * "average" there; this is what keeps quiet passages calm.
+ * @param {number} rms `audio.rms`
+ */
+export function loudness(rms) {
+  if (!(rms > 0)) return 0;
+  return clamp((20 * Math.log10(rms) - LOUD_DB[0]) / (LOUD_DB[1] - LOUD_DB[0]), 1);
+}
+
+/** Energy follower time constants (s): it swells within a beat or two and settles over a bar. */
+const ENERGY_ATTACK = 0.2;
+const ENERGY_RELEASE = 0.8;
+
+/** The music's energy: loudness() smoothed, quick up and slower down. 0–1. */
+export function createEnergy() {
+  const e = {
+    value: 0,
+    /** @param {number} rms `audio.rms` @param {number} dt seconds */
+    step(rms, dt) {
+      const x = loudness(rms);
+      e.value += (x - e.value) * (1 - Math.exp(-dt / (x > e.value ? ENERGY_ATTACK : ENERGY_RELEASE)));
+      return e.value;
+    },
+  };
+  return e;
+}
+
+/**
+ * A beat's kick to the landscape, 0–1: reactivity · onset strength · an energy gate that leaves a
+ * quiet passage's beats a nudge (0.08 + 0.92 · energy^1.5). 0 without an onset; NaN reads as 0.
+ * @param {boolean} onset `audio.onset`
+ * @param {number} strength `audio.onsetStrength`
+ * @param {number} energy createEnergy's value, 0–1
+ * @param {number} reactivity 0–2
+ */
+export function beatHit(onset, strength, energy, reactivity) {
+  if (!onset) return 0;
+  const g = 0.08 + 0.92 * clamp(energy, 1) ** 1.5;
+  return clamp(clamp(reactivity, 2) * clamp(strength, 1) * g, 1);
+}
+
+/**
+ * The washes' flow, in drift-clock units per second: REST in silence, up to REST + GAIN when loud,
+ * plus up to SURGE for a moment after a beat; MAX bounds it.
+ */
+export const FLOW = { REST: 0.7, GAIN: 3.3, SURGE: 3, MAX: 7 };
+/** Flow speed easing (s) and the beat surge's decay rate (1/s). */
+const FLOW_TAU = 0.12;
+const FLOW_DECAY = 4;
+
+/**
+ * The sky and ground washes' drift clock (`clock`, fed to the backdrop shader as its time) and
+ * turbulence (`turb`, 0–1: how hard the washes are warped). Drive = reactivity · energy; a beat
+ * (beatHit) surges both and they ease back. `motion` (Reduce motion) scales the clock.
+ */
+export function createFlow() {
+  let env = 0;
+  const f = {
+    clock: 0,
+    speed: FLOW.REST,
+    turb: 0.2,
+    /**
+     * @param {number} energy 0–1
+     * @param {number} hit beatHit, 0–1
+     * @param {number} dt seconds
+     * @param {number} reactivity 0–2
+     * @param {number} motion ≥ 0
+     */
+    step(energy, hit, dt, reactivity, motion) {
+      env *= Math.exp(-dt * FLOW_DECAY);
+      const h = clamp(hit, 1);
+      if (h > env) env = h;
+      const drive = clamp(clamp(reactivity, 2) * clamp(energy, 1), 1);
+      const k = 1 - Math.exp(-dt / FLOW_TAU);
+      const target = Math.min(FLOW.MAX, FLOW.REST + FLOW.GAIN * drive + FLOW.SURGE * env);
+      f.speed += (target - f.speed) * k;
+      f.turb += (clamp(0.2 + 0.6 * drive + 0.4 * env, 1) - f.turb) * k;
+      f.clock += clamp(motion, 4) * f.speed * dt;
+      return f;
+    },
+  };
+  return f;
+}
+
+/** Sky brightness multiplier, [sparse, open]; the cover's sky is 1. */
+export const SKY_BRIGHT = [0.85, 1.15];
+/** Spectral centroid (0–1 of Nyquist) read as dark → bright: most music sits in this span. */
+const CENTROID = [0.03, 0.2];
+/** Sky tone easing (s): the colour moves with the song's sections, not with single notes. */
+const SKY_TAU = 1;
+
+/**
+ * The sky's colour temperature (`warm`, 0 = cool ash … 1 = warm pink; 0.5 = the cover) and
+ * brightness (`bright`, SKY_BRIGHT) from spectral brightness (`audio.centroid`) and energy. Both
+ * ease over SKY_TAU, scaled about the cover's tone by reactivity (0 = the cover); the brightness
+ * target goes through the shared flash limiter first (a full-frame brightness change), so even a
+ * strobing input starts at most 3 brightenings a second.
+ */
+export function createSkyTone() {
+  const flash = createFlashLimiter();
+  let w = 0.5;
+  let b = 1;
+  const t = {
+    warm: 0.5,
+    bright: 1,
+    /**
+     * @param {number} centroid `audio.centroid`
+     * @param {number} energy createEnergy's value, 0–1
+     * @param {number} dt seconds
+     * @param {number} reactivity 0–2
+     * @param {boolean} reduceFlashing `ctx.reduceFlashing`
+     */
+    step(centroid, energy, dt, reactivity, reduceFlashing) {
+      const r = clamp(reactivity, 2);
+      const c = clamp((centroid - CENTROID[0]) / (CENTROID[1] - CENTROID[0]), 1);
+      const e = clamp(energy, 1);
+      const k = 1 - Math.exp(-dt / SKY_TAU);
+      w += (clamp(0.5 + r * (0.6 * c + 0.4 * e - 0.5), 1) - w) * k;
+      const span = (SKY_BRIGHT[1] - SKY_BRIGHT[0]) / 2;
+      const target = 1 + span * Math.max(-1, Math.min(1, r * 2 * (0.7 * e + 0.3 * c - 0.5)));
+      b += (flash.step(target, dt, reduceFlashing) - b) * k;
+      t.warm = w;
+      t.bright = b;
+      return t;
+    },
+  };
+  return t;
+}
+
+/** How quickly (s) the breath fades in once the host has a tempo, and out when it loses it. */
+const BREATH_TAU = 0.6;
+
+/**
+ * A breath in time with the beat for the landscape between beats: 0.5 + 0.5 · cos(2π · beatPhase)
+ * (1 on the beat), weighted by reactivity · energy^1.5 and by whether the host has a tempo
+ * (`bpm` > 0). While the tempo is lost the last phase holds and the weight fades, so nothing jumps.
+ */
+export function createBreath() {
+  let weight = 0;
+  let phase = 0;
+  const b = {
+    value: 0,
+    /**
+     * @param {number} bpm `audio.bpm` (0 = no tempo yet)
+     * @param {number} beatPhase `audio.beatPhase`, 0–1
+     * @param {number} energy 0–1
+     * @param {number} dt seconds
+     * @param {number} reactivity 0–2
+     */
+    step(bpm, beatPhase, energy, dt, reactivity) {
+      const sure = bpm > 0 && Number.isFinite(beatPhase);
+      if (sure) phase = beatPhase;
+      const target = sure ? clamp(clamp(reactivity, 2) * clamp(energy, 1) ** 1.5, 1) : 0;
+      weight += (target - weight) * (1 - Math.exp(-dt / BREATH_TAU));
+      b.value = clamp(weight * (0.5 + 0.5 * Math.cos(2 * Math.PI * phase)), 1);
+      return b.value;
+    },
+  };
+  return b;
+}
