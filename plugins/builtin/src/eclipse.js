@@ -17,17 +17,14 @@
  * energy; they billow out near the spectrum's loud angles and thin near quiet ones; strong beats
  * spawn new billows at the ring's edge that drift outward; sky pulses push a shockwave through
  * them and light faint rays in the black sky; the bass brightens them and the ring's rim light on
- * them pulses on beats (all flash-limited with the ring). Below a waterline (Water: low / mid) a
- * dark sea mirrors it all: the waveform keeps small ripples running, the bass rolls long swells
- * in and stretches the sun's reflection into a streak, and beats drop rings that spread across it.
+ * them pulses on beats (all flash-limited with the ring).
  *
  * GPU: a 256 × 3 R16F texture (row 0 levels, row 1 ripple, row 2 cloud bias) uploaded each frame;
  * the marbled clouds' smooth fields at a third of the resolution (shaders/eclipse/clouds.frag; at
  * full res the clouds tripled the frame's GPU time); then one full-screen pass in polar
  * coordinates (shaders/eclipse/eclipse.frag) draws the disc, ring, dendrite corona (procedural
  * branching trees in a domain-warped space) and cuts the clouds' crisp edges and streaks from the
- * fields — straight to the canvas, or with water into a canvas-sized target (skipping the rows
- * under the waterline) that shaders/eclipse/water.frag copies above the line and mirrors below.
+ * fields, straight to the canvas.
  */
 import {
   SECTORS,
@@ -43,7 +40,6 @@ import {
   createCloudLight,
   createPulses,
   createBillows,
-  createWater,
   backgroundDrive,
   effectiveMotion,
   fitEclipse,
@@ -62,22 +58,17 @@ const REACH = 0.6;
 export default async function create(ctx) {
   const gl = /** @type {WebGL2RenderingContext} */ (ctx.gl);
   const dir = "shaders/eclipse/";
-  const [vs, noise, fs, cloudFs, waterFs] = await Promise.all(
-    ["fullscreen.vert", "noise.glsl", "eclipse.frag", "clouds.frag", "water.frag"].map((f) => ctx.assets.text(dir + f)),
+  const [vs, noise, fs, cloudFs] = await Promise.all(
+    ["fullscreen.vert", "noise.glsl", "eclipse.frag", "clouds.frag"].map((f) => ctx.assets.text(dir + f)),
   );
   const inc = (/** @type {string} */ src) => src.replace("// #include noise", noise);
   const prog = createProgram(gl, vs, inc(fs), dir + "eclipse.frag");
   const cloudProg = createProgram(gl, vs, inc(cloudFs), dir + "clouds.frag");
-  const waterProg = createProgram(gl, vs, waterFs, dir + "water.frag");
   const u = prog.u;
   const cu = cloudProg.u;
-  const wu = waterProg.u;
   // Cloud fields at 1/CLOUD_DIV of the canvas resolution (smooth; edges are cut at full res).
   const fields = createTarget(gl);
   fields.resize(1, 1); // complete before the first cloud pass
-  // With water: the scene, canvas-sized, for water.frag to copy and mirror.
-  const scene = createTarget(gl);
-  scene.resize(1, 1);
   const vao = gl.createVertexArray();
 
   const tex = gl.createTexture();
@@ -101,8 +92,7 @@ export default async function create(ctx) {
   const pulses = createPulses();
   const pulseOut = new Float32Array(pulses.data.length);
   const billows = createBillows();
-  const water = createWater();
-  const layout = { cx: 0, cy: 0, radius: 1, horizon: 0 };
+  const layout = { cx: 0, cy: 0, radius: 1 };
   const mo = { rotation: 0, reactivity: 1, drift: 1 };
   const gamma = new Float32Array(3);
   let rot = 0;
@@ -128,12 +118,10 @@ export default async function create(ctx) {
       light.step(audio.bassAtt, audio.rms, audio.onset, audio.onsetStrength, dt, drive);
       pulses.step(audio.onset, audio.onsetStrength, dt, drive);
       billows.step(audio.onset, audio.onsetStrength, corona.levels, dt, drive);
-      water.step(audio.waveform, audio.bassAtt, audio.onset, audio.onsetStrength, dt, drive);
-      const waterOn = String(p.water) !== "off";
       // The background's brightening counts toward the frame's flash budget with the ring's.
       let topPulse = 0;
       for (let i = 1; i < pulses.data.length; i += 2) if (pulses.data[i] > topPulse) topPulse = pulses.data[i];
-      const extra = 0.4 * light.bright + 0.3 * light.rim + 0.15 * topPulse + (waterOn ? 0.2 * water.streak : 0);
+      const extra = 0.4 * light.bright + 0.3 * light.rim + 0.15 * topPulse;
       glare.step(ring.swell, flares.data, dt, ctx.reduceFlashing, extra);
       const k = glare.scale;
       for (let i = 0; i < flareOut.length; i += 2) {
@@ -157,7 +145,7 @@ export default async function create(ctx) {
       const outer = ring.disc + (ring.outer - ring.disc) * ((1 + BASS_WIDEN * swell) / (1 + BASS_WIDEN * ring.swell));
 
       const { width: w, height: h } = ctx.size;
-      fitEclipse(w, h, layout, waterOn ? p.water : "off");
+      fitEclipse(w, h, layout);
       tintGamma(p.tint, gamma);
 
       gl.disable(gl.DEPTH_TEST);
@@ -168,7 +156,6 @@ export default async function create(ctx) {
       const fw = Math.max(1, Math.ceil(w / CLOUD_DIV));
       const fh = Math.max(1, Math.ceil(h / CLOUD_DIV));
       if (clouds > 0 && (fields.width !== fw || fields.height !== fh)) fields.resize(fw, fh);
-      if (waterOn && (scene.width !== w || scene.height !== h)) scene.resize(w, h);
       // Unit 1 is read by the passes after the cloud pass; never leave a render target on it.
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, null);
@@ -195,9 +182,7 @@ export default async function create(ctx) {
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
 
-      if (waterOn) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, scene.fbo);
-      } else gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, w, h);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -224,31 +209,7 @@ export default async function create(ctx) {
       gl.uniform2fv(u.u_pulses, pulseOut);
       gl.uniform1f(u.u_bright, light.bright * k);
       gl.uniform1f(u.u_rim, light.rim * k);
-      gl.uniform1f(u.u_horizon, layout.horizon);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-      if (waterOn) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.viewport(0, 0, w, h);
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, scene.tex);
-        gl.useProgram(waterProg.program);
-        gl.uniform1i(wu.u_scene, 1);
-        gl.uniform1i(wu.u_lev, 0);
-        gl.uniform2f(wu.u_res, w, h);
-        gl.uniform1f(wu.u_horizon, layout.horizon);
-        gl.uniform1f(wu.u_cx, layout.cx);
-        gl.uniform1f(wu.u_ringR, outer * layout.radius);
-        gl.uniform1f(wu.u_chop, water.chop);
-        gl.uniform1f(wu.u_swell, water.swell);
-        gl.uniform1f(wu.u_roll, water.roll);
-        gl.uniform1f(wu.u_streak, water.streak * k);
-        gl.uniform1f(wu.u_time, clock);
-        gl.uniform4fv(wu.u_rings, water.rings);
-        gl.uniform3f(wu.u_gamma, gamma[0], gamma[1], gamma[2]);
-        gl.uniform1f(wu.u_sky, skyAlpha(p.sky));
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
-      }
     },
 
     dispose() {
@@ -256,9 +217,7 @@ export default async function create(ctx) {
       gl.deleteVertexArray(vao);
       gl.deleteProgram(prog.program);
       gl.deleteProgram(cloudProg.program);
-      gl.deleteProgram(waterProg.program);
       fields.dispose();
-      scene.dispose();
     },
   };
 }
