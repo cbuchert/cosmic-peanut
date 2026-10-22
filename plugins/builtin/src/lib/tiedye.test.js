@@ -19,6 +19,7 @@ import {
   createIntensity,
   PULSE_MAX, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH,
   createFlow, FLOW_MAX, createRecord, REC_CAP, MIN_BAND, MAX_BAND, createDominant,
+  createMorph, PHRASE_BEATS, LOOKS, MORPH_TIME, PHRASE_SECONDS,
 } from "./tiedye.js";
 
 describe("createBandWidths", () => {
@@ -536,6 +537,83 @@ describe("createDominant", () => {
     for (let f = 0; f < 120; f++) c = d.step(mix([0, 0, 0, 0, 0, 0]), 6, 1 / 60);
     expect(c).toBe(4);
     expect(d.step(mix([0.1, 0.1, 0.9, 0.1, 0.1]), 5, 1 / 60)).toBeLessThan(5);
+  });
+});
+
+/** @param {Partial<import('./tiedye.js').MorphInput>} o */
+const morphIn = (o = {}) => ({ auto: true, home: 0, beat: false, tempo: false, energy: 0.5, reduceMotion: false, ...o });
+
+describe("createMorph", () => {
+  it("holds the chosen pattern when one is picked", () => {
+    const m = createMorph();
+    for (let f = 0; f < 60 * 120; f++) {
+      m.step(1 / 60, morphIn({ auto: false, home: 2, beat: f % 30 === 0, tempo: true }));
+      expect(m.a).toBe(2);
+      expect(m.mix).toBe(0);
+    }
+  });
+
+  it("auto: morphs smoothly to the next look once a phrase (PHRASE_BEATS beats) with a tempo", () => {
+    const m = createMorph();
+    const beatEvery = 30; // 120 BPM at 60 Hz
+    /** @type {{ f: number, mix: number }[]} */
+    const starts = [];
+    const seen = new Set();
+    let mix = 0;
+    let prevB = -1;
+    for (let f = 0; f < beatEvery * PHRASE_BEATS * LOOKS.length + 60 * MORPH_TIME * 2; f++) {
+      m.step(1 / 60, morphIn({ beat: f % beatEvery === 0 && f > 0, tempo: true }));
+      expect(m.mix).toBeGreaterThanOrEqual(0);
+      expect(m.mix).toBeLessThanOrEqual(1);
+      // Smooth: a small step each frame, or the handover (all b → b becomes the new a).
+      const handover = m.mix === 0 && mix > 1 - 2 / (60 * MORPH_TIME) && m.a === prevB;
+      if (!handover) expect(Math.abs(m.mix - mix)).toBeLessThanOrEqual(1 / (60 * MORPH_TIME) + 1e-9);
+      if (mix === 0 && m.mix > 0) starts.push({ f, mix: m.mix });
+      mix = m.mix;
+      prevB = m.b;
+      seen.add(m.a);
+    }
+    expect(starts.length).toBeGreaterThanOrEqual(LOOKS.length);
+    expect(starts[0].f).toBe(beatEvery * PHRASE_BEATS);
+    expect(starts[1].f - starts[0].f).toBe(beatEvery * PHRASE_BEATS);
+    expect([...seen].sort()).toEqual([0, 1, 2, 3]); // every pattern family comes round
+  });
+
+  /** Seconds until the first morph starts, for energy(t). */
+  const firstMorph = (/** @type {(t: number) => number} */ energy, reduceMotion = false) => {
+    const m = createMorph();
+    for (let f = 0; f < 60 * 120; f++) {
+      m.step(1 / 60, morphIn({ energy: energy(f / 60), reduceMotion }));
+      if (m.mix > 0) return f / 60;
+    }
+    return Infinity;
+  };
+
+  it("without a tempo: a phrase every PHRASE_SECONDS of music, sooner when the energy shifts, slower in quiet", () => {
+    const steady = firstMorph(() => 0.8);
+    expect(steady).toBeGreaterThan(PHRASE_SECONDS * 0.8);
+    expect(steady).toBeLessThan(PHRASE_SECONDS * 1.3);
+    // The music drops at 8 s: the look changes within a few seconds of the drop.
+    const drop = firstMorph((t) => (t < 8 ? 0.8 : 0.2));
+    expect(drop).toBeGreaterThan(8);
+    expect(drop).toBeLessThan(12);
+    // Silence still changes now and then, but slowly.
+    const silent = firstMorph(() => 0);
+    expect(silent).toBeGreaterThan(steady * 1.5);
+    expect(silent).toBeLessThan(90);
+  });
+
+  it("under Reduce motion morphs at half the speed", () => {
+    const run = (/** @type {boolean} */ reduceMotion) => {
+      const m = createMorph();
+      let n = 0;
+      for (let f = 0; f < 60 * 40; f++) {
+        m.step(1 / 60, morphIn({ beat: f % 30 === 0 && f > 0, tempo: true, reduceMotion }));
+        if (m.mix > 0) n++;
+      }
+      return n;
+    };
+    expect(run(true)).toBeCloseTo(2 * run(false), -1);
   });
 });
 

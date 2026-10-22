@@ -515,3 +515,94 @@ export function createDominant() {
     },
   };
 }
+
+/**
+ * @typedef {object} MorphInput
+ * @property {boolean} auto the Pattern param is "auto"
+ * @property {number} home patternIndex of the Pattern param (used when not auto)
+ * @property {boolean} beat a beat this frame (createFlow's `beat`)
+ * @property {boolean} tempo the tempo is confident (`audio.bpm > 0`)
+ * @property {number} energy createFlow's `energy`, 0–1
+ * @property {boolean} reduceMotion `ctx.reduceMotion`
+ */
+
+/** The looks "auto" cycles through: a pattern and (for the spiral) its arm count. */
+export const LOOKS = [
+  { pattern: 0, arms: 2 },
+  { pattern: 1, arms: 2 },
+  { pattern: 0, arms: 3 },
+  { pattern: 2, arms: 2 },
+  { pattern: 0, arms: 1 },
+  { pattern: 3, arms: 2 },
+];
+/** Beats in a phrase (8 bars of 4/4): with a confident tempo, the look changes once a phrase. */
+export const PHRASE_BEATS = 32;
+/** Seconds a morph takes (twice that under Reduce motion). */
+export const MORPH_TIME = 4;
+/** Without a tempo: seconds of loud music per phrase (silence runs the clock at SILENT_PACE). */
+export const PHRASE_SECONDS = 16;
+const SILENT_PACE = 0.35;
+/** A sustained energy shift this big (fast vs slow average) ends a phrase early… */
+const SHIFT = 0.25;
+/** …once the phrase is at least this many seconds of clock old. */
+const MIN_PHRASE = 4;
+const SHIFT_FAST = 0.5;
+const SHIFT_SLOW = 3;
+
+/**
+ * Pattern morphing for Pattern "auto": on phrase changes the cloth morphs from one look to the
+ * next. `a` and `b` are pattern indices, `armsA`/`armsB` their spiral arm counts, and `mix` 0–1
+ * how far the morph from a to b has got (0 = all a).
+ */
+export function createMorph() {
+  let look = 0;
+  let beats = 0;
+  let clock = 0;
+  let fast = NaN;
+  let slow = NaN;
+  const m = {
+    a: 0,
+    b: 0,
+    armsA: 2,
+    armsB: 2,
+    mix: 0,
+    /** @param {number} dt @param {MorphInput} o */
+    step(dt, o) {
+      if (!o.auto) {
+        m.a = m.b = o.home;
+        m.armsA = m.armsB = 2;
+        m.mix = 0;
+        return m;
+      }
+      let phrase = false;
+      if (Number.isNaN(fast)) fast = slow = o.energy;
+      fast += (o.energy - fast) * (1 - Math.exp(-dt / SHIFT_FAST));
+      slow += (o.energy - slow) * (1 - Math.exp(-dt / SHIFT_SLOW));
+      if (o.tempo) {
+        if (o.beat && ++beats >= PHRASE_BEATS) phrase = true;
+      } else {
+        clock += dt * (SILENT_PACE + (1 - SILENT_PACE) * Math.max(0, Math.min(1, o.energy)));
+        phrase = clock >= PHRASE_SECONDS || (clock >= MIN_PHRASE && Math.abs(fast - slow) > SHIFT);
+      }
+      if (phrase) {
+        beats = 0;
+        clock = 0;
+        slow = fast;
+      }
+      if (m.mix > 0 || phrase) {
+        m.mix = Math.min(1, m.mix + dt / (o.reduceMotion ? 2 * MORPH_TIME : MORPH_TIME));
+        if (m.mix >= 1) {
+          look = (look + 1) % LOOKS.length;
+          m.mix = 0;
+        }
+      }
+      const next = (look + 1) % LOOKS.length;
+      m.a = LOOKS[look].pattern;
+      m.armsA = LOOKS[look].arms;
+      m.b = LOOKS[next].pattern;
+      m.armsB = LOOKS[next].arms;
+      return m;
+    },
+  };
+  return m;
+}
