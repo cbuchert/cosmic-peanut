@@ -24,7 +24,6 @@ uniform float u_fieldTexel; // one cloud-field texel, in st (x) units
 uniform vec2 u_pulses[4];  // sky pulses: (distance past the ring, amplitude) — the rays light up
 uniform float u_bright;    // cloud brightening from the bass (flash-limited), 0–1
 uniform float u_rim;       // the ring's rim light on the clouds, beat pulse (flash-limited), 0–1
-uniform float u_horizon;   // waterline, px from the bottom (0 = no water): nothing drawn below
 
 out vec4 outColor;
 
@@ -96,11 +95,6 @@ vec2 tree(vec2 q, float c, float n, float L, float W, float ku, float px, int fo
 }
 
 void main() {
-  // Below the waterline only the water pass draws (it reflects what's above).
-  if (gl_FragCoord.y < u_horizon - 2.0) {
-    outColor = vec4(0.0, 0.0, 0.0, u_sky);
-    return;
-  }
   vec2 p = (gl_FragCoord.xy - u_center) / u_radius;
   float r = length(p);
   float px = 1.0 / u_radius; // one pixel in units
