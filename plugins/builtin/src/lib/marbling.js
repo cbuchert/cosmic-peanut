@@ -614,6 +614,7 @@ export function createMarbler(seed) {
       const p = pours[i];
       if (p.state !== 0) continue;
       p.state = delay > 0 ? 1 : 2;
+      if (ink >= 0) m.drops++;
       p.delay = delay;
       p.x = x;
       p.y = y;
@@ -691,6 +692,10 @@ export function createMarbler(seed) {
     evD,
     /** Number of events this frame. */
     count: 0,
+    /** Drop slices and strokes among them (not drift). */
+    started: 0,
+    /** Paint (not clear) drops laid so far. */
+    drops: 0,
     /** Smoothed loudness 0–1 that sets the pour rate. */
     energy: 0,
     /** 0–1 sheen pulse on hits (≤ 3 rises/s under reduceFlashing). */
@@ -710,6 +715,24 @@ export function createMarbler(seed) {
       }
       if (sx >= 0) sx = (sx - map[1]) * k + map[3];
       sy = (sy - map[2]) * k + map[4];
+    },
+    /**
+     * A batch of current was baked into the page: carry drops being poured, and the stylus, along
+     * with it so the rest of each lands where its paint now is.
+     * @param {ArrayLike<number>} f the baked flow (createCurrents().acc)
+     */
+    advect(f) {
+      for (const p of pours) {
+        if (p.state === 0) continue;
+        flowDisp(f, p.x, p.y, v);
+        p.x += v[0];
+        p.y += v[1];
+      }
+      if (sx >= 0) {
+        flowDisp(f, sx, sy, v);
+        sx += v[0];
+        sy += v[1];
+      }
     },
     /**
      * @param {PourAudio} audio
@@ -856,6 +879,9 @@ export function createMarbler(seed) {
         if (u >= 1) p.state = 0;
       }
       m.count = n;
+      let started = 0;
+      for (let i = 0; i < n; i++) if (evA[i * 4] === EV_DROP || evA[i * 4] === EV_DRAG) started++;
+      m.started = started;
     },
   };
   return m;

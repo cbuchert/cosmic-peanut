@@ -163,7 +163,7 @@ function bandsHit(lo, hi) {
   for (let i = lo; i < hi; i++) b[i] = 0.8;
   return b;
 }
-const PARAMS = { pour: 1, size: 1, rake: 0, reactivity: 1, renew: 0 };
+const PARAMS = { pour: 1, size: 1, rake: 0, reactivity: 1, renew: 0, currents: 1 };
 const ENV = { aspect: 16 / 9, pxPerUnit: 1440, reduceFlashing: true, reduceMotion: false };
 const DT = 1 / 60;
 
@@ -752,5 +752,54 @@ describe("createCurrents", () => {
       return trace;
     };
     expect(run()).toEqual(run());
+  });
+});
+
+describe("marbler and currents", () => {
+  it("carries drops being poured, and the stylus, along with a baked current", () => {
+    const f = new Float32Array(FLOW_LEN);
+    f[0] = 0.01;
+    f[1] = 0.005;
+    f.set([0.9, 0.5, 1 / 0.3 ** 2, 0.004], 2);
+    const m = createMarbler(3);
+    const RAKE = { ...PARAMS, rake: 1 };
+    m.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    m.step(audioFrame({ rms: 0.2, onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, RAKE, ENV);
+    /** First event of the given type this frame. @param {number} type */
+    const first = (type) => {
+      for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === type) return [m.evA[i * 4 + 1], m.evA[i * 4 + 2]];
+      return [NaN, NaN];
+    };
+    const [dx, dy] = first(EV_DROP);
+    m.advect(f);
+    const d = flowDisp(f, dx, dy, new Float64Array(2));
+    m.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    const [ax, ay] = first(EV_DROP);
+    expect(ax).toBeCloseTo(dx + d[0], 5);
+    expect(ay).toBeCloseTo(dy + d[1], 5);
+    // The stylus step starts where it was left, carried by the current.
+    const s0 = first(EV_DRAG);
+    const m2 = createMarbler(3);
+    m2.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    m2.step(audioFrame({ rms: 0.2, onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, RAKE, ENV);
+    m2.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    let s2 = [NaN, NaN];
+    for (let i = 0; i < m2.count; i++) if (m2.evA[i * 4] === EV_DRAG) s2 = [m2.evA[i * 4 + 1], m2.evA[i * 4 + 2]];
+    const ds = flowDisp(f, s2[0], s2[1], new Float64Array(2));
+    expect(Math.hypot(s0[0] - s2[0], s0[1] - s2[1])).toBeGreaterThan(0.001);
+    expect(s0[0]).toBeCloseTo(s2[0] + ds[0], 3);
+  });
+
+  it("counts the paint drops it lays and the drop slices and strokes it starts each frame", () => {
+    const m = createMarbler(3);
+    const RAKE = { ...PARAMS, rake: 1 };
+    m.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    expect(m.drops).toBe(0);
+    expect(m.started).toBe(1); // the stylus step
+    m.step(audioFrame({ rms: 0.2, onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, RAKE, ENV);
+    let ev = 0;
+    for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === EV_DROP || m.evA[i * 4] === EV_DRAG) ev++;
+    expect(m.started).toBe(ev);
+    expect(m.drops).toBeGreaterThan(1);
   });
 });

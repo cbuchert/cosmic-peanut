@@ -19,6 +19,7 @@
  */
 import { createProgram } from "./lib/gl.js";
 import {
+  createCurrents,
   createEventQueue,
   createMarbler,
   DEFAULTS,
@@ -33,6 +34,8 @@ import {
  * it they widen to ~3.7 px within 1 minute.
  */
 const SHARP = 0.1;
+/** Longest a bake batch runs (s): the currents' vortex centres are frozen within one. */
+const MAX_BATCH = 1.5;
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
@@ -77,7 +80,14 @@ export default async function create(ctx) {
   let inks = [];
   let cur = 0;
   const marbler = createMarbler(0x6d61726c);
+  const currents = createCurrents(0x63757272);
   const queue = createEventQueue();
+  /** u_flow: (drift x, drift y, on, 0), then the six vortices of currents.acc. */
+  const flowU = new Float32Array(28);
+  /** Seconds since the last bake (the currents' vortex centres are frozen per batch). */
+  let batchAge = 0;
+  /** Dev readout for the harness (plugins/_harness): events started this frame, drops, bakes. */
+  const debug = { events: 0, drops: 0, bakes: 0, colors: /** @type {number[][]} */ ([]) };
   const eff = { ...DEFAULTS };
   const env = { aspect: 1, pxPerUnit: 1, reduceFlashing: true, reduceMotion: false };
   const inkColors = new Float32Array(12);
@@ -86,6 +96,7 @@ export default async function create(ctx) {
 
   function applyParams() {
     const pal = paletteOf(ctx.params.palette);
+    debug.colors = [...pal.inks, pal.paper];
     for (let i = 0; i < 4; i++) for (let k = 0; k < 3; k++) inkColors[i * 3 + k] = pal.inks[i][k];
     const on = ctx.params.paper !== "none" ? 1 : 0;
     for (let k = 0; k < 3; k++) paper[k] = pal.paper[k] * on;
@@ -109,11 +120,21 @@ export default async function create(ctx) {
     gl.uniform4fv(p.u.u_b, queue.evB);
     gl.uniform4fv(p.u.u_c, queue.evC);
     gl.uniform4fv(p.u.u_d, queue.evD);
+    const f = currents.acc;
+    flowU[0] = f[0];
+    flowU[1] = f[1];
+    flowU[2] = currents.active ? 1 : 0;
+    flowU.set(f.subarray(2), 4);
+    gl.uniform4fv(p.u.u_flow, flowU);
   }
 
-  /** Bake the pending events into the other ink texture and empty the queue. */
+  /** Bake the pending events and currents into the other ink texture and empty the queue. */
   function bake() {
-    if (queue.count === 0) return;
+    batchAge = 0;
+    if (queue.count === 0 && !currents.active) {
+      currents.reset();
+      return;
+    }
     const src = inks[cur];
     const dst = inks[cur ^ 1];
     gl.bindVertexArray(vao);
@@ -126,6 +147,9 @@ export default async function create(ctx) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     cur ^= 1;
     queue.clear();
+    if (currents.active) marbler.advect(currents.acc);
+    currents.reset();
+    debug.bakes++;
   }
 
   function resize() {
@@ -157,7 +181,9 @@ export default async function create(ctx) {
   applyParams();
   resize();
 
-  return {
+  /** @type {import('../tidalviz').Visualizer & { debug: typeof debug }} */
+  const viz = {
+    debug,
     frame(audio, time) {
       const src = inks[cur];
       effectiveParams(ctx.params, ctx.reduceMotion, eff);
@@ -166,9 +192,13 @@ export default async function create(ctx) {
       env.reduceFlashing = ctx.reduceFlashing;
       env.reduceMotion = ctx.reduceMotion;
       marbler.step(audio, time.dt, eff, env);
+      currents.step(audio, marbler.energy, time.dt, eff, env);
+      batchAge += time.dt;
 
-      if (!queue.fits(marbler.count)) bake();
+      if (!queue.fits(marbler.count) || currents.full() || batchAge > MAX_BATCH) bake();
       queue.append(marbler);
+      debug.events = marbler.started;
+      debug.drops = marbler.drops;
 
       gl.bindVertexArray(vao);
       gl.disable(gl.DEPTH_TEST);
@@ -201,4 +231,5 @@ export default async function create(ctx) {
       for (const p of [sim, resample, comp]) gl.deleteProgram(p.program);
     },
   };
+  return viz;
 }
