@@ -169,6 +169,30 @@ def test_beat_phase_is_zero_until_confident_then_advances_steadily_and_lands_on_
         assert d < 0.04, (t, phase, want)  # 0.04 of a beat = 20 ms
 
 
+def test_tempo_holds_through_beatless_sound_and_resets_after_a_second_of_silence():
+    # 8 s of the demo groove, 4 s of steady noise (sound, but no beat), then 2 s of silence.
+    src = SyntheticSource("demo")
+    render, rng, sr = src.render, np.random.default_rng(7), 48000
+    noise_at, silence_at = 8 * sr, 12 * sr
+
+    def mixed(n: int) -> np.ndarray:
+        start = src.position
+        block = render(n)
+        if start >= silence_at:
+            return np.zeros_like(block)
+        if start >= noise_at:
+            return (0.1 * rng.standard_normal(block.shape)).astype(np.float32)
+        return block
+
+    src.render = mixed  # type: ignore[method-assign]
+    rows = np.array([(f.host_time, f.scalars[S["bpm"]]) for f in frames(src, 14.0)])
+    t, bpm = rows[:, 0], rows[:, 1]
+    # Held (not dropped, no octave jump). As the 5.5 s window drains of the groove the weaker
+    # estimates may nudge it ~2 %; the beat score re-aligns the phase when music returns.
+    assert np.all(np.abs(bpm[(t > 8) & (t < 12)] - 120.0) <= 3.0)
+    assert np.all(bpm[t > 13.2] == 0.0)  # silence: back to "not confident"
+
+
 def test_centroid_of_a_1khz_sine_is_1khz_over_nyquist():
     f = last(SyntheticSource("sine1k"), 0.5)
     assert abs(f.scalars[S["centroid"]] - 1000.0 / 24000.0) < 0.005

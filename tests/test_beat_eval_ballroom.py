@@ -6,7 +6,7 @@ import pytest
 from tools.beat_eval import clips, evaluate, summary
 
 # Measured on the current tracker; raise these as it improves (NOTES.md has the history).
-FLOOR = {"f": 0.52, "cmlt": 0.37, "amlt": 0.59, "acc1": 0.64, "acc2": 0.91}
+FLOOR = {"f": 0.66, "cmlt": 0.52, "amlt": 0.68, "acc1": 0.72, "acc2": 0.94}
 
 
 @pytest.mark.skipif(not clips(), reason="no Ballroom dataset (tools.beat_eval --fetch)")

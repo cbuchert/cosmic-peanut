@@ -35,10 +35,14 @@ ANNOTATIONS_URL = "https://codeload.github.com/CPJKU/BallroomAnnotations/zip/ref
 
 
 def beats_from_phase(t: F64, bpm: F64, phase: F64) -> F64:
-    """Beat times: each wrap of `phase` between two frames with a tempo, at its 0 crossing."""
+    """Beat times: each wrap of `phase` between two frames with a tempo, at its 0 crossing.
+
+    A phase correction can make a wrap whose crossing falls before the last beat; it is dropped.
+    """
     tempo = (bpm[1:] > 0) & (bpm[:-1] > 0)
     i = np.flatnonzero(tempo & (phase[1:] < phase[:-1] - 0.5)) + 1
-    return t[i] - phase[i] * 60.0 / bpm[i]
+    beats = t[i] - phase[i] * 60.0 / bpm[i]
+    return beats[beats > np.maximum.accumulate(np.r_[-np.inf, beats[:-1]])]
 
 
 def track(samples: NDArray[np.float32], sample_rate: float) -> tuple[F64, F64, F64]:

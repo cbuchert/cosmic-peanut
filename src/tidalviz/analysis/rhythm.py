@@ -107,10 +107,14 @@ class Tempo:
     (via a zero-padded FFT into preallocated buffers). Candidate periods between 60 and 180 BPM
     are scored with their first harmonics and a log-normal prior around 120 BPM (to avoid
     octave errors), then refined to a fractional lag by parabolic interpolation over the first
-    few multiples. ``bpm`` is reported once consecutive estimates agree.
+    few multiples. ``bpm`` is reported once consecutive estimates agree, and held until a
+    second of silence (a weak estimate never drops it, so a beatless bridge keeps the tempo).
 
-    Beat phase: a comb over the envelope gives the initial beat alignment; after that, every
-    (sub-hop localized) onset near a predicted beat nudges the reference beat time toward it.
+    Beat phase: a comb over the envelope gives the initial beat alignment. After that, a
+    cumulative beat score (Stark, Davies & Plumbley, DAFx 2009, after Ellis 2007) keeps it:
+    C(m) = (1 − α)·odf(m) + α·max_v W(v)·C(m − v) over v in ½–2 periods, W log-Gaussian around
+    one period, so C peaks where onsets keep recurring a period apart, and a lone off-beat hit
+    barely moves it. Once per beat the reference beat time is pulled toward C's latest peak.
     """
 
     fields: tuple[str, ...] = ("bpm", "beatPhase")
@@ -120,8 +124,12 @@ class Tempo:
     CONFIDENCE = 0.2  # ACF peak / ACF[0]
     AGREE = 0.02  # relative agreement between consecutive estimates
     AGREE_COUNT = 3
-    LOSE_AFTER = 12  # updates without confidence before bpm drops back to 0 (~1 s)
-    PLL_WINDOW, PLL_GAIN = 0.2, 0.25  # onsets within ±0.2 beat pull the phase by 25%
+    LOSE_S = 1.0  # seconds of silence before bpm drops back to 0 (beatless sound keeps it)
+    HARMONICS = (1.0, 1.0, 1.0, 1.0)  # comb weights of the ACF at 1–4 × the candidate period
+    THRESH_FRAMES = 16  # half-width of the moving mean taken off the envelope (0 = plain mean)
+    ALPHA, TIGHTNESS = 0.9, 5.0  # cumulative score: weight of the past, width of W
+    PULL = 0.5  # fraction of the phase error to C's peak corrected once per beat
+    PEAK_GUARD = 2  # frames: C's newest values can still rise, so the peak search skips them
 
     def __init__(self, ctx: AnalysisContext) -> None:
         h = self.HISTORY
@@ -141,38 +149,103 @@ class Tempo:
         bpm = 60.0 * self._fps / self._lags
         self._prior = np.exp(-0.5 * (np.log2(bpm / self.PRIOR_BPM) / self.PRIOR_OCTAVES) ** 2)
         self._score = np.zeros(self._lags.size, dtype=np.float64)
-        self._tmp = np.zeros(self._lags.size, dtype=np.float64)
+        # Comb: row (a, b) reads the ACF at a·lag + b, b within ±a (a period error grows with
+        # the multiple); each harmonic's rows reduce to their max, then weigh by HARMONICS.
+        rows = [a * self._lags + b for a in range(1, 5) for b in range(-a, a + 1)]
+        self._comb_idx = np.clip(np.array(rows), 0, 2 * h - 1)
+        self._comb_rows = np.zeros(self._comb_idx.shape, dtype=np.float64)
+        self._comb_starts = np.array([0, 3, 8, 15])
+        self._comb_max = np.zeros((4, self._lags.size), dtype=np.float64)
+        self._comb_w = np.array(self.HARMONICS, dtype=np.float64)
+        # Moving mean of the envelope via a cumulative sum (clamped windows at the ends).
+        k, i = self.THRESH_FRAMES, np.arange(h)
+        self._mm_hi, self._mm_lo = np.minimum(i + k + 1, h), np.maximum(i - k, 0)
+        self._mm_n = (self._mm_hi - self._mm_lo).astype(np.float64)
+        self._cum = np.zeros(h + 1, dtype=np.float64)
+        self._mm = np.zeros(h, dtype=np.float64)
+        self._mm_tmp = np.zeros(h, dtype=np.float64)
         self._period_s = 0.0  # 0 = not confident
         self._candidate = 0.0
         self._agree = 0
-        self._misses = 0
+        self._silent = 0  # consecutive silent frames
+        self._lose = round(self.LOSE_S * self._fps)
         self._ref = 0.0  # host time of a reference beat
-        self._last_onset = -1.0
+        # Cumulative score, written at p and p + H so any recent span is one contiguous slice.
+        self._cs = np.zeros(2 * h, dtype=np.float64)
+        self._w = np.zeros(h, dtype=np.float64)  # W over lags hi..lo (oldest first, like a slice)
+        self._wtmp = np.zeros(h, dtype=np.float64)
+        self._lagv = np.arange(h, dtype=np.float64)  # lag v at index v
+        self._wlo = self._whi = 0
+        self._w_period = 0.0
+        self._since_pull = 0
         self._i_bpm = SCALAR_INDEX["bpm"]
         self._i_phase = SCALAR_INDEX["beatPhase"]
 
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
-        self._env[self._pos] = ctx.odf
-        self._pos = (self._pos + 1) % self.HISTORY
-        self._frames += 1
-        if self._frames >= self.HISTORY // 2 and self._frames % self.UPDATE == 0:
-            self._estimate(ctx)
-        if self._period_s > 0.0 and ctx.onset and ctx.onset_time != self._last_onset:
-            self._pull_phase(ctx.onset_time)
-        self._last_onset = ctx.onset_time if ctx.onset else self._last_onset
+        h, p = self.HISTORY, self._pos
+        self._env[p] = ctx.odf
+        c = ctx.odf
         if self._period_s > 0.0:
+            c = (1.0 - self.ALPHA) * c + self.ALPHA * self._score_past()
+        self._cs[p] = self._cs[p + h] = c
+        self._pos = (p + 1) % h
+        self._frames += 1
+        self._silent = self._silent + 1 if ctx.silent else 0
+        if self._silent >= self._lose:
+            self._period_s = 0.0
+            self._candidate, self._agree = 0.0, 0
+        elif not ctx.silent and self._frames >= h // 2 and self._frames % self.UPDATE == 0:
+            self._estimate(ctx)
+        if self._period_s > 0.0:
+            self._since_pull += 1
+            if self._since_pull * ctx.dt >= self._period_s:
+                self._pull_phase(ctx)
             out.scalars[self._i_bpm] = 60.0 / self._period_s
             out.scalars[self._i_phase] = ((ctx.host_time - self._ref) / self._period_s) % 1.0
         else:
             out.scalars[self._i_bpm] = 0.0
             out.scalars[self._i_phase] = 0.0
 
+    def _score_past(self) -> float:
+        """max_v W(v)·C(now − v), v from ½ to 2 periods (W rebuilt when the period changes)."""
+        if self._period_s != self._w_period:
+            self._set_window()
+        lo, hi = self._wlo, self._whi
+        end = self._pos + self.HISTORY  # C(now − v) is at end − v
+        n = hi - lo + 1
+        np.multiply(self._cs[end - hi : end - lo + 1], self._w[:n], out=self._wtmp[:n])
+        return float(np.max(self._wtmp[:n]))
+
+    def _set_window(self) -> None:
+        period = self._period_s * self._fps
+        self._wlo = max(1, round(period / 2))
+        self._whi = min(self.HISTORY - 1, round(2 * period))
+        w = self._w[: self._whi - self._wlo + 1]
+        np.divide(self._lagv[self._whi : self._wlo - 1 : -1], period, out=w)  # hi..lo, a view
+        np.log(w, out=w)
+        np.square(w, out=w)
+        np.multiply(w, -0.5 * self.TIGHTNESS**2, out=w)
+        np.exp(w, out=w)
+        self._w_period = self._period_s
+
     def _ordered(self) -> None:
-        """Copy the envelope oldest-first into _lin[:H], mean-removed; _lin[H:] stays 0."""
+        """Copy the envelope oldest-first into _lin[:H]; _lin[H:] stays 0.
+
+        With THRESH_FRAMES, the moving mean is taken off and the rest half-wave rectified (an
+        adaptive threshold: only peaks above the local level remain), then the mean removed.
+        """
         h, p = self.HISTORY, self._pos
         self._lin[: h - p] = self._env[p:]
         self._lin[h - p : h] = self._env[:p]
         body = self._lin[:h]
+        if self.THRESH_FRAMES:
+            np.cumsum(body, out=self._cum[1:])
+            np.take(self._cum, self._mm_hi, out=self._mm)
+            np.take(self._cum, self._mm_lo, out=self._mm_tmp)
+            np.subtract(self._mm, self._mm_tmp, out=self._mm)
+            np.divide(self._mm, self._mm_n, out=self._mm)
+            np.subtract(body, self._mm, out=body)
+            np.maximum(body, 0.0, out=body)
         np.subtract(body, float(np.mean(body)), out=body)
 
     def _estimate(self, ctx: AnalysisContext) -> None:
@@ -188,16 +261,15 @@ class Tempo:
         if zero <= 1e-12:
             self._miss()
             return
-        # score(L) = acf[L] + ½·acf[2L] (a true beat period also repeats at twice the lag),
-        # read through a 3-tap max so periods that fall between whole frames aren't penalized.
+        # score(L) = Σ_a HARMONICS[a]·max acf[a·L ± a] (a true beat period also repeats at its
+        # multiples; the window lets periods between whole frames score fully), times the prior.
         m = self._acfm
         np.maximum(acf[:-2], acf[1:-1], out=m[1:-1])
         np.maximum(m[1:-1], acf[2:], out=m[1:-1])
         lags = self._lags
-        np.take(m, lags, out=self._score)
-        np.take(m, 2 * lags, out=self._tmp)
-        np.multiply(self._tmp, 0.5, out=self._tmp)
-        np.add(self._score, self._tmp, out=self._score)
+        np.take(acf, self._comb_idx, out=self._comb_rows)
+        np.maximum.reduceat(self._comb_rows, self._comb_starts, axis=0, out=self._comb_max)
+        np.matmul(self._comb_w, self._comb_max, out=self._score)
         np.multiply(self._score, self._prior, out=self._score)
         best = int(lags[int(np.argmax(self._score))])
         if m[best] / zero < self.CONFIDENCE:
@@ -207,7 +279,6 @@ class Tempo:
         if not self.MIN_BPM <= 60.0 * self._fps / period <= self.MAX_BPM:
             self._miss()  # refinement slid off the edge of the search range
             return
-        self._misses = 0
         if self._candidate and abs(period - self._candidate) / self._candidate < self.AGREE:
             self._agree += 1
             self._candidate += 0.5 * (period - self._candidate)
@@ -250,15 +321,18 @@ class Tempo:
         # The envelope peaks on the frame that detected the onset, about half a hop late.
         return ctx.host_time - (best + 0.5) * ctx.dt
 
-    def _pull_phase(self, onset_time: float) -> None:
-        p = self._period_s
-        err = ((onset_time - self._ref) / p + 0.5) % 1.0 - 0.5  # beats; 0 = on a beat
-        if abs(err) < self.PLL_WINDOW:
-            self._ref += self.PLL_GAIN * err * p
+    def _pull_phase(self, ctx: AnalysisContext) -> None:
+        """Pull the reference beat toward the cumulative score's peak over the last period."""
+        self._since_pull = 0
+        g, n = self.PEAK_GUARD, round(self._period_s * self._fps)
+        end = self._pos + self.HISTORY - g  # exclusive; newest g frames skipped
+        age = g + n - 1 - int(np.argmax(self._cs[end - n : end]))  # frames before the newest
+        # C peaks on the frame that detected the onset, about half a hop late.
+        beat = ctx.host_time - (age + 0.5) * ctx.dt
+        err = ((beat - self._ref) / self._period_s + 0.5) % 1.0 - 0.5
+        self._ref += self.PULL * err * self._period_s
 
     def _miss(self) -> None:
-        self._misses += 1
+        """A weak estimate restarts the agreement count but keeps the current tempo."""
         self._agree = 0
         self._candidate = 0.0
-        if self._misses >= self.LOSE_AFTER:
-            self._period_s = 0.0
