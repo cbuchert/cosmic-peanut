@@ -8,18 +8,27 @@ import {
   createStripeDrive,
   createThickness,
   createWaveBend,
+  createEnergy,
+  createPhrase,
+  PHRASE_BEATS,
+  REVERSE_RATE,
   DUTY_MAX,
   FIELD_MAX,
   FLOW_SENS,
   lookColors,
+  loudness,
   opField,
   resolveLook,
   RIPPLE_SPEED,
+  TWIST_MAX,
+  TWIST_SENS,
   stripe,
   WAVE_PHASE,
   WAVE_RESERVE,
   WAVE_SLEW,
 } from "./opart.js";
+import { CAM_DIST, screenRadius } from "./skull-bounds.js";
+import { PULSE_LIMIT, TILT_LIMIT } from "./skull-motion.js";
 
 describe("stripe (anti-aliased sign of sin)", () => {
   it("is 0 on black, 1 on white, with a monotonic ramp across each edge", () => {
@@ -275,28 +284,161 @@ describe("createWaveBend robustness", () => {
   });
 });
 
+/**
+ * Random field states and screen points (half the short side is 1, the long side up to 21:9 either
+ * way round, every skull size, tilt and jaw) and whether the point is outside the skull's bounding
+ * circle (inside, the skull covers the stripes).
+ * @param {number} seed
+ * @param {(x: number, y: number, s: import("./opart.js").FieldState, outside: boolean) => void} fn
+ */
+function sampleField(seed, fn) {
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 6000; i++) {
+    const size = 0.5 + rnd();
+    const outline = [(FOCAL / CAM_DIST) * size * (1 + PULSE_LIMIT * rnd()), (rnd() * 2 - 1) * TILT_LIMIT, rnd() * 0.33];
+    const long = (rnd() * 2 - 1) * 2.4;
+    const short = rnd() * 2 - 1;
+    const [x, y] = i % 2 ? [long, short] : [short, long];
+    const warp = 0.05 + rnd() * 1.95;
+    const s = { flow: rnd() * 1000, warp, outline, twist: (rnd() * 2 - 1) * TWIST_MAX * warp };
+    fn(x, y, s, Math.hypot(x, y) > screenRadius(1 + PULSE_LIMIT, FOCAL * size));
+  }
+}
+const FOCAL = 3.3; // src/skull.js
+
 describe("opField (mirror of opart.glsl)", () => {
-  it("stays within FIELD_MAX on any screen and moves with the flow no faster than FLOW_SENS per unit of warp", () => {
-    let seed = 3;
-    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-    const outline = [0.55 * 1.08, 0, 0.3]; // max skull size, a tilt of 0, jaw open
-    let worstSens = 0;
-    for (let i = 0; i < 4000; i++) {
-      // Half the short side is 1; the long side up to 21:9 (2.4), either way round.
-      const long = (rnd() * 2 - 1) * 2.4;
-      const short = rnd() * 2 - 1;
-      const [x, y] = i % 2 ? [long, short] : [short, long];
-      const warp = rnd() * 2;
-      const flow = rnd() * 1000;
-      const f = opField(x, y, flow, warp, outline);
+  it("stays within FIELD_MAX on any screen and, outside the skull, moves with the flow no faster than FLOW_SENS per unit of warp", () => {
+    let worst = 0;
+    sampleField(3, (x, y, s, outside) => {
+      const f = opField(x, y, s);
       expect(Math.abs(f)).toBeLessThanOrEqual(FIELD_MAX);
-      if (warp > 0.05) {
-        const h = 1e-4;
-        const sens = Math.abs(opField(x, y, flow + h, warp, outline) - f) / h / warp;
-        worstSens = Math.max(worstSens, sens);
+      const h = 1e-4;
+      if (outside) worst = Math.max(worst, Math.abs(opField(x, y, { ...s, flow: s.flow + h }) - f) / h / s.warp);
+    });
+    expect(worst).toBeLessThanOrEqual(FLOW_SENS);
+    expect(worst).toBeGreaterThan(0.5 * FLOW_SENS); // the bound isn't wildly loose
+  });
+});
+
+describe("opField swirl (mirror of opart.glsl)", () => {
+  it("outside the skull, moves with the twist no faster than TWIST_SENS", () => {
+    let worst = 0;
+    sampleField(5, (x, y, s, outside) => {
+      if (!outside) return;
+      const h = 1e-4;
+      worst = Math.max(worst, Math.abs(opField(x, y, { ...s, twist: (s.twist ?? 0) + h }) - opField(x, y, s)) / h);
+    });
+    expect(worst).toBeLessThanOrEqual(TWIST_SENS);
+    expect(worst).toBeGreaterThan(0.5 * TWIST_SENS);
+  });
+});
+
+describe("loudness (rms → 0–1 drive level)", () => {
+  it("is 0 in silence, rises monotonically with the level in dB, and saturates at 1 for loud music", () => {
+    expect(loudness(0)).toBe(0);
+    expect(loudness(NaN)).toBe(0);
+    expect(loudness(0.003)).toBe(0); // ≈ −50 dBFS: room noise
+    let prev = 0;
+    for (let db = -60; db <= 0; db += 1) {
+      const v = loudness(10 ** (db / 20));
+      expect(v).toBeGreaterThanOrEqual(prev);
+      expect(v).toBeLessThanOrEqual(1);
+      prev = v;
+    }
+    expect(loudness(0.02)).toBeLessThan(0.35); // a quiet passage (≈ −34 dBFS)
+    expect(loudness(0.25)).toBe(1); // loud, mastered music (≈ −12 dBFS)
+  });
+});
+
+/** Steady audio at an rms level, with average bass. @param {number} rms */
+const steady = (rms) => ({ rms, bassAtt: rms > 0 ? 1 : 0, onset: false, onsetStrength: 0, silent: rms === 0 });
+
+describe("createEnergy", () => {
+  it("settles high for loud music, low for a quiet passage, at 0 in silence", () => {
+    /** @param {number} rms */
+    const settle = (rms) => {
+      const e = createEnergy();
+      for (let f = 0; f < 600; f++) e.step(steady(rms), 1 / 60);
+      return e.level;
+    };
+    expect(settle(0)).toBe(0);
+    expect(settle(0.3)).toBeGreaterThan(0.9);
+    expect(settle(0.02)).toBeLessThan(0.35);
+    expect(settle(0.3)).toBeGreaterThan(3 * settle(0.02));
+  });
+});
+
+describe("createEnergy beat surge", () => {
+  it("surges on an onset in proportion to its strength, decays within a beat, the same at 60 and 120 Hz", () => {
+    /** @param {number} strength @param {number} hz */
+    const run = (strength, hz) => {
+      const e = createEnergy();
+      const a = steady(0.3);
+      const trace = [];
+      for (let f = 0; f < hz; f++) {
+        a.onset = f === hz / 4;
+        a.onsetStrength = a.onset ? strength : 0;
+        e.step(a, 1 / hz);
+        expect(e.surge).toBeGreaterThanOrEqual(0);
+        expect(e.surge).toBeLessThanOrEqual(1);
+        if (f % (hz / 60) === hz / 60 - 1) trace.push(e.surge);
+      }
+      return trace;
+    };
+    const strong = run(1, 60);
+    const weak = run(0.3, 60);
+    expect(Math.max(...strong.slice(0, 14))).toBe(0);
+    expect(Math.max(...strong)).toBeGreaterThan(0.9);
+    expect(Math.max(...weak)).toBeCloseTo(0.3, 1);
+    expect(strong[15 + 30]).toBeLessThan(0.15); // half a second later
+    const fast = run(1, 120);
+    for (let i = 16; i < 60; i++) expect(fast[i]).toBeCloseTo(strong[i], 1);
+  });
+});
+
+describe("createPhrase swirl direction", () => {
+  it("with a confident tempo, reverses smoothly every PHRASE_BEATS beats, the same at 60 and 120 Hz", () => {
+    /** @param {number} hz */
+    const run = (hz) => {
+      const p = createPhrase();
+      const trace = [];
+      let prev = 1;
+      for (let f = 0; f < 40 * hz; f++) {
+        const t = f / hz;
+        const d = p.step(120, (t * 2) % 1, 0.8, 1 / hz);
+        expect(Math.abs(d)).toBeLessThanOrEqual(1);
+        expect(Math.abs(d - prev)).toBeLessThanOrEqual(REVERSE_RATE / hz + 1e-9); // no jumps
+        prev = d;
+        if (f % (hz / 60) === 0) trace.push(d);
+      }
+      return trace;
+    };
+    const tr = run(60);
+    const beatsToFrames = 30; // 120 BPM at 60 Hz
+    expect(tr[PHRASE_BEATS * beatsToFrames - 30]).toBe(1); // still forward just before the phrase ends
+    expect(tr[PHRASE_BEATS * beatsToFrames + 240]).toBe(-1); // reversed a few seconds into the next
+    expect(tr[2 * PHRASE_BEATS * beatsToFrames + 240]).toBe(1); // and back
+    const fast = run(120);
+    for (let i = 0; i < tr.length; i += 7) expect(fast[i]).toBeCloseTo(tr[i], 1);
+  });
+});
+
+describe("createPhrase without a tempo", () => {
+  it("holds its direction through steady music and reverses once when the energy changes for good", () => {
+    const p = createPhrase();
+    let d = 1;
+    for (let f = 0; f < 60 * 60; f++) d = p.step(0, 0, 0.5 + 0.05 * Math.sin(f / 20), 1 / 60);
+    expect(d).toBe(1);
+    let flips = 0;
+    let prevSign = 1;
+    for (let f = 0; f < 60 * 30; f++) {
+      d = p.step(0, 0, 1.2, 1 / 60); // the chorus kicks in and stays
+      if (Math.sign(d) !== prevSign && d !== 0) {
+        flips++;
+        prevSign = Math.sign(d);
       }
     }
-    expect(worstSens).toBeLessThanOrEqual(FLOW_SENS);
-    expect(worstSens).toBeGreaterThan(0.2 * FLOW_SENS); // the bound isn't wildly loose
+    expect(flips).toBe(1);
+    expect(d).toBe(-1);
   });
 });

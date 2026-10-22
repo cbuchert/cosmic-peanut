@@ -20,6 +20,12 @@
  *   still=N   deterministic: seeded Math.random, fixed 1/60 s steps, stop after N frames
  *   gain=G    scale the audio's level (waveform, rms, peak, spectrum, bands) by G, e.g. 0.05 for a
  *             quiet passage
+ *   level=L   like gain, but also scales bass/mid/treb (+Att), onsetStrength and flux; level=0 is
+ *             the host's silence (all zero, no onsets, silent: true)
+ *   bgm=R     background-motion probe (use with still=N): per frame, mean |Δ luminance| over a
+ *             320×180 copy of the canvas outside a circle of radius R (screen units, half the
+ *             short side = 1) round the centre, plus per-pixel black/white alternation counts;
+ *             published as __stats().bgm (see run.py --motion)
  */
 import { createDrums, createMelody, createMusic, createProtoDemo, createSynth, createTones } from "./synth.js";
 
@@ -36,12 +42,98 @@ const base = `/plugins/${repo}/`;
 const w = /** @type {any} */ (window);
 const still = Number(q.get("still") ?? 0);
 const gain = Number(q.get("gain") ?? 1);
+const level = q.get("level") === null ? null : Number(q.get("level"));
+const bgmRadius = q.get("bgm") === null ? null : Number(q.get("bgm"));
 
 /** Scale a frame's level in place (the synth rebuilds it every update). @param {any} a @param {number} g */
 function applyGain(a, g) {
   for (const k of ["waveform", "spectrum", "bands", "left", "right"]) if (a[k]) for (let i = 0; i < a[k].length; i++) a[k][i] *= g;
   a.rms *= g;
   a.peak *= g;
+}
+
+/** Scalar fields `level` scales on top of the arrays. */
+const LEVEL_SCALARS = ["rms", "peak", "bass", "mid", "treb", "bassAtt", "midAtt", "trebAtt", "onsetStrength", "flux"];
+/** @type {any} */
+const levelled = {};
+/** A copy of the frame at `level` (scalars copied each frame, so the synth's state is untouched). @param {any} a @param {number} g */
+function applyLevel(a, g) {
+  Object.assign(levelled, a);
+  for (const k of ["waveform", "spectrum", "bands", "left", "right"]) if (a[k]) for (let i = 0; i < a[k].length; i++) a[k][i] *= g;
+  for (const k of LEVEL_SCALARS) levelled[k] = (a[k] ?? 0) * g;
+  if (g === 0) {
+    levelled.onset = false;
+    levelled.silent = true;
+  }
+  return levelled;
+}
+
+/**
+ * Background-motion probe: frame-to-frame luminance change and per-pixel black/white alternation
+ * outside the centre circle (the foreground object), at a fixed 320×180.
+ * @param {number} radius screen units (half the canvas's short side = 1)
+ */
+function createMotionProbe(radius) {
+  const W = 320, H = 180, WIN = 60; // WIN: frames in a 1 s window (still mode steps 1/60 s)
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const g = /** @type {CanvasRenderingContext2D} */ (c.getContext("2d", { willReadFrequently: true }));
+  const n = W * H;
+  const mask = new Uint8Array(n);
+  let area = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const sx = ((x + 0.5) / W * 2 - 1) * (W / H), sy = (y + 0.5) / H * 2 - 1;
+    if (Math.hypot(sx, sy) > radius) { mask[y * W + x] = 1; area++; }
+  }
+  const prev = new Float32Array(n);
+  const state = new Int8Array(n); // −1 black, 1 white, 0 unknown
+  const ring = new Uint8Array(n * WIN); // flips per pixel per frame, last WIN frames
+  const inWin = new Uint16Array(n);
+  const maxWin = new Uint16Array(n);
+  const total = new Uint32Array(n);
+  /** @type {number[]} */ const motion = [];
+  /** @type {number[]} */ const onsets = [];
+  let frame = 0;
+  return {
+    /** @param {HTMLCanvasElement} canvas @param {any} audio */
+    sample(canvas, audio, measure = true) {
+      g.clearRect(0, 0, W, H);
+      g.drawImage(canvas, 0, 0, W, H);
+      const d = g.getImageData(0, 0, W, H).data;
+      let sum = 0;
+      const slot = (frame % WIN) * n;
+      for (let i = 0; i < n; i++) {
+        const l = (0.2126 * d[4 * i] + 0.7152 * d[4 * i + 1] + 0.0722 * d[4 * i + 2]) / 255;
+        if (mask[i] && frame > 0) sum += Math.abs(l - prev[i]);
+        prev[i] = l;
+        const s = l > 0.65 ? 1 : l < 0.35 ? -1 : state[i];
+        const flip = measure && mask[i] && state[i] !== 0 && s !== state[i] ? 1 : 0;
+        state[i] = s;
+        inWin[i] += flip - ring[slot + i];
+        ring[slot + i] = flip;
+        if (inWin[i] > maxWin[i]) maxWin[i] = inWin[i];
+        total[i] += flip;
+      }
+      if (measure) {
+        motion.push(frame > 0 ? sum / area : 0);
+        onsets.push(audio.onset ? audio.onsetStrength : 0);
+      }
+      frame++;
+    },
+    /** @param {number} seconds measured span */
+    stats(seconds) {
+      const maxs = [], rates = [];
+      for (let i = 0; i < n; i++) if (mask[i]) { maxs.push(maxWin[i]); rates.push(total[i] / seconds); }
+      const p = (/** @type {number[]} */ a, /** @type {number} */ q) => [...a].sort((x, y) => x - y)[Math.floor(q * (a.length - 1))];
+      // An alternation (Hz) is a black→white→black cycle: two flips.
+      return {
+        motion, onsets,
+        altHzP95: p(maxs, 0.95) / 2, altHzP99: p(maxs, 0.99) / 2, altHzMax: Math.max(...maxs) / 2,
+        meanFlipRateP95: p(rates, 0.95),
+      };
+    },
+  };
 }
 
 const bgEl = /** @type {HTMLElement} */ (document.getElementById("bg"));
@@ -204,6 +296,8 @@ async function main() {
   probe.height = 18;
   const pg = /** @type {CanvasRenderingContext2D} */ (probe.getContext("2d", { willReadFrequently: true }));
   const time = { now: 0, dt: 0, frame: 0 };
+  const probe2 = bgmRadius !== null ? createMotionProbe(bgmRadius) : null;
+  const BGM_WARMUP = 60; // frames before the probe starts measuring
   let running = true;
   let last = performance.now();
   const start = last;
@@ -219,8 +313,9 @@ async function main() {
     time.now = (ts - start) / 1000;
     time.dt = frames === 0 ? 1 / 60 : dt;
     time.frame = frames++;
-    const audio = synth.update(time.now, time.dt);
+    let audio = synth.update(time.now, time.dt);
     if (gain !== 1) applyGain(audio, gain);
+    if (level !== null) audio = applyLevel(audio, level);
     const t0 = performance.now();
     try {
       for (let r = 0; r < rep; r++) {
@@ -240,6 +335,7 @@ async function main() {
       for (let i = 0; i < d.length; i += 4) s += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
       lum.push(s / (d.length / 4) / 255);
     }
+    if (probe2) probe2.sample(canvas, audio, frames > BGM_WARMUP);
     if (still && frames >= still) {
       w.__still = true;
       return;
@@ -267,6 +363,7 @@ async function main() {
       intervalP99: pct(intervals, 0.99),
       size: [size.width, size.height],
       lum,
+      bgm: probe2 ? probe2.stats((frames - BGM_WARMUP) / 60) : null,
       errors,
     };
   };

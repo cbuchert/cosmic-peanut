@@ -20,8 +20,11 @@ export function stripe(v, w, t) {
 export const BASE_K = 32;
 /** Largest |field value| on screen, including warp (screen units, half the short side = 1). */
 export const FIELD_MAX = 2.8;
-/** Largest |∂field/∂flow| per unit of Warp (checked against the mirrored field in tests). */
-export const FLOW_SENS = 1.6;
+/**
+ * Largest |∂field/∂flow| per unit of Warp outside the skull's bounding circle (checked against the
+ * mirrored field in tests; inside, the skull covers the stripes).
+ */
+export const FLOW_SENS = 1;
 
 /** Most stripe inversions per second any pixel may see with reduceFlashing (WCAG: 3 flashes/s). */
 export const MAX_INVERSIONS = 3;
@@ -324,26 +327,49 @@ function smin(/** @type {number} */ a, /** @type {number} */ b, /** @type {numbe
   return b + (a - b) * h - k * h * (1 - h);
 }
 
+/** Most twist (radians at the skull's centre) per unit of Warp: the whirlpool at its tightest. */
+export const TWIST_MAX = 2;
+/** Largest |∂field/∂twist| outside the skull's bounding circle (checked against the mirror). */
+export const TWIST_SENS = 0.65;
+/** Smooth-min width (screen units) where an emitter's loops merge with the skull's. */
+export const EMIT_K = 0.12;
+
 /**
- * The stripe field of shaders/skull/opart.glsl opField, in JS, for tests of its bounds (FIELD_MAX
- * and FLOW_SENS, which the anti-strobe budget relies on). Keep the two in step.
+ * @typedef {{ flow: number, warp: number, outline: number[], twist?: number, emitters?: Float32Array }} FieldState
+ * outline: [screen units per object unit, tilt, jaw drop] (u_outline); twist: the whirlpool's
+ * angle at the centre (u_twist); emitters: (x, y, offset, -) per emitter (u_emitters).
+ */
+
+/**
+ * The stripe field of shaders/skull/opart.glsl opField, in JS, for tests of its bounds (FIELD_MAX,
+ * FLOW_SENS, TWIST_SENS, which the anti-strobe budget relies on). Keep the two in step.
  * @param {number} x screen units, skull at the origin
  * @param {number} y
- * @param {number} flow warp clock
- * @param {number} warp
- * @param {number[]} outline [screen units per object unit, tilt, jaw drop] (u_outline)
+ * @param {FieldState} st
  */
-export function opField(x, y, flow, warp, outline) {
+export function opField(x, y, st) {
+  const { flow, warp, outline } = st;
+  const twist = st.twist ?? 0;
   const ox = fbm(x * 0.8, y * 0.8 + 0.5 * flow);
   const oy = fbm(x * 0.8 + 5.2 - 0.4 * flow, y * 0.8 + 1.3);
   let qx = x + warp * 0.42 * (ox * 2 - 1);
   let qy = y + warp * 0.42 * (oy * 2 - 1);
   const r = Math.hypot(qx, qy);
-  const a = warp * 1.3 * Math.exp(-0.8 * r) * Math.sin(0.6 * flow + 1);
+  const a = twist * Math.exp(-0.8 * r);
   const c = Math.cos(a);
   const s = Math.sin(a);
   [qx, qy] = [c * qx - s * qy, s * qx + c * qy];
-  // outline(q)
+  let line = outlineField(qx, qy, outline);
+  const em = st.emitters;
+  if (em) for (let i = 0; i + 3 < em.length; i += 4) line = smin(line, Math.hypot(qx - em[i], qy - em[i + 1]) + em[i + 2], EMIT_K);
+  return line + 0.25 * warp * (fbm(qx * 1.6 - 0.3 * flow, qy * 1.6) - 0.5);
+}
+
+/**
+ * opart.glsl outline(): signed distance (screen units, roughly) to the skull's silhouette.
+ * @param {number} qx @param {number} qy @param {number[]} outline [scale, tilt, jaw drop]
+ */
+export function outlineField(qx, qy, outline) {
   const [k, tilt, drop] = outline;
   const ct = Math.cos(-tilt);
   const st = Math.sin(-tilt);
@@ -351,6 +377,115 @@ export function opField(x, y, flow, warp, outline) {
   const py = (st * qx + ct * qy) / k;
   const cranium = sdEllipse2(px, py - 0.2, 0.95, 1.0);
   const jaw = sdEllipse2(px, py + 0.72 + drop, 0.52, 0.34);
-  const line = smin(cranium, jaw, 0.3) * k;
-  return line + 0.25 * warp * (fbm(qx * 1.6 - 0.3 * flow, qy * 1.6) - 0.5);
+  return smin(cranium, jaw, 0.3) * k;
+}
+
+/** Loudness range (dBFS of `audio.rms`) the stripes' drive maps onto 0–1. */
+export const LOUD_FLOOR_DB = -42;
+export const LOUD_TOP_DB = -14;
+
+/**
+ * How loud the music is, 0–1, from the raw (un-gained) `audio.rms`: 0 at or below LOUD_FLOOR_DB
+ * (silence, room noise), 1 from LOUD_TOP_DB (mastered music), linear in dB between.
+ * @param {number} rms
+ */
+export function loudness(rms) {
+  if (!(rms > 0)) return 0;
+  const db = 20 * Math.log10(rms);
+  return clamp((db - LOUD_FLOOR_DB) / (LOUD_TOP_DB - LOUD_FLOOR_DB), 0, 1);
+}
+
+/** Seconds for the energy level to rise toward louder music, and to fall back when it quietens. */
+const ENERGY_ATTACK = 0.3;
+const ENERGY_RELEASE = 1.2;
+/** Seconds for a beat surge to fall to 1/e. */
+export const SURGE_TAU = 0.22;
+
+/**
+ * The music's energy for the stripes: `level` (0–1.3), the loudness weighted by the bass, smoothed
+ * (fast attack, slow release, so a loud passage spins things up and a quiet one lets them relax),
+ * and `surge` (0–1), a short envelope each onset raises, sized by its strength. Exponential
+ * smoothing, so 60 Hz and 120 Hz displays follow the same curve.
+ */
+export function createEnergy() {
+  const e = {
+    level: 0,
+    surge: 0,
+    /**
+     * @param {{ rms: number, bassAtt: number, onset: boolean, onsetStrength: number, silent: boolean }} audio
+     * @param {number} dt seconds
+     */
+    step(audio, dt) {
+      if (!(dt > 0)) return e;
+      const loud = audio.silent ? 0 : loudness(audio.rms);
+      const target = loud * (0.7 + 0.3 * clamp(audio.bassAtt || 0, 0, 2));
+      const tau = target > e.level ? ENERGY_ATTACK : ENERGY_RELEASE;
+      e.level += (target - e.level) * (1 - Math.exp(-dt / tau));
+      e.surge *= Math.exp(-dt / SURGE_TAU);
+      if (audio.onset && !audio.silent) e.surge = Math.max(e.surge, clamp(audio.onsetStrength || 0, 0, 1) * (0.4 + 0.6 * loud));
+      return e;
+    },
+  };
+  return e;
+}
+
+/** Beats per phrase (8 bars of 4/4): the swirl reverses at each phrase boundary. */
+export const PHRASE_BEATS = 32;
+/** Fastest the swirl direction may change (per second): a full reversal takes 2 / REVERSE_RATE s. */
+export const REVERSE_RATE = 0.8;
+/** Without a tempo: seconds between reversals at least, and the energy change that triggers one. */
+const PHRASE_MIN_S = 8;
+const PHRASE_JUMP = 0.25;
+
+/**
+ * The swirl's direction, −1..1: it reverses at phrase boundaries (every PHRASE_BEATS beats while
+ * the tempo is confident, counted where beatPhase wraps), or without a tempo when the energy
+ * changes for good (a fast average leaves a slow one by PHRASE_JUMP, at most every PHRASE_MIN_S).
+ * The direction slews at REVERSE_RATE, so the whirlpool slows, stops and spins back. Deterministic.
+ */
+export function createPhrase() {
+  let dir = 1;
+  let target = 1;
+  let beats = 0;
+  let lastPhase = 0;
+  let fast = 0;
+  let slow = 0;
+  let since = 0;
+  let armed = true;
+  return {
+    /**
+     * @param {number} bpm `audio.bpm` (0 until confident)
+     * @param {number} beatPhase `audio.beatPhase`
+     * @param {number} energy createEnergy level
+     * @param {number} dt seconds
+     * @returns {number} direction, −1..1
+     */
+    step(bpm, beatPhase, energy, dt) {
+      if (!(dt > 0)) return dir;
+      since += dt;
+      const ph = clamp(beatPhase || 0, 0, 1);
+      if (bpm > 0) {
+        if (ph < lastPhase - 0.5 && ++beats >= PHRASE_BEATS) {
+          beats = 0;
+          target = -target;
+        }
+      } else {
+        beats = 0;
+      }
+      lastPhase = ph;
+      const e = clamp(energy || 0, 0, 2);
+      fast += (e - fast) * (1 - Math.exp(-dt / 1));
+      slow += (e - slow) * (1 - Math.exp(-dt / 8));
+      const gap = Math.abs(fast - slow);
+      if (!(bpm > 0) && armed && gap > PHRASE_JUMP && since >= PHRASE_MIN_S) {
+        target = -target;
+        since = 0;
+        armed = false;
+      }
+      if (gap < 0.4 * PHRASE_JUMP) armed = true;
+      const max = REVERSE_RATE * dt;
+      dir += clamp(target - dir, -max, max);
+      return dir;
+    },
+  };
 }
