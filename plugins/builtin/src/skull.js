@@ -85,6 +85,7 @@ export default async function create(ctx) {
   const bulge = createBulge(SECTORS);
   const emitters = createEmitters(EMITTERS);
   const spot = new Float32Array(2);
+  /** u_outline: the skull's outline at rest (screen units per object unit, tilt, jaw drop). */
   const outline = [1, 0, 0];
   let sinceEmit = Infinity;
   let emitSeq = 0;
@@ -94,7 +95,7 @@ export default async function create(ctx) {
   const knobs = { reactivity: 1, warp: 1, speed: 1, jaw: 1 };
   const eff = { speed: 1, warp: 1, nod: 1, ripple: 1, jaw: 1, reactivity: 1 };
   const motionDrive = { jaw: 1, reactivity: 1, nod: 1 };
-  const stripeIn = { density: 1, speed: 1, warp: 1, reactivity: 1, bassAtt: 1, energy: 0, surge: 0, dir: 1 };
+  const stripeIn = { density: 1, speed: 1, warp: 1, reactivity: 1, bassAtt: 1, energy: 0, surge: 0, dir: 1, local: 0 };
   let clock = 0;
   resolveLook(ctx.params.mode, ctx.params.stripes, look);
 
@@ -148,27 +149,22 @@ export default async function create(ctx) {
 
       energy.step(audio, dt);
       const dir = phrase.step(audio.bpm, audio.beatPhase, energy.level, dt);
-      stripeIn.density = Number(p.density);
-      stripeIn.speed = eff.speed;
-      stripeIn.warp = eff.warp;
-      stripeIn.reactivity = eff.reactivity;
-      stripeIn.bassAtt = audio.bassAtt;
-      stripeIn.energy = energy.level;
-      stripeIn.surge = energy.surge * eff.ripple;
-      stripeIn.dir = dir;
-      drive.step(dt, stripeIn, ctx.reduceFlashing);
+      const size = Number(p.size) || 1;
+      const focal = FOCAL * size;
+      // The stripes flow round the skull at rest, not round its nods, chomps and bass swells: those
+      // would move every contour on the screen at once, far faster than the anti-strobe budget.
+      outline[0] = focal / CAM_DIST;
+
+      // The local effects first: the drive gets what they leave of the per-pixel budget. On a beat
+      // they ease off (pace) so the surge can take most of it: the loops lurch outward on the hit.
+      const surge = energy.surge * eff.ripple;
+      const pace = 1 - 0.8 * Math.min(1, surge * Math.min(1, eff.reactivity));
       drive.duty = thickness.step(audio.bass, eff.reactivity, dt, ctx.reduceFlashing);
       const launch = trigger.step(audio.onset, audio.onsetStrength, eff.reactivity * eff.ripple, dt, ctx.reduceFlashing);
       if (launch > 0) ripples.spawn(launch);
-      ripples.step(dt);
-      waveNow = bend.step(audio.waveform, dt);
-      bulgeNow = bulge.step(audio.bands, eff.reactivity * eff.ripple, dt);
-
-      const size = Number(p.size) || 1;
-      const focal = FOCAL * size;
-      outline[0] = (focal / CAM_DIST) * motion.scale;
-      outline[1] = motion.roll;
-      outline[2] = 0.55 * Math.sin(motion.jaw);
+      ripples.step(dt, pace);
+      waveNow = bend.step(audio.waveform, dt, pace);
+      bulgeNow = bulge.step(audio.bands, eff.reactivity * eff.ripple, dt, pace);
       // Strong beats seed a loop emitter where the spectrum is loudest, alternating sides.
       sinceEmit += dt;
       if (launch > 0.5 && sinceEmit >= EMIT_GAP * (eff.ripple < 1 ? 3 : 1)) {
@@ -181,7 +177,19 @@ export default async function create(ctx) {
           sinceEmit = 0;
         }
       }
-      emitters.step(dt, drive.freq, outline, ctx.reduceFlashing);
+      // (The frequency can only breathe up by a hair this frame: 2% covers it.)
+      emitters.step(dt, drive.freq * 1.02, outline, ctx.reduceFlashing, pace);
+
+      stripeIn.density = Number(p.density);
+      stripeIn.speed = eff.speed;
+      stripeIn.warp = eff.warp;
+      stripeIn.reactivity = eff.reactivity;
+      stripeIn.bassAtt = audio.bassAtt;
+      stripeIn.energy = energy.level;
+      stripeIn.surge = surge;
+      stripeIn.dir = dir;
+      stripeIn.local = thickness.rate + ripples.rate + bend.rate + bulge.rate + emitters.rate;
+      drive.step(dt, stripeIn, ctx.reduceFlashing);
       const spin = eyes.step(audio.trebAtt, eff.reactivity, dt) % TAU;
       lookColors(look.acid, clock, colors);
 

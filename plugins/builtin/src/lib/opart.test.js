@@ -41,6 +41,7 @@ import {
   RIPPLE_PHASE,
   RIPPLE_RESERVE,
   RIPPLE_SUM,
+  RIPPLE_VISIBLE,
   ripplePhase,
   TWIST_MAX,
   TWIST_SENS,
@@ -76,7 +77,7 @@ describe("stripe (anti-aliased sign of sin)", () => {
 function violentInput(knobs = {}) {
   let seed = 11;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  const input = { density: 2, speed: 2, warp: 2, reactivity: 2, bassAtt: 1, energy: 1, surge: 0, dir: 1, ...knobs };
+  const input = { density: 2, speed: 2, warp: 2, reactivity: 2, bassAtt: 1, energy: 1, surge: 0, dir: 1, local: 0, ...knobs };
   return {
     input,
     next() {
@@ -130,13 +131,37 @@ function worstInversions(hz, seconds, reduceFlashing, knobs) {
 }
 
 describe("createStripeDrive anti-strobe", () => {
-  it("with reduceFlashing, keeps every pixel within DRIVE_BUDGET of phase a second at any density, speed and warp", () => {
-    const most = Math.floor(DRIVE_BUDGET / Math.PI) + 1; // flips a 1 s window can hold at that rate
-    expect(2 * MAX_ALT_HZ * Math.PI * 0.9).toBeCloseTo(RATE_BUDGET, 9);
+  it("with reduceFlashing, keeps every pixel's phase rate within what the local effects leave of RATE_BUDGET, at any density, speed and warp", () => {
     for (const density of [0.5, 1, 2])
       for (const speed of [0, 1, 2])
         for (const warp of [0, 1, 2])
-          for (const hz of [60, 120]) expect(worstInversions(hz, 4, true, { density, speed, warp }), `${density} ${speed} ${warp} ${hz} Hz`).toBeLessThanOrEqual(most);
+          for (const hz of [60, 120]) {
+            const d = createStripeDrive();
+            const v = violentInput({ density, speed, warp });
+            let seed = 3;
+            const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+            for (let f = 0; f < hz * 4; f++) {
+              v.next();
+              const local = rnd() * (RATE_BUDGET - DRIVE_BUDGET); // what the local effects used
+              const prev = { phase: d.phase, freq: d.freq, flow: d.flow, twist: d.twist };
+              d.step(1 / hz, { ...v.input, local }, true);
+              const dk = Math.abs(d.freq - prev.freq);
+              const worst = dk * FIELD_MAX + (d.phase - prev.phase) + (prev.freq + dk) * (FLOW_SENS * warp * Math.abs(d.flow - prev.flow) + TWIST_SENS * Math.abs(d.twist - prev.twist));
+              expect(worst * hz + local, `${density} ${speed} ${warp} ${hz} Hz`).toBeLessThanOrEqual(RATE_BUDGET * (1 + 1e-9));
+            }
+          }
+  });
+
+  it("gives a beat surge the budget the local effects leave unused", () => {
+    const drift = (/** @type {number} */ local) => {
+      const d = createStripeDrive();
+      const input = { density: 1, speed: 1, warp: 1, reactivity: 1, bassAtt: 1, energy: 1, surge: 1, dir: 1, local };
+      for (let f = 0; f < 600; f++) d.step(1 / 60, input, true);
+      const before = d.phase;
+      d.step(1 / 60, input, true);
+      return (d.phase - before) * 60;
+    };
+    expect(drift(0)).toBeGreaterThan(1.5 * drift(RATE_BUDGET - DRIVE_BUDGET));
   });
 
   it("without reduceFlashing, max params may flow faster", () => {
@@ -189,8 +214,8 @@ describe("createRipples ring buffer", () => {
       r.step(1 / 60);
       seen.push([r.data[0], r.data[1]]);
     }
-    expect(seen[59][0]).toBeCloseTo(RIPPLE_BIRTH + RIPPLE_SPEED * 1, 5);
-    expect(seen[119][0]).toBeCloseTo(RIPPLE_BIRTH + RIPPLE_SPEED * 2, 5);
+    expect(seen[0][0]).toBeGreaterThan(RIPPLE_BIRTH);
+    expect(seen[119][0] - seen[59][0]).toBeCloseTo(RIPPLE_SPEED * 1, 4); // once out from under the skull
     expect(seen[0][1]).toBeGreaterThan(0.9);
     for (let i = 1; i < seen.length; i++) expect(seen[i][1]).toBeLessThanOrEqual(seen[i - 1][1]);
     expect(seen[seen.length - 1][1]).toBe(0);
@@ -206,8 +231,8 @@ describe("createRipples ring buffer", () => {
     for (let i = 0; i < 4; i++) radii.push(r.data[2 * i]);
     radii.sort((a, b) => a - b);
     expect(r.data.length).toBe(8);
-    expect(radii[0]).toBeCloseTo(RIPPLE_BIRTH + RIPPLE_SPEED * 0.3, 5); // the 5th and 6th were skipped
-    expect(radii[3]).toBeCloseTo(RIPPLE_BIRTH + RIPPLE_SPEED * 0.6, 5);
+    expect(radii[3] - radii[0]).toBeCloseTo(RIPPLE_SPEED * 0.3, 4); // the 5th and 6th were skipped
+    expect(radii[0]).toBeGreaterThan(RIPPLE_BIRTH + RIPPLE_SPEED * 0.3);
     const big = createRipples(8);
     big.spawn(1);
     big.spawn(1);
@@ -509,7 +534,7 @@ describe("createStripeDrive energy", () => {
     expect(surge).toBeGreaterThan(2.5 * loud); // the beats carry most of the motion
     const weak = settledDrift({ energy: 1, surge: 0.4 });
     expect(weak - loud).toBeLessThan(0.35 * (surge - loud)); // weak onsets only nudge
-    expect(surge).toBeLessThanOrEqual(DRIVE_BUDGET + 1e-9);
+    expect(surge).toBeLessThanOrEqual(RATE_BUDGET + 1e-9);
   });
 });
 
@@ -775,5 +800,128 @@ describe("opartDefines", () => {
       expect(get(name)).toMatch(/^-?\d+\.\d+(e-?\d+)?$/);
       expect(Number(get(name))).toBeCloseTo(v, 9);
     }
+  });
+});
+
+describe("local effects report the phase rate they use", () => {
+  it("ripples: `rate` bounds every visible point's ripple phase rate, stays within RIPPLE_RESERVE, and is 0 when idle", () => {
+    for (const hz of [60, 120]) {
+      const r = createRipples(8);
+      r.step(1 / hz);
+      expect(r.rate).toBe(0);
+      let seed = 7;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      const ds = Array.from({ length: 240 }, (_, i) => RIPPLE_VISIBLE + (i / 239) * (2.4 - RIPPLE_VISIBLE));
+      let prev = ds.map((d) => ripplePhase(d, r.data));
+      let early = Infinity;
+      for (let f = 0; f < hz * 6; f++) {
+        if (rnd() < 0.05) r.spawn(rnd() < 0.5 ? 1 : rnd());
+        r.step(1 / hz);
+        expect(r.rate).toBeLessThanOrEqual(RIPPLE_RESERVE + 1e-6);
+        const now = ds.map((d) => ripplePhase(d, r.data));
+        for (let i = 0; i < ds.length; i++) expect(Math.abs(now[i] - prev[i]) * hz).toBeLessThanOrEqual(r.rate * 1.02 + 0.05); // + a birth: ≤ RIPPLE_PHASE·e⁻⁹ rad
+        prev = now;
+      }
+      const one = createRipples(8);
+      one.spawn(1);
+      one.step(1 / hz);
+      early = one.rate;
+      expect(early).toBeLessThan(0.25 * RIPPLE_RESERVE); // a newborn ring is still under the skull
+    }
+  });
+});
+
+describe("bulge, wave bend, thickness and emitters report their phase rate", () => {
+  it("bulge: `rate` is BULGE_PHASE × its fastest sector's change, within BULGE_RESERVE", () => {
+    const b = createBulge(16);
+    const loud = new Float32Array(64).fill(1);
+    let prev = Array.from(b.step(new Float32Array(64), 1, 1 / 60));
+    expect(b.rate).toBe(0);
+    for (let f = 0; f < 120; f++) {
+      const now = Array.from(b.step(f < 60 ? loud : new Float32Array(64), 1, 1 / 60));
+      const most = Math.max(...now.map((v, i) => Math.abs(v - prev[i])));
+      expect(b.rate).toBeCloseTo(BULGE_PHASE * most * 60, 4);
+      expect(b.rate).toBeLessThanOrEqual(BULGE_RESERVE + 1e-6);
+      prev = now;
+    }
+  });
+});
+
+describe("wave bend and thickness report their phase rate", () => {
+  it("wave bend: `rate` is WAVE_PHASE × its fastest point's change, within WAVE_RESERVE", () => {
+    const b = createWaveBend(32);
+    const wave = new Float32Array(2048);
+    let prev = Array.from(b.step(wave, 1 / 60));
+    for (let f = 0; f < 120; f++) {
+      for (let i = 0; i < wave.length; i++) wave[i] = Math.sin(i / 50 + f / 7) * (f < 60 ? 1 : 0.1);
+      const now = Array.from(b.step(wave, 1 / 60));
+      const most = Math.max(...now.map((v, i) => Math.abs(v - prev[i])));
+      expect(b.rate).toBeCloseTo(WAVE_PHASE * most * 60, 4);
+      expect(b.rate).toBeLessThanOrEqual(WAVE_RESERVE + 1e-6);
+      prev = now;
+    }
+  });
+});
+
+describe("thickness and emitters report their phase rate", () => {
+  it("thickness: `rate` is how fast the stripe edges (asin of the threshold) moved, within DUTY_RESERVE", () => {
+    const t = createThickness();
+    let prev = 0;
+    for (let f = 0; f < 240; f++) {
+      const v = t.step(f % 20 === 0 ? 3 : 0.2, 2, 1 / 60, true);
+      expect(t.rate).toBeCloseTo(Math.abs(Math.asin(v) - Math.asin(prev)) * 60, 6);
+      expect(t.rate).toBeLessThanOrEqual(DUTY_RESERVE + 1e-9);
+      prev = v;
+    }
+  });
+
+  it("emitters: `rate` (freq × the fastest offset's change) bounds the field's phase change, within EMIT_RESERVE", () => {
+    const outline = [0.594, 0, 0];
+    const st = { flow: 1, warp: 1, outline, twist: 0.4 };
+    const em = createEmitters(6);
+    const pts = Array.from({ length: 200 }, (_, i) => [Math.cos(i) * (0.9 + (i % 9) * 0.15), Math.sin(i * 1.3) * (0.9 + (i % 7) * 0.12)]);
+    let prev = pts.map(([x, y]) => opField(x, y, { ...st, emitters: em.data }));
+    let seen = 0;
+    for (let f = 0; f < 60 * 14; f++) {
+      if (f % 50 === 0) em.spawn(Math.cos(f) * 1.3, Math.sin(f) * 0.9, outline);
+      em.step(1 / 60, BASE_K, outline, true);
+      expect(em.rate).toBeLessThanOrEqual(EMIT_RESERVE * 1.001);
+      const now = pts.map(([x, y]) => opField(x, y, { ...st, emitters: em.data }));
+      for (let i = 0; i < pts.length; i++) expect(Math.abs(now[i] - prev[i]) * BASE_K * 60).toBeLessThanOrEqual(em.rate * 1.001 + 1e-6);
+      seen = Math.max(seen, em.rate);
+      prev = now;
+    }
+    expect(seen).toBeGreaterThan(0.5 * EMIT_RESERVE);
+    for (let f = 0; f < 60 * 30; f++) em.step(1 / 60, BASE_K, outline, true);
+    expect(em.rate).toBe(0);
+  });
+});
+
+describe("local effects pause for the beat", () => {
+  it("a pace below 1 slows the wave bend, bulge, ripples and emitters (and their rates) so a beat surge gets the budget", () => {
+    const wave = new Float32Array(2048).fill(1);
+    const loud = new Float32Array(64).fill(1);
+    const outline = [0.594, 0, 0];
+    /** @param {number} pace */
+    const run = (pace) => {
+      const b = createWaveBend(32);
+      const g = createBulge(16);
+      const r = createRipples(8);
+      const e = createEmitters(6);
+      r.spawn(1);
+      e.spawn(1.3, 0, outline);
+      for (let f = 0; f < 30; f++) {
+        b.step(wave, 1 / 60, pace);
+        g.step(loud, 1, 1 / 60, pace);
+        r.step(1 / 60, pace);
+        e.step(1 / 60, BASE_K, outline, true, pace);
+      }
+      return { bend: b.rate, bulge: g.rate, ripple: r.rate, emit: e.rate, radius: r.data[1] > 0 ? r.data[0] : NaN };
+    };
+    const full = run(1);
+    const slow = run(0.25);
+    for (const k of /** @type {const} */ (["bend", "bulge", "emit"])) expect(slow[k], k).toBeCloseTo(0.25 * full[k], 6);
+    expect(slow.ripple).toBeLessThan(0.5 * full.ripple);
+    expect(slow.radius).toBeLessThan(full.radius);
   });
 });

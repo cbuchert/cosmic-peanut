@@ -64,7 +64,7 @@ export const DRIFT_GAIN = 1.2;
  * Extra drift (rad/s) a full beat surge adds (by surge², so weak onsets only nudge): the loops
  * lurch outward on each beat, within what the budget leaves.
  */
-export const SURGE_DRIFT = 6;
+export const SURGE_DRIFT = 14;
 /** Fastest the whirlpool's twist may change (rad/s) before the budget. */
 const TWIST_SLEW = 0.35;
 
@@ -78,8 +78,9 @@ const clamp = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
  * kicks the drift, and the twist turns with the phrase direction (`dir`).
  *
  * Anti-strobe: the worst pixel's phase rate, |dk|·FIELD_MAX + drift + freq·(FLOW_SENS·warp·flow' +
- * TWIST_SENS·|twist'|), stays within DRIVE_BUDGET (×FREE_FACTOR with reduceFlashing off). The shape
- * changes take at most SHAPE_SHARE of it; the drift gets the rest.
+ * TWIST_SENS·|twist'|), stays within what the local effects leave of RATE_BUDGET this frame (at
+ * least DRIVE_BUDGET; ×FREE_FACTOR with reduceFlashing off). The shape changes take at most
+ * SHAPE_SHARE of it; the drift gets the rest, so a beat surge can use whatever is free.
  */
 export function createStripeDrive() {
   const d = {
@@ -96,7 +97,8 @@ export function createStripeDrive() {
     /**
      * @param {number} dt
      * @param {{ density: number, speed: number, warp: number, reactivity: number, bassAtt: number,
-     *   energy: number, surge: number, dir: number }} input
+     *   energy: number, surge: number, dir: number, local?: number }} input `local`: the phase rate
+     *   (rad/s) the local effects used at their worst pixel this frame (their `rate`s)
      * @param {boolean} reduceFlashing
      */
     step(dt, input, reduceFlashing) {
@@ -108,7 +110,9 @@ export function createStripeDrive() {
       const energy = clamp(input.energy || 0, 0, 1.5);
       const surge = clamp(input.surge || 0, 0, 1);
       const dir = clamp(input.dir || 0, -1, 1);
-      const budget = DRIVE_BUDGET * (reduceFlashing ? 1 : FREE_FACTOR) * dt;
+      // What the local effects didn't use this frame (they never use more than their reserves).
+      const local = clamp(input.local || 0, 0, RATE_BUDGET - DRIVE_BUDGET);
+      const budget = (RATE_BUDGET * (reduceFlashing ? 1 : FREE_FACTOR) - local) * dt;
 
       const target = BASE_K * density * (1 + BREATHE * react * 0.5 * clamp((input.bassAtt || 0) - 1, -1, 1));
       let dk = clamp((target - d.freq) * (1 - Math.exp(-dt / BREATHE_TAU)), -BREATHE_SLEW * dt, BREATHE_SLEW * dt);
@@ -155,7 +159,9 @@ export function createThickness() {
   const flash = createFlashLimiter();
   let env = 0;
   let out = 0;
-  return {
+  const t = {
+    /** Phase rate (rad/s) the stripe edges moved at in the last step. */
+    rate: 0,
     /**
      * @param {number} bass `audio.bass` (1 = average)
      * @param {number} reactivity Reactivity param
@@ -164,16 +170,22 @@ export function createThickness() {
      * @returns {number} threshold for stripe(), 0 to DUTY_MAX
      */
     step(bass, reactivity, dt, reduceFlashing) {
-      if (!(dt > 0)) return out;
+      if (!(dt > 0)) {
+        t.rate = 0;
+        return out;
+      }
       env *= Math.exp(-dt / 0.4);
       env = Math.max(env, clamp(((bass || 0) - 1) * 0.5 * clamp(reactivity, 0, 2), 0, 1));
       const target = DUTY_MAX * clamp(flash.step(env, dt, reduceFlashing), 0, 1);
       // d(asin x)/dt = x'/√(1 − x²) ≤ x'/√(1 − DUTY_MAX²)
       const max = DUTY_RESERVE * Math.sqrt(1 - DUTY_MAX * DUTY_MAX) * dt;
+      const before = out;
       out += clamp(target - out, -max, max);
+      t.rate = Math.abs(Math.asin(out) - Math.asin(before)) / dt;
       return out;
     },
   };
+  return t;
 }
 
 /** Ripple ring speed (screen units/s, half the short side = 1), width and fade (s to 1/e). */
@@ -183,10 +195,19 @@ export const RIPPLE_TAU = 2;
 /** Phase (rad) a full-strength ripple shifts the stripes by at its crest. */
 export const RIPPLE_PHASE = 2;
 /**
- * Rings are born this far inside the skull's silhouette (in units of the outline distance, which is
- * negative inside), so they rise out from under the skull instead of popping up at its edge.
+ * Outline distance from which the stripes may be visible: the skull covers everything deeper inside
+ * its silhouette (the 2D outline is only roughly the 3D skull's edge, hence the margin).
  */
-export const RIPPLE_BIRTH = -2.2 * RIPPLE_WIDTH;
+export const RIPPLE_VISIBLE = -0.1;
+/**
+ * Rings are born deep inside the skull's silhouette (3 widths below RIPPLE_VISIBLE, so a birth
+ * changes no visible phase), race out at RIPPLE_FAST while still hidden, then rise from under the
+ * skull at RIPPLE_SPEED.
+ */
+export const RIPPLE_BIRTH = RIPPLE_VISIBLE - 3 * RIPPLE_WIDTH;
+const RIPPLE_FAST = 2.5;
+const RIPPLE_FAST_END = RIPPLE_VISIBLE - 2.2 * RIPPLE_WIDTH;
+const SLOPE_MAX = Math.sqrt(2 / Math.E); // max |d/dx exp(−x²)|
 /** A ripple ends past this radius (off any screen) or below 1% amplitude. */
 const RIPPLE_END_R = 3.2;
 /**
@@ -206,9 +227,12 @@ export const RIPPLE_SUM = RIPPLE_RESERVE / (RIPPLE_PHASE * (Math.sqrt(2 / Math.E
 export function createRipples(cap) {
   const age = new Float32Array(cap).fill(Infinity);
   const strength = new Float32Array(cap);
+  const radius = new Float32Array(cap);
   let next = 0;
   const r = {
     data: new Float32Array(cap * 2),
+    /** The most any visible point's ripple phase changes (rad/s) as of the last step. */
+    rate: 0,
     /** @param {number} s amplitude, 0–1 */
     spawn(s) {
       let alive = 0;
@@ -223,20 +247,30 @@ export function createRipples(cap) {
       next = free;
       age[next] = 0;
       strength[next] = a;
+      radius[next] = RIPPLE_BIRTH;
       r.data[2 * next] = RIPPLE_BIRTH;
       r.data[2 * next + 1] = a;
       next = (next + 1) % cap;
     },
-    /** @param {number} dt */
-    step(dt) {
+    /** @param {number} dt @param {number} [pace] 0–1: slows the rings (a beat surge takes the budget) */
+    step(dt, pace = 1) {
+      let rate = 0;
       for (let i = 0; i < cap; i++) {
         age[i] += dt;
-        const radius = RIPPLE_BIRTH + age[i] * RIPPLE_SPEED;
+        const speed = (radius[i] < RIPPLE_FAST_END ? RIPPLE_FAST : RIPPLE_SPEED) * clamp(pace, 0, 1);
+        radius[i] += speed * dt;
         const amp = strength[i] * Math.exp(-age[i] / RIPPLE_TAU);
-        const alive = radius < RIPPLE_END_R && amp > 0.01 * strength[i];
-        r.data[2 * i] = alive ? radius : 0;
+        const alive = radius[i] < RIPPLE_END_R && amp > 0.01 * strength[i];
+        r.data[2 * i] = alive ? radius[i] : 0;
         r.data[2 * i + 1] = alive ? amp : 0;
+        if (!alive) continue;
+        // Visible points have x = (d − radius)/width ≥ x0.
+        const x0 = (RIPPLE_VISIBLE - radius[i]) / RIPPLE_WIDTH;
+        const slope = x0 <= Math.SQRT1_2 ? SLOPE_MAX : 2 * x0 * Math.exp(-x0 * x0);
+        const peak = x0 <= 0 ? 1 : Math.exp(-x0 * x0);
+        rate += RIPPLE_PHASE * amp * ((slope * speed) / RIPPLE_WIDTH + peak / RIPPLE_TAU);
       }
+      r.rate = rate;
     },
   };
   return r;
@@ -298,15 +332,19 @@ export const WAVE_SLEW = 0.8;
  */
 export function createWaveBend(n) {
   const out = new Float32Array(n);
-  return {
+  const w = {
+    /** Phase rate (rad/s) the bend used at its worst pixel in the last step. */
+    rate: 0,
     /**
      * @param {Float32Array} waveform `audio.waveform`, −1..1
      * @param {number} dt
+     * @param {number} [pace] 0–1: slows the bend (a beat surge takes the budget)
      * @returns {Float32Array} n values in −1..1 (the same array every call)
      */
-    step(waveform, dt) {
+    step(waveform, dt, pace = 1) {
       const len = waveform.length;
-      const maxStep = WAVE_SLEW * Math.max(0, dt);
+      const maxStep = WAVE_SLEW * clamp(pace, 0, 1) * Math.max(0, dt);
+      let most = 0;
       for (let i = 0; i < n; i++) {
         const a = Math.floor((i * len) / n);
         const b = Math.max(a + 1, Math.floor(((i + 1) * len) / n));
@@ -316,11 +354,15 @@ export function createWaveBend(n) {
           if (x > -2 && x < 2) sum += x; // skips NaN and wild values
         }
         const target = clamp((len ? sum / (b - a) : 0) * 1.5, -1, 1);
-        out[i] += clamp(target - out[i], -maxStep, maxStep);
+        const step = clamp(target - out[i], -maxStep, maxStep);
+        out[i] += step;
+        most = Math.max(most, Math.abs(step));
       }
+      w.rate = dt > 0 ? (WAVE_PHASE * most) / dt : 0;
       return out;
     },
   };
+  return w;
 }
 
 /** Mode and Stripes select options (manifest order; the first is the default). */
@@ -490,7 +532,7 @@ export function loudness(rms) {
 const ENERGY_ATTACK = 0.3;
 const ENERGY_RELEASE = 1.2;
 /** Seconds for a beat surge to fall to 1/e. */
-export const SURGE_TAU = 0.15;
+export const SURGE_TAU = 0.2;
 
 /**
  * The music's energy for the stripes: `level` (0–1.3), the loudness weighted by the bass, smoothed
@@ -597,17 +639,21 @@ const BULGE_FLOOR = 0.15;
  */
 export function createBulge(n) {
   const out = new Float32Array(n);
-  return {
+  const b = {
+    /** Phase rate (rad/s) the bulge used at its worst pixel in the last step. */
+    rate: 0,
     /**
      * @param {Float32Array} bands `audio.bands` (any length), 0–1
      * @param {number} reactivity Reactivity param
      * @param {number} dt seconds
+     * @param {number} [pace] 0–1: slows the bulge (a beat surge takes the budget)
      * @returns {Float32Array} n levels 0–1 (the same array every call)
      */
-    step(bands, reactivity, dt) {
+    step(bands, reactivity, dt, pace = 1) {
       const len = bands.length;
-      const max = BULGE_SLEW * Math.max(0, dt);
+      const max = BULGE_SLEW * clamp(pace, 0, 1) * Math.max(0, dt);
       const react = clamp(reactivity, 0, 2);
+      let most = 0;
       for (let i = 0; i < n; i++) {
         // Sector i (top → bottom) reads bands from the top of the spectrum down.
         const a = Math.floor(((n - 1 - i) * len) / n);
@@ -615,11 +661,15 @@ export function createBulge(n) {
         let v = 0;
         for (let j = a; j < b && j < len; j++) if (bands[j] > v) v = bands[j]; // NaN never wins
         const target = clamp(((Math.min(v, 1) - BULGE_FLOOR) / (1 - BULGE_FLOOR)) * 0.6 * react, 0, 1);
-        out[i] += clamp(target - out[i], -max, max);
+        const step = clamp(target - out[i], -max, max);
+        out[i] += step;
+        most = Math.max(most, Math.abs(step));
       }
+      b.rate = dt > 0 ? (BULGE_PHASE * most) / dt : 0;
       return out;
     },
   };
+  return b;
 }
 
 /** An idle emitter's offset: far above any field value on screen, so it changes nothing. */
@@ -650,6 +700,8 @@ export function createEmitters(cap) {
     data,
     /** Emitters alive. */
     count: 0,
+    /** Phase rate (rad/s) the emitters moved the field at, at its worst pixel, in the last step. */
+    rate: 0,
     /**
      * Start an emitter at (x, y) (screen units, skull at the origin) if a slot is free and the spot
      * is clear of the skull.
@@ -677,10 +729,15 @@ export function createEmitters(cap) {
      * @param {number} freq stripe frequency (rad per unit of field)
      * @param {number[]} outline u_outline
      * @param {boolean} reduceFlashing
+     * @param {number} [pace] 0–1: slows the emitters (a beat surge takes the budget)
      */
-    step(dt, freq, outline, reduceFlashing) {
+    step(dt, freq, outline, reduceFlashing, pace = 1) {
+      em.rate = 0;
       if (!(dt > 0)) return em;
-      const max = (EMIT_RESERVE * (reduceFlashing ? 1 : FREE_FACTOR) * dt) / Math.max(freq, 1);
+      const max = (EMIT_RESERVE * (reduceFlashing ? 1 : FREE_FACTOR) * clamp(pace, 0, 1) * dt) / Math.max(freq, 1);
+      // The smooth minima split ∂field among the offsets (their weights sum to ≤ 1), so the field
+      // moves no faster than the fastest offset.
+      let most = 0;
       for (let i = 0; i < cap; i++) {
         if (!active[i]) continue;
         age[i] += dt;
@@ -688,13 +745,16 @@ export function createEmitters(cap) {
         const line = outlineField(data[4 * i], data[4 * i + 1], outline);
         const top = line + EMIT_CLEAR;
         const target = age[i] < EMIT_LIFE ? floor[i] : top;
-        data[o] += clamp(target - data[o], -max, max);
+        const step = clamp(target - data[o], -max, max);
+        data[o] += step;
+        most = Math.max(most, Math.abs(step));
         if (age[i] >= EMIT_LIFE && data[o] >= top - 1e-4) {
           active[i] = 0;
           data[o] = EMIT_IDLE;
           em.count--;
         }
       }
+      em.rate = (freq * most) / dt;
       return em;
     },
   };
