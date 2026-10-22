@@ -187,6 +187,21 @@ export function createBlooms(seed) {
   return b;
 }
 
+/** Most the waveform warps the arms (shader units: × 0.05 turn of the band coordinate). */
+export const WARP_MAX = 2;
+/** The share of the warp that quiet music keeps. */
+const WARP_QUIET = 0.25;
+
+/**
+ * How hard the waveform ripples the bands: grows with the music's energy (so a loud waveform reads
+ * as a ripple through the dye), scaled by Reactivity.
+ * @param {number} energy createFlow's `energy`, 0–1 @param {number} reactivity
+ */
+export function warpAmount(energy, reactivity) {
+  const e = Math.max(0, Math.min(1, energy));
+  return Math.max(0, Math.min(2, reactivity)) * (WARP_QUIET + (1 - WARP_QUIET) * e);
+}
+
 /** Points around the circle at which the waveform warps the arms. */
 export const WARP_N = 64;
 /** Seconds the warp takes to follow the waveform: arms wobble with the sound, never flicker. */

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BLOOM_CAP,
   BLOOM_SPREAD,
-  createArmWarp,
+  createArmWarp, warpAmount, WARP_MAX,
   WARP_N,
   PALETTES,
   PATTERNS,
@@ -245,6 +245,21 @@ describe("createBlooms", () => {
     expect(peak).toBeLessThanOrEqual(1);
     expect(b.data[3]).toBe(0);
     expect(active(b)).toBe(0);
+  });
+});
+
+describe("warpAmount", () => {
+  it("ripples the arms harder the louder the music, bounded, none at Reactivity 0", () => {
+    let prev = -1;
+    for (const e of [0, 0.25, 0.5, 1]) {
+      const w = warpAmount(e, 1);
+      expect(w).toBeGreaterThan(prev);
+      prev = w;
+    }
+    expect(warpAmount(1, 1)).toBeGreaterThan(2.5 * warpAmount(0, 1));
+    expect(warpAmount(0, 0)).toBe(0);
+    expect(warpAmount(1, 0)).toBe(0);
+    expect(warpAmount(9, 9)).toBeLessThanOrEqual(WARP_MAX);
   });
 });
 
