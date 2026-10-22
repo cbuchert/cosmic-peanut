@@ -240,6 +240,9 @@ async function main() {
       for (let i = 0; i < d.length; i += 4) s += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
       lum.push(s / (d.length / 4) / 255);
     }
+    // Measurement hook (e.g. motion.py injects one): runs right after the frame, while the canvas
+    // still holds it.
+    w.__afterFrame?.(canvas, audio, time);
     if (still && frames >= still) {
       w.__still = true;
       return;
