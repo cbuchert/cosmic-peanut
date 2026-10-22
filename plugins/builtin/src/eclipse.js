@@ -122,7 +122,8 @@ export default async function create(ctx) {
       flares.step(audio.onset, audio.onsetStrength, dt, react);
       flow.step(audio.rms, audio.bassAtt, audio.onset, audio.onsetStrength, dt, react, mo.drift);
       // The background responds in proportion to the energy: calm when quiet, turbulent when loud.
-      const drive = backgroundDrive(react, flow.energy);
+      // (Reduce motion: gentler still — drift is 0.4 then, so this is 0.7.)
+      const drive = backgroundDrive(react, flow.energy) * (0.5 + 0.5 * mo.drift);
       bias.step(corona.levels, dt, drive);
       light.step(audio.bassAtt, audio.rms, audio.onset, audio.onsetStrength, dt, drive);
       pulses.step(audio.onset, audio.onsetStrength, dt, drive);
@@ -162,15 +163,20 @@ export default async function create(ctx) {
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
       gl.bindVertexArray(vao);
+      const clouds = Number(p.clouds);
+      // Resize targets first: resize() binds their texture to the active unit.
+      const fw = Math.max(1, Math.ceil(w / CLOUD_DIV));
+      const fh = Math.max(1, Math.ceil(h / CLOUD_DIV));
+      if (clouds > 0 && (fields.width !== fw || fields.height !== fh)) fields.resize(fw, fh);
+      if (waterOn && (scene.width !== w || scene.height !== h)) scene.resize(w, h);
+      // Unit 1 is read by the passes after the cloud pass; never leave a render target on it.
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, null);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, SECTORS, 3, gl.RED, gl.FLOAT, upload);
-      const clouds = Number(p.clouds);
       const th = cloudThreshold(clouds, mid, flow.energy);
       if (clouds > 0) {
-        const fw = Math.max(1, Math.ceil(w / CLOUD_DIV));
-        const fh = Math.max(1, Math.ceil(h / CLOUD_DIV));
-        if (fields.width !== fw || fields.height !== fh) fields.resize(fw, fh);
         gl.bindFramebuffer(gl.FRAMEBUFFER, fields.fbo);
         gl.viewport(0, 0, fw, fh);
         gl.useProgram(cloudProg.program);
@@ -190,7 +196,6 @@ export default async function create(ctx) {
       }
 
       if (waterOn) {
-        if (scene.width !== w || scene.height !== h) scene.resize(w, h);
         gl.bindFramebuffer(gl.FRAMEBUFFER, scene.fbo);
       } else gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, w, h);

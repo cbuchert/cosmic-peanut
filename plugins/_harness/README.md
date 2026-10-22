@@ -21,6 +21,10 @@ bright, busy backdrop behind the transparent canvas; default black like the shel
 `still=N` (seeded `Math.random`, fixed 60 Hz steps, stop after N frames: deterministic stills),
 `gain=G` (scale the audio's level — waveform, rms, peak, spectrum, bands — e.g. `gain=0.05` for a
 quiet passage).
+`bgmotion=1` (record background motion — mean |Δ luminance| outside a centred circle of
+`motionR` × min(width, height) / 2, default 1.08 — and onsets per frame; `run.py --motion` reports
+it over 5 s in silence, a quiet passage and loud music, plus the beat response), `silent=1` with
+any `audio` mode zeroes the levels and onsets like the host in silence.
 Contexts use the SDK's options (`alpha: true, premultipliedAlpha: true`, three clear alpha 0).
 
 `run.py` writes screenshots and `results-<browser>.json` to `out/` (git-ignored). For each

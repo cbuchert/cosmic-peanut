@@ -21,7 +21,7 @@
  *   gain=G    scale the audio's level (waveform, rms, peak, spectrum, bands) by G, e.g. 0.05 for a
  *             quiet passage
  *   silent=1  with any audio mode: also zero the level scalars and onsets, like the host in silence
- *   motion=1  record background motion: mean |Δ luminance| (0–255) per frame over a 320 × 180
+ *   bgmotion=1  record background motion: mean |Δ luminance| (0–255) per frame over a 320 × 180
  *             readback, outside a centred circle of radius motionR × min(width, height) / 2
  *             (default 1.08), plus each frame's onset strength (0 when no onset)
  */
@@ -41,7 +41,7 @@ const w = /** @type {any} */ (window);
 const still = Number(q.get("still") ?? 0);
 const gain = Number(q.get("gain") ?? 1);
 const silentQ = q.get("silent") === "1";
-const measureMotion = q.get("motion") === "1";
+const measureMotion = q.get("bgmotion") === "1";
 const motionR = Number(q.get("motionR") ?? 1.08);
 
 /** Scale a frame's level in place (the synth rebuilds it every update). @param {any} a @param {number} g */

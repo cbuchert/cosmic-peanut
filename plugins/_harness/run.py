@@ -6,7 +6,7 @@ Serve the repo root first (python3 -m http.server <port> --bind 127.0.0.1), then
         deterministic stills of each visualizer over black and over a light, busy backdrop
         (plus the backdrop alone), for checking transparency; no timing.
     uv run python plugins/_harness/run.py --port <port> --motion [eclipse ...]
-        background motion (mean |delta luminance| outside the centre circle, harness.js motion=1)
+        background motion (mean |delta luminance| outside the centre circle, harness.js bgmotion=1)
         over 5 s of deterministic frames in silence, a quiet passage and loud music, plus the beat
         response (motion in the 150 ms after a strong onset / the 150 ms before).
 """
@@ -83,7 +83,7 @@ def beat_response(motion: list[float], beats: list[float], strong: float = 0.8) 
 def motion_stats(page, base: str, q: str, radius: float) -> dict:
     out = {}
     for name, audio in MOTION_CASES.items():
-        page.goto(f"{base}?{q}&{audio}&motion=1&motionR={radius}&still={WARM + WINDOW}")
+        page.goto(f"{base}?{q}&{audio}&bgmotion=1&motionR={radius}&still={WARM + WINDOW}")
         page.wait_for_function(
             "window.__still === true || window.__errors.length > 0", timeout=120000
         )
