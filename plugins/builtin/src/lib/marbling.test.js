@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createEventQueue, MAX_PENDING, resizeMap, toOldPage, DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
+import { EV_COMB, COMB_MAX_AMP, combForward, combInverse, FLOW_VORTICES, CURRENT_MAX_SPEED, createCurrents, FLOW_LEN, FLOW_MAX_GRAD, flowBound, flowDisp, flowInverse, createEventQueue, MAX_PENDING, resizeMap, toOldPage, DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
 
 const out = new Float64Array(2);
 
@@ -163,7 +163,7 @@ function bandsHit(lo, hi) {
   for (let i = lo; i < hi; i++) b[i] = 0.8;
   return b;
 }
-const PARAMS = { pour: 1, size: 1, rake: 0, reactivity: 1, renew: 0 };
+const PARAMS = { pour: 1, size: 1, rake: 0, reactivity: 1, renew: 0, currents: 1 };
 const ENV = { aspect: 16 / 9, pxPerUnit: 1440, reduceFlashing: true, reduceMotion: false };
 const DT = 1 / 60;
 
@@ -262,12 +262,12 @@ describe("createMarbler", () => {
       const m = createMarbler(5);
       let drops = 0;
       for (let f = 0; f < 600; f++) {
-        const onset = f % 6 === 0; // a flood of hits (10/s)
+        const onset = f % 15 === 0; // eighth notes at 120 BPM
         const lo = (f * 7) % 48;
         m.step(audioFrame({ rms, onset, onsetStrength: 1, bands: bandsHit(lo, lo + 16) }), DT, PARAMS, ENV);
         expect(m.count).toBeLessThanOrEqual(MAX_EVENTS);
-        for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === EV_DROP) drops++;
       }
+      drops = m.drops;
       return drops;
     };
     expect(poured(0.3)).toBeGreaterThan(1.8 * poured(0.02));
@@ -386,6 +386,17 @@ describe("renew", () => {
     expect(run(2, 60).maxSlice).toBeLessThan(0.0015);
   });
 
+  it("rests in silence: no drift and no clear drops, so a quiet page is still", () => {
+    const m = createMarbler(4);
+    for (let f = 0; f < 600; f++) m.step(audioFrame({ rms: 0.2 }), DT, { ...PARAMS, renew: 1 }, ENV);
+    let events = 0;
+    for (let f = 0; f < 120 * 60; f++) {
+      m.step(audioFrame({ silent: true }), DT, { ...PARAMS, renew: 1 }, ENV);
+      if (f > 180) events += m.count;
+    }
+    expect(events).toBe(0);
+  });
+
   it("stands still with Renew at 0", () => {
     const r = run(0, 60);
     expect(r.big).toBe(0);
@@ -437,12 +448,13 @@ describe("effectiveParams", () => {
     const out = { ...DEFAULTS };
     effectiveParams({ pour: 1.5, size: "x" }, false, out);
     expect(out).toEqual({ ...DEFAULTS, pour: 1.5 });
-    expect(DEFAULTS).toEqual({ pour: 1, size: 1, rake: 1, reactivity: 1, renew: 1 });
+    expect(DEFAULTS).toEqual({ pour: 1, size: 1, rake: 1, reactivity: 1, renew: 1, currents: 1 });
   });
 
-  it("calms pour, rake and renew under Reduce motion while they sit at their defaults", () => {
+  it("calms pour, rake, renew and currents under Reduce motion while they sit at their defaults", () => {
     const out = { ...DEFAULTS };
     effectiveParams({ ...DEFAULTS }, true, out);
+    expect(out.currents).toBeLessThan(0.6);
     expect(out.pour).toBeLessThan(0.7);
     expect(out.rake).toBeLessThan(0.5);
     expect(out.renew).toBeLessThan(0.6);
@@ -499,18 +511,24 @@ describe("resize", () => {
     expect(m.evA[3]).toBeLessThan(r2 * k * k);
   });
 
-  it("flicks a spray of smaller drops around each hit, some of them vein ink (black ground)", () => {
+  it("flicks a spray of smaller drops around each loud hit, some of them vein ink (black ground)", () => {
     let spray = 0;
     let vein = 0;
     for (let seed = 1; seed <= 20; seed++) {
       const m = createMarbler(seed);
-      m.step(audioFrame(), DT, PARAMS, ENV);
-      m.step(audioFrame({ onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, PARAMS, ENV);
+      for (let f = 0; f < 120; f++) m.step(audioFrame({ rms: 0.3 }), DT, PARAMS, ENV);
+      m.step(audioFrame({ rms: 0.3, onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, PARAMS, ENV);
       const r = Math.sqrt(0.075 ** 2 * 2); // generous bound on the main drop's radius
-      for (let i = 1; i < m.count; i++) {
-        if (m.evA[i * 4] !== EV_DROP) continue;
+      // The hit: the biggest first slice this frame (earlier slots may hold drops still pouring).
+      let h = 0;
+      for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === EV_DROP && m.evA[i * 4 + 3] > m.evA[h * 4 + 3]) h = i;
+      const hx = m.evA[h * 4 + 1];
+      const hy = m.evA[h * 4 + 2];
+      for (let i = 0; i < m.count; i++) {
+        if (m.evA[i * 4] !== EV_DROP || i === h) continue;
+        // Spray lands around the hit (the beat's other drops land elsewhere, and are bigger).
+        if (Math.hypot(m.evA[i * 4 + 1] - hx, m.evA[i * 4 + 2] - hy) >= 4 * r) continue;
         spray++;
-        expect(Math.hypot(m.evA[i * 4 + 1] - m.evA[1], m.evA[i * 4 + 2] - m.evA[2])).toBeLessThan(4 * r);
         if (m.evC[i * 4] === 1) vein++;
       }
     }
@@ -566,3 +584,512 @@ describe("ground", () => {
   });
 });
 
+
+describe("currents (flow field)", () => {
+  /** Drift (0.01, −0.004) and two vortices of opposite sense. */
+  const field = () => {
+    const f = new Float32Array(FLOW_LEN);
+    f[0] = 0.01;
+    f[1] = -0.004;
+    f.set([0.6, 0.4, 1 / 0.2 ** 2, 0.002, 1.2, 0.7, 1 / 0.1 ** 2, -0.001], 2);
+    return f;
+  };
+
+  it("is divergence-free: a smooth swirl plus drift that neither sources nor sinks paint", () => {
+    const f = field();
+    const h = 1e-4;
+    const a = new Float64Array(2);
+    const b = new Float64Array(2);
+    let maxDiv = 0;
+    let maxGrad = 0;
+    for (let i = 0; i < 400; i++) {
+      const x = (i * 0.618) % 1.7;
+      const y = (i * 0.414) % 1;
+      flowDisp(f, x + h, y, a);
+      flowDisp(f, x - h, y, b);
+      const dudx = (a[0] - b[0]) / (2 * h);
+      const dvdx = (a[1] - b[1]) / (2 * h);
+      flowDisp(f, x, y + h, a);
+      flowDisp(f, x, y - h, b);
+      const dudy = (a[0] - b[0]) / (2 * h);
+      const dvdy = (a[1] - b[1]) / (2 * h);
+      maxDiv = Math.max(maxDiv, Math.abs(dudx + dvdy));
+      maxGrad = Math.max(maxGrad, Math.abs(dudx), Math.abs(dudy), Math.abs(dvdx), Math.abs(dvdy));
+    }
+    expect(maxGrad).toBeGreaterThan(0.05); // it does swirl
+    expect(maxDiv / maxGrad).toBeLessThan(1e-4);
+  });
+
+  it("bounds its own steepness, and inverts (fixed point) to well under a texel within that bound", () => {
+    const f = field();
+    // Scale the swirl until the bound sits at the baking limit.
+    const scale = FLOW_MAX_GRAD / flowBound(f);
+    for (let i = 2; i < FLOW_LEN; i += 4) f[i + 3] *= scale;
+    expect(flowBound(f)).toBeCloseTo(FLOW_MAX_GRAD, 6);
+    const a = new Float64Array(2);
+    const b = new Float64Array(2);
+    const h = 1e-4;
+    const p = new Float64Array(2);
+    const back = new Float64Array(2);
+    for (let i = 0; i < 400; i++) {
+      const x = (i * 0.618) % 1.7;
+      const y = (i * 0.414) % 1;
+      flowDisp(f, x + h, y, a);
+      flowDisp(f, x - h, y, b);
+      expect(Math.hypot(a[0] - b[0], a[1] - b[1]) / (2 * h)).toBeLessThanOrEqual(FLOW_MAX_GRAD);
+      flowDisp(f, x, y, p);
+      flowInverse(f, x + p[0], y + p[1], back);
+      expect(Math.hypot(back[0] - x, back[1] - y)).toBeLessThan(2e-6);
+    }
+  });
+});
+
+describe("createCurrents", () => {
+  const CP = { pour: 1, size: 1, rake: 1, reactivity: 1, renew: 1, currents: 1 };
+  /** Music-ish frame: every band at `level`, rms from it. @param {number} level @param {object} [o] */
+  const music = (level, o = {}) => audioFrame({ rms: level * 0.4, bands: new Float32Array(64).fill(level), ...o });
+  /** Fastest the rate field moves paint anywhere on the page (page heights / s). @param {Float32Array} f */
+  const maxSpeed = (f) => {
+    const v = new Float64Array(2);
+    let best = 0;
+    for (let i = 0; i <= 40; i++)
+      for (let j = 0; j <= 24; j++) {
+        flowDisp(f, (i / 40) * ENV.aspect, j / 24, v);
+        best = Math.max(best, Math.hypot(v[0], v[1]));
+      }
+    return best;
+  };
+
+  it("flows while music plays and settles to exactly still in silence", () => {
+    const c = createCurrents(1);
+    for (let i = 0; i < 300; i++) c.step(music(0.7), 0.8, DT, CP, ENV);
+    expect(maxSpeed(c.rate)).toBeGreaterThan(0.01);
+    for (let i = 0; i < 600; i++) c.step(audioFrame({ silent: true }), 0, DT, CP, ENV);
+    expect(maxSpeed(c.rate)).toBe(0);
+    c.reset();
+    c.step(audioFrame({ silent: true }), 0, DT, CP, ENV);
+    expect(c.active).toBe(false);
+  });
+
+  it("runs faster the louder the music, up to a bounded speed", () => {
+    const speedAt = (/** @type {number} */ e, /** @type {object} */ p = CP) => {
+      const c = createCurrents(4);
+      let best = 0;
+      for (let i = 0; i < 600; i++) {
+        c.step(music(e), e, DT, /** @type {any} */ (p), ENV);
+        if (i > 300) best = Math.max(best, maxSpeed(c.rate));
+      }
+      return best;
+    };
+    const speeds = [0.05, 0.2, 0.5, 1].map((e) => speedAt(e));
+    for (let i = 1; i < speeds.length; i++) expect(speeds[i]).toBeGreaterThan(speeds[i - 1] * 1.2);
+    expect(speeds[3]).toBeGreaterThan(0.04);
+    expect(speedAt(1, { ...CP, reactivity: 2, currents: 2 })).toBeLessThanOrEqual(CURRENT_MAX_SPEED);
+    expect(speedAt(1, { ...CP, reactivity: 0 })).toBeLessThan(0.1 * speeds[3]);
+    expect(speedAt(1, { ...CP, currents: 0 })).toBe(0);
+  });
+
+  it("swells the big swirls with the bass and spins a local vortex per part of the spectrum, low to high across the page", () => {
+    /** Run with only bands [lo, hi) sounding; return |A| per vortex (time-max) and final centres x. */
+    const run = (/** @type {number} */ lo, /** @type {number} */ hi) => {
+      const c = createCurrents(7);
+      const amp = new Float64Array(FLOW_VORTICES);
+      for (let i = 0; i < 900; i++) {
+        const b = new Float32Array(64);
+        for (let k = lo; k < hi; k++) b[k] = 0.9;
+        c.step(audioFrame({ rms: 0.2, bands: b }), 0.6, DT, CP, ENV);
+        for (let v = 0; v < FLOW_VORTICES; v++) amp[v] = Math.max(amp[v], Math.abs(c.rate[2 + v * 4 + 3]));
+      }
+      const xs = Array.from({ length: FLOW_VORTICES }, (_, v) => c.rate[2 + v * 4]);
+      const sig = Array.from({ length: FLOW_VORTICES }, (_, v) => 1 / Math.sqrt(c.rate[2 + v * 4 + 2]));
+      return { amp, xs, sig };
+    };
+    const bass = run(0, 16);
+    const highs = run(48, 64);
+    // Vortices 0 and 1 are the big ones (widest), the bass swells them.
+    for (let v = 2; v < FLOW_VORTICES; v++) expect(bass.sig[v]).toBeLessThan(bass.sig[0] * 0.6);
+    expect(bass.amp[0]).toBeGreaterThan(1.5 * highs.amp[0]);
+    expect(bass.amp[1]).toBeGreaterThan(1.5 * highs.amp[1]);
+    // Local vortex g follows band group g (16 bands each): the sounding group's spins hardest.
+    for (const [lo, g] of [[0, 0], [16, 1], [32, 2], [48, 3]]) {
+      const r = run(lo, lo + 16);
+      const local = Array.from(r.amp).slice(2);
+      expect(local.indexOf(Math.max(...local))).toBe(g);
+      expect(local[g]).toBeGreaterThan(3 * Math.max(...local.filter((_, i) => i !== g)));
+    }
+    // Their homes run low → high across the page (they wander, but stay in their lane).
+    for (let v = 3; v < FLOW_VORTICES; v++) expect(bass.xs[v]).toBeGreaterThan(bass.xs[v - 1]);
+  });
+
+  it("surges on a beat and eases back within a second", () => {
+    const c = createCurrents(3);
+    for (let i = 0; i < 300; i++) c.step(music(0.6), 0.6, DT, CP, ENV);
+    const before = maxSpeed(c.rate);
+    c.step(music(0.6, { onset: true, onsetStrength: 1 }), 0.6, DT, CP, ENV);
+    let after = 0;
+    for (let i = 0; i < 9; i++) {
+      c.step(music(0.6), 0.6, DT, CP, ENV);
+      after = Math.max(after, maxSpeed(c.rate));
+    }
+    expect(after).toBeGreaterThan(1.4 * before);
+    for (let i = 0; i < 60; i++) c.step(music(0.6), 0.6, DT, CP, ENV);
+    expect(maxSpeed(c.rate)).toBeLessThan(1.15 * before);
+  });
+
+  it("accumulates the batch's displacement at frozen centres, asking to be baked before it gets too steep", () => {
+    const c = createCurrents(5);
+    const P2 = { ...CP, reactivity: 2, currents: 2 };
+    let fulls = 0;
+    let sumDrift = 0;
+    for (let i = 0; i < 1200; i++) {
+      const centres = Array.from(c.acc.subarray(2, 6));
+      c.step(music(1, { onset: i % 30 === 0, onsetStrength: 1 }), 1, DT, P2, ENV);
+      sumDrift += c.rate[0] * DT;
+      expect(Array.from(c.acc.subarray(2, 5))).toEqual(centres.slice(0, 3)); // frozen
+      expect(flowBound(c.acc)).toBeLessThanOrEqual(FLOW_MAX_GRAD);
+      expect(c.acc[0]).toBeCloseTo(sumDrift, 6);
+      if (c.full()) {
+        fulls++;
+        c.reset();
+        sumDrift = 0;
+        expect(flowBound(c.acc)).toBe(0);
+      }
+    }
+    expect(fulls).toBeGreaterThan(5);
+  });
+
+  it("stirs a slow central spiral while the music builds up", () => {
+    /** |A| of the first big swirl and its distance from the page centre, after `frames` of `energyAt`. */
+    const run = (/** @type {(f: number) => number} */ energyAt) => {
+      const c = createCurrents(2);
+      for (let f = 0; f < 600; f++) c.step(music(0.5), energyAt(f), DT, CP, ENV);
+      return { a: Math.abs(c.rate[5]), d: Math.hypot(c.rate[2] - ENV.aspect / 2, c.rate[3] - 0.5) };
+    };
+    const steady = run(() => 0.85);
+    const build = run((f) => (f < 300 ? 0.2 : 0.2 + (0.65 * (f - 300)) / 300));
+    expect(build.a).toBeGreaterThan(1.3 * steady.a);
+    expect(build.d).toBeLessThan(0.15);
+  });
+
+  it("is deterministic given the seed and the audio", () => {
+    const run = () => {
+      const c = createCurrents(9);
+      const trace = [];
+      for (let i = 0; i < 240; i++) {
+        c.step(music(0.3 + 0.3 * Math.sin(i / 20), { onset: i % 25 === 0, onsetStrength: 0.8 }), 0.5, DT, CP, ENV);
+        trace.push(...c.rate);
+      }
+      return trace;
+    };
+    expect(run()).toEqual(run());
+  });
+});
+
+describe("marbler and currents", () => {
+  it("carries drops being poured, and the stylus, along with a baked current", () => {
+    const f = new Float32Array(FLOW_LEN);
+    f[0] = 0.01;
+    f[1] = 0.005;
+    f.set([0.9, 0.5, 1 / 0.3 ** 2, 0.004], 2);
+    const m = createMarbler(3);
+    const RAKE = { ...PARAMS, rake: 1 };
+    m.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    m.step(audioFrame({ rms: 0.2, onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, RAKE, ENV);
+    /** First event of the given type this frame. @param {number} type */
+    const first = (type) => {
+      for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === type) return [m.evA[i * 4 + 1], m.evA[i * 4 + 2]];
+      return [NaN, NaN];
+    };
+    const [dx, dy] = first(EV_DROP);
+    m.advect(f);
+    const d = flowDisp(f, dx, dy, new Float64Array(2));
+    m.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    const [ax, ay] = first(EV_DROP);
+    expect(ax).toBeCloseTo(dx + d[0], 5);
+    expect(ay).toBeCloseTo(dy + d[1], 5);
+    // The stylus step starts where it was left, carried by the current.
+    const s0 = first(EV_DRAG);
+    const m2 = createMarbler(3);
+    m2.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    m2.step(audioFrame({ rms: 0.2, onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, RAKE, ENV);
+    m2.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    let s2 = [NaN, NaN];
+    for (let i = 0; i < m2.count; i++) if (m2.evA[i * 4] === EV_DRAG) s2 = [m2.evA[i * 4 + 1], m2.evA[i * 4 + 2]];
+    const ds = flowDisp(f, s2[0], s2[1], new Float64Array(2));
+    expect(Math.hypot(s0[0] - s2[0], s0[1] - s2[1])).toBeGreaterThan(0.001);
+    expect(s0[0]).toBeCloseTo(s2[0] + ds[0], 3);
+  });
+
+  it("counts the paint drops it lays, and the drops and strokes that begin each frame", () => {
+    const m = createMarbler(3);
+    const RAKE = { ...PARAMS, rake: 1 };
+    m.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    m.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    expect(m.drops).toBe(0);
+    expect(m.started).toBe(0); // the stylus keeps raking: nothing new begins
+    m.step(audioFrame({ rms: 0.2, onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, RAKE, ENV);
+    expect(m.drops).toBeGreaterThan(1);
+    expect(m.started).toBe(m.drops);
+    m.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    expect(m.started).toBe(0); // still pouring, but nothing new
+  });
+});
+
+describe("pour follows the music", () => {
+  /** Centres of drops that started this frame (first slice: R² equals what the pour emits first). */
+  const newDrops = (/** @type {ReturnType<typeof createMarbler>} */ m, /** @type {Set<string>} */ seen) => {
+    const out = [];
+    for (let i = 0; i < m.count; i++) {
+      if (m.evA[i * 4] !== EV_DROP) continue;
+      const key = `${m.evA[i * 4 + 1]},${m.evA[i * 4 + 2]}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push([m.evA[i * 4 + 1], m.evA[i * 4 + 2], i]);
+    }
+    return out;
+  };
+
+  it("pours on every beat, not only the strong ones", () => {
+    const m = createMarbler(2);
+    let hits = 0;
+    let poured = 0;
+    for (let f = 0; f < 600; f++) {
+      const onset = f % 15 === 0; // eighth notes at 120 BPM
+      const before = m.drops;
+      m.step(audioFrame({ rms: 0.12, onset, onsetStrength: f % 30 === 0 ? 0.9 : 0.4, bands: bandsHit(0, 40) }), DT, PARAMS, ENV);
+      if (onset && f > 60) {
+        hits++;
+        if (m.drops > before) poured++;
+      }
+    }
+    expect(poured).toBe(hits);
+  });
+
+  it("pours several drops on a loud beat and one on a quiet one", () => {
+    /** Hit drops (scale-1 drops with satellites aside: count distinct new centres the onset frame). */
+    const perBeat = (/** @type {number} */ rms, /** @type {number} */ strength) => {
+      const m = createMarbler(6);
+      for (let f = 0; f < 240; f++) m.step(audioFrame({ rms }), DT, PARAMS, ENV);
+      let mains = 0;
+      for (let b = 0; b < 8; b++) {
+        m.step(audioFrame({ rms, onset: true, onsetStrength: strength, bands: bandsHit(0, 6) }), DT, PARAMS, ENV);
+        mains += m.hits;
+        for (let f = 0; f < 29; f++) m.step(audioFrame({ rms }), DT, PARAMS, ENV);
+      }
+      return mains / 8;
+    };
+    expect(perBeat(0.02, 0.4)).toBe(1);
+    expect(perBeat(0.4, 1)).toBeGreaterThanOrEqual(3);
+    expect(perBeat(0.4, 1)).toBeLessThanOrEqual(4);
+  });
+
+  it("feeds the page with a stream of small drops at a rate that follows the loudness, none in silence", () => {
+    const rate = (/** @type {object} */ o) => {
+      const m = createMarbler(8);
+      for (let f = 0; f < 300; f++) m.step(audioFrame(o), DT, PARAMS, ENV);
+      const d0 = m.drops;
+      for (let f = 0; f < 600; f++) m.step(audioFrame(o), DT, PARAMS, ENV);
+      return (m.drops - d0) / 10; // per second
+    };
+    const loud = rate({ rms: 0.4, bands: bandsHit(0, 64) });
+    const quiet = rate({ rms: 0.03, bands: bandsHit(0, 64) });
+    expect(rate({ silent: true })).toBe(0);
+    expect(quiet).toBeGreaterThan(1.5);
+    expect(loud).toBeGreaterThan(6);
+    expect(loud).toBeGreaterThan(2 * quiet);
+  });
+
+  it("lets the dropper's drops go in time with the beats when there are beats", () => {
+    const m = createMarbler(8);
+    let onBeat = 0;
+    let all = 0;
+    for (let f = 0; f < 1200; f++) {
+      const before = m.dripped;
+      m.step(audioFrame({ rms: 0.4, onset: f % 30 === 0, onsetStrength: 0.9, bands: bandsHit(0, 64) }), DT, PARAMS, ENV);
+      const d = m.dripped - before;
+      all += d;
+      if (f % 30 < 9) onBeat += d;
+    }
+    expect(all).toBeGreaterThan(100); // still ~6/s
+    expect(onBeat / all).toBeGreaterThan(0.7);
+  });
+
+  it("lands each hit where its sound sits in the spectrum: bass to the left, highs to the right", () => {
+    const meanX = (/** @type {number} */ lo, /** @type {number} */ hi) => {
+      let sum = 0;
+      let n = 0;
+      for (let seed = 1; seed <= 30; seed++) {
+        const m = createMarbler(seed);
+        m.step(audioFrame(), DT, PARAMS, ENV);
+        m.step(audioFrame({ onset: true, onsetStrength: 1, bands: bandsHit(lo, hi) }), DT, PARAMS, ENV);
+        sum += m.evA[1] / ENV.aspect;
+        n++;
+      }
+      return sum / n;
+    };
+    expect(meanX(0, 6)).toBeLessThan(0.3);
+    expect(meanX(24, 32)).toBeGreaterThan(0.35);
+    expect(meanX(24, 32)).toBeLessThan(0.65);
+    expect(meanX(56, 64)).toBeGreaterThan(0.7);
+  });
+});
+
+/** 120 BPM: beatPhase ramps 0→1 every 30 frames; onsets on each beat. @param {number} f @param {object} [o] */
+const beatFrame = (f, o = {}) =>
+  audioFrame({ rms: 0.3, bpm: 120, beatPhase: (f % 30) / 30, onset: f % 30 === 0, onsetStrength: 0.9, bands: bandsHit(0, 40), ...o });
+
+describe("tempo", () => {
+
+  it("drops a big stone on each bar's downbeat when the tempo is known and the music is up", () => {
+    const m = createMarbler(4);
+    const stones = [];
+    for (let f = 0; f < 30 * 16; f++) {
+      m.step(beatFrame(f), DT, PARAMS, ENV);
+      if (m.stone) stones.push(f);
+    }
+    expect(stones.length).toBeGreaterThanOrEqual(3);
+    for (let i = 1; i < stones.length; i++) expect(stones[i] - stones[i - 1]).toBe(120); // every 4 beats
+    // No tempo, no stones; quiet music, none either.
+    const m2 = createMarbler(4);
+    const m3 = createMarbler(4);
+    let none = 0;
+    for (let f = 0; f < 30 * 16; f++) {
+      m2.step(beatFrame(f, { bpm: 0, beatPhase: 0 }), DT, PARAMS, ENV);
+      m3.step(beatFrame(f, { rms: 0.004 }), DT, PARAMS, ENV);
+      none += (m2.stone ? 1 : 0) + (m3.stone ? 1 : 0);
+    }
+    expect(none).toBe(0);
+  });
+});
+
+describe("comb", () => {
+  // A comb moving right (m = +x), its front at x = 0.8, tines every 0.1 along y.
+  const c = new Float32Array([0.8, 1 / 0.05, 0.01, 1, 0, 0.1, 0, 0.004]);
+
+  it("drags paint along the comb's motion near its front, most at the tines, keeping each row on its line", () => {
+    const p = new Float64Array(2);
+    combForward(c, 0.8, 0.05, p); // on a tine (tines at y = 0.05 + 0.1k), at the front
+    expect(p[0] - 0.8).toBeCloseTo(0.01, 7);
+    expect(p[1]).toBe(0.05);
+    combForward(c, 0.8, 0.1, p); // midway between tines: much less
+    expect(p[0] - 0.8).toBeLessThan(0.002);
+    combForward(c, 1.2, 0.05, p); // far from the front: nothing
+    expect(p[0] - 1.2).toBeLessThan(1e-12);
+  });
+
+  it("inverts to well under a texel within its steepness limit", () => {
+    const strong = Float32Array.from(c);
+    strong[2] = COMB_MAX_AMP * 0.05; // amp limit is per front width
+    const p = new Float64Array(2);
+    const back = new Float64Array(2);
+    for (let i = 0; i < 400; i++) {
+      const x = (i * 0.618) % 1.7;
+      const y = (i * 0.414) % 1;
+      combForward(strong, x, y, p);
+      combInverse(strong, p[0], p[1], back);
+      expect(Math.hypot(back[0] - x, back[1] - y)).toBeLessThan(1e-6);
+    }
+  });
+
+  it("combs the whole page in time with the bars, direction alternating, harder and more often when loud", () => {
+    const RAKE = { ...PARAMS, rake: 1 };
+    const run = (/** @type {object} */ o, frames = 30 * 64) => {
+      const m = createMarbler(5);
+      const starts = [];
+      const dirs = [];
+      let maxAmpW = 0;
+      let prevFront = NaN;
+      for (let f = 0; f < frames; f++) {
+        m.step(beatFrame(f, o), DT, RAKE, ENV);
+        let combs = 0;
+        for (let i = 0; i < m.count; i++) {
+          if (m.evA[i * 4] !== EV_COMB) continue;
+          combs++;
+          maxAmpW = Math.max(maxAmpW, m.evA[i * 4 + 3] * m.evA[i * 4 + 2]);
+          const front = m.evA[i * 4 + 1];
+          if (!(Math.abs(front - prevFront) < 0.1)) {
+            starts.push(f);
+            dirs.push([m.evB[i * 4], m.evB[i * 4 + 1]]);
+          }
+          prevFront = front;
+        }
+        expect(combs).toBeLessThanOrEqual(1);
+        if (combs === 0) prevFront = NaN;
+      }
+      return { starts, dirs, maxAmpW };
+    };
+    const loud = run({ rms: 0.4 });
+    expect(loud.starts.length).toBeGreaterThanOrEqual(6); // 64 beats: one every 2 bars
+    for (const f of loud.starts) expect((f - loud.starts[0]) % 240).toBe(0); // on a downbeat, every 2 bars
+    for (let i = 1; i < loud.dirs.length; i++) expect(loud.dirs[i]).not.toEqual(loud.dirs[i - 1]);
+    expect(loud.maxAmpW).toBeLessThanOrEqual(COMB_MAX_AMP + 1e-6);
+    const mid = run({ rms: 0.02 });
+    expect(mid.starts.length).toBeGreaterThan(0);
+    expect(mid.starts.length).toBeLessThan(loud.starts.length);
+    expect(run({ rms: 0.004 }).starts.length).toBe(0);
+    // Without a tempo, strong hits in loud passages still comb now and then, never back to back.
+    const free = run({ rms: 0.4, bpm: 0, beatPhase: 0 });
+    expect(free.starts.length).toBeGreaterThan(0);
+    for (let i = 1; i < free.starts.length; i++) expect(free.starts[i] - free.starts[i - 1]).toBeGreaterThanOrEqual(6 * 60);
+  });
+
+  it("flicks a quick stroke through the paint on snares and hats, not on kicks, at most two at once", () => {
+    const RAKE = { ...PARAMS, rake: 1 };
+    const run = (/** @type {number} */ lo, /** @type {number} */ hi, params = RAKE) => {
+      const m = createMarbler(2);
+      let maxDrags = 0;
+      for (let f = 0; f < 600; f++) {
+        const onset = f % 8 === 0;
+        m.step(audioFrame({ rms: 0.3, onset, onsetStrength: 0.9, bands: onset ? bandsHit(lo, hi) : new Float32Array(64) }), DT, params, ENV);
+        let drags = 0;
+        for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === EV_DRAG) drags++;
+        maxDrags = Math.max(maxDrags, drags);
+      }
+      return { flicks: m.flicks, maxDrags };
+    };
+    const snare = run(20, 40);
+    expect(snare.flicks).toBeGreaterThan(30);
+    expect(snare.maxDrags).toBeLessThanOrEqual(3); // the stylus and two flicks
+    expect(run(48, 64).flicks).toBeGreaterThan(30);
+    expect(run(0, 6).flicks).toBe(0);
+    expect(run(20, 40, { ...RAKE, rake: 0 }).flicks).toBe(0);
+  });
+
+  it("moves the comb and the stylus in lurches on the beat", () => {
+    const m = createMarbler(5);
+    const RAKE = { ...PARAMS, rake: 1 };
+    let after = 0;
+    let before = 0;
+    let sAfter = 0;
+    let sBefore = 0;
+    let prevFront = NaN;
+    let prevS = NaN;
+    for (let f = 0; f < 30 * 40; f++) {
+      m.step(beatFrame(f, { rms: 0.4 }), DT, RAKE, ENV);
+      const ph = f % 30; // frames since the beat
+      for (let i = 0; i < m.count; i++) {
+        const t = m.evA[i * 4];
+        if (t === EV_COMB) {
+          const d = m.evA[i * 4 + 1] - prevFront;
+          if (d > 0 && d < 0.1) {
+            if (ph < 9) after += d;
+            else if (ph >= 21) before += d;
+          }
+          prevFront = m.evA[i * 4 + 1];
+        }
+        if (t === EV_DRAG && m.evA[i * 4 + 3] < 8000) {
+          // the stylus (σ 0.012), not a flick (σ 0.01)
+          const sx = m.evA[i * 4 + 1];
+          const d = Math.abs(sx - prevS);
+          if (d < 0.1) {
+            if (ph < 9) sAfter += d;
+            else if (ph >= 21) sBefore += d;
+          }
+          prevS = sx;
+        }
+      }
+    }
+    expect(after).toBeGreaterThan(2 * before);
+    expect(sAfter).toBeGreaterThan(2 * sBefore);
+  });
+});
