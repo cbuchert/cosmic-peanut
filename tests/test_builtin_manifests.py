@@ -429,7 +429,7 @@ def test_darksun_manifest():
     assert params["palette"]["default"] == "dusk"
     assert params["backdrop"]["options"] == ["painted", "none"]
     assert params["backdrop"]["default"] == "painted"
-    for f in ("fullscreen.vert", "darksun.frag"):
+    for f in ("fullscreen.vert", "noise.glsl", "backdrop.frag", "darksun.frag"):
         assert (REPOS["builtin"] / "shaders/darksun" / f).is_file(), f
 
 

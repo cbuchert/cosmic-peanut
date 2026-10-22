@@ -208,7 +208,7 @@
     {
       "id": "darksun",
       "name": "Dark Sun",
-      "description": "After Mogwai's Every Country's Sun: a dark sun swells with the bass above an upside-down horizon, whose inverted mountain range is the live spectrum, with a beam of light falling from its heart on every beat.",
+      "description": "After Mogwai's Every Country's Sun: a dark sun swells, spikes and rises with the music above an upside-down horizon whose inverted mountain range is the live spectrum; every beat drops the range, flares the beam and ripples the wet ground, while the watercolour sky flows and warms with the song.",
       "author": "Tidalviz",
       "entry": "src/darksun.js",
       "renderer": "webgl2",
