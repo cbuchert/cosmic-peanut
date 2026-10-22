@@ -22,6 +22,8 @@
  *             quiet passage; gain=0 also marks frames silent
  *   warm=S    play the audio unscaled for the first S seconds, then apply `gain` (pour first, then
  *             measure a quiet passage or silence)
+ *   edges=1   with still=N: measure edge sharpness (__edges, palette from `debug.colors`, tol=0.06) on
+ *             the last frame into window.__edgeResult
  *   motion=1  record per-frame background motion: mean |Δ| of the canvas (0–255 levels, on a
  *             320×180 probe) against the previous frame, with the frame's onset / onsetStrength
  *             and, when the visualizer exposes `debug.events` (events started this frame), that
@@ -269,6 +271,8 @@ async function main() {
       events.push(viz.debug?.events ?? -1);
     }
     if (still && frames >= still) {
+      // The drawing buffer is only readable in the task that drew it: measure edges now.
+      if (q.get("edges") === "1") w.__edgeResult = w.__edges(viz.debug?.colors ?? [], Number(q.get("tol") ?? 0.06));
       w.__still = true;
       return;
     }

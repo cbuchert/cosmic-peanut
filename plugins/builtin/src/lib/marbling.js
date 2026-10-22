@@ -237,7 +237,7 @@ const LOCAL_SIGMA = 0.13;
 const LOCAL_A = 0.005;
 const FLOW_DRIFT = 0.006;
 /** Fastest the currents may ever move paint (page heights / s), whatever the params. */
-export const CURRENT_MAX_SPEED = 0.2;
+export const CURRENT_MAX_SPEED = 0.3;
 
 /**
  * The bath's currents: a smooth, divergence-free flow (see {@link flowDisp}) whose strength follows
@@ -320,8 +320,8 @@ export function createCurrents(seed) {
       rate[0] = FLOW_DRIFT * s * Math.cos(th);
       rate[1] = FLOW_DRIFT * s * Math.sin(th);
       // A beat surges the whole bath for a moment.
-      surge = audio.onset && !quiet ? Math.max(surge, clamp01(audio.onsetStrength)) : surge * Math.exp(-dt / 0.2);
-      const boost = 1 + 1.2 * surge;
+      surge = audio.onset && !quiet ? Math.max(surge, clamp01(audio.onsetStrength)) : surge * Math.exp(-dt / 0.12);
+      const boost = 1 + 3 * surge;
       const swell = 0.25 + 0.75 * clamp01(bassS / 0.8);
       rate[2 + 3] = BIG_A * s * swell * boost * (1 + 1.5 * stir);
       rate[6 + 3] = -BIG_A * s * swell * boost;

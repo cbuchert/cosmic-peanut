@@ -136,7 +136,9 @@ def motion(
     return out
 
 
-def edges(browser, base: str, vizs: list[str], prefix: str, at: list[int], query: str) -> dict:
+def edges(
+    browser, base: str, vizs: list[str], prefix: str, at: list[int], query: str, tag: str
+) -> dict:
     """Deterministic stills after each of `at` seconds (fixed 60 Hz steps, music) and the mean
     mixed-pixel run between pure colours; colours come from `window.__viz.debug.colors`."""
     out = {}
@@ -144,15 +146,14 @@ def edges(browser, base: str, vizs: list[str], prefix: str, at: list[int], query
         for sec in at:
             page = browser.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=2)
             page.goto(
-                f"{base}?repo={prefix}{VIZ[viz]}&viz={viz}&audio=music&still={sec * 60}&{query}"
+                f"{base}?repo={prefix}{VIZ[viz]}&viz={viz}&audio=music&still={sec * 60}&edges=1&{query}"
             )
             page.wait_for_function(
                 "window.__still === true || window.__errors.length > 0",
                 timeout=(sec * 3 + 30) * 1000,
             )
-            colors = page.evaluate("window.__viz.debug && window.__viz.debug.colors")
-            e = page.evaluate("([c, t]) => window.__edges(c, t)", [colors, 0.06])
-            page.screenshot(path=OUT / f"{viz}-edges-{sec}s.png")
+            e = page.evaluate("window.__edgeResult")
+            page.screenshot(path=OUT / f"{viz}-edges-{sec}s-{tag}.png")
             out[f"{viz}@{sec}s"] = e
             print(viz, sec, json.dumps(e), page.evaluate("window.__errors"), flush=True)
             page.close()
@@ -208,7 +209,7 @@ def main() -> None:
                 )
             else:
                 at = [int(x) for x in args.edges.split(",")]
-                res = edges(browser, base, args.viz, args.prefix, at, args.query)
+                res = edges(browser, base, args.viz, args.prefix, at, args.query, args.tag)
             kind = "motion" if args.motion else "edges"
             (OUT / f"{kind}-{args.tag}.json").write_text(json.dumps(res, indent=2))
             browser.close()
