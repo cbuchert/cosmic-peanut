@@ -566,14 +566,10 @@ export function createMorph() {
     armsA: 2,
     armsB: 2,
     mix: 0,
+    /** True on the frame a phrase ends (also when not auto). */
+    phrase: false,
     /** @param {number} dt @param {MorphInput} o */
     step(dt, o) {
-      if (!o.auto) {
-        m.a = m.b = o.home;
-        m.armsA = m.armsB = 2;
-        m.mix = 0;
-        return m;
-      }
       let phrase = false;
       if (Number.isNaN(fast)) fast = slow = o.energy;
       fast += (o.energy - fast) * (1 - Math.exp(-dt / SHIFT_FAST));
@@ -588,6 +584,13 @@ export function createMorph() {
         beats = 0;
         clock = 0;
         slow = fast;
+      }
+      m.phrase = phrase;
+      if (!o.auto) {
+        m.a = m.b = o.home;
+        m.armsA = m.armsB = 2;
+        m.mix = 0;
+        return m;
       }
       if (m.mix > 0 || phrase) {
         m.mix = Math.min(1, m.mix + dt / (o.reduceMotion ? 2 * MORPH_TIME : MORPH_TIME));
@@ -605,4 +608,57 @@ export function createMorph() {
     },
   };
   return m;
+}
+
+/**
+ * Rotate each dye color's hue by `hue` radians about the gray axis (clamped back into 0–1).
+ * @param {Float32Array} base colors from paletteOf @param {number} n @param {number} hue
+ * @param {Float32Array} out length ≥ n × 3
+ */
+export function driftPalette(base, n, hue, out) {
+  const c = Math.cos(hue);
+  const s = Math.sin(hue) / Math.sqrt(3);
+  const k = (1 - c) / 3;
+  const d = c + k;
+  for (let i = 0; i < n; i++) {
+    const r = base[i * 3];
+    const g = base[i * 3 + 1];
+    const b = base[i * 3 + 2];
+    out[i * 3] = Math.max(0, Math.min(1, d * r + (k - s) * g + (k + s) * b));
+    out[i * 3 + 1] = Math.max(0, Math.min(1, (k + s) * r + d * g + (k - s) * b));
+    out[i * 3 + 2] = Math.max(0, Math.min(1, (k - s) * r + (k + s) * g + d * b));
+  }
+  return out;
+}
+
+/** Most the palette's hues drift from the chosen palette (radians): it stays in its family. */
+export const MAX_HUE_DRIFT = 0.45;
+/** Seconds per easing stage (two stages, so the drift starts and stops gently). */
+const DRIFT_TAU = 2.5;
+
+/**
+ * Palette drift over a long listen: each phrase picks a new hue offset (seeded) and the palette
+ * eases there over several seconds.
+ * @param {number} seed
+ */
+export function createPaletteDrift(seed) {
+  const rand = prng(seed);
+  let target = 0;
+  let mid = 0;
+  let hue = 0;
+  return {
+    /** @param {number} dt @param {boolean} phrase @returns {number} hue offset, radians */
+    step(dt, phrase) {
+      if (phrase) {
+        // Somewhere new, at least a third of the range away from where it was heading.
+        let t = target;
+        while (Math.abs(t - target) < MAX_HUE_DRIFT / 3) t = (2 * rand() - 1) * MAX_HUE_DRIFT;
+        target = t;
+      }
+      const k = 1 - Math.exp(-dt / DRIFT_TAU);
+      mid += (target - mid) * k;
+      hue += (mid - hue) * k;
+      return hue;
+    },
+  };
 }

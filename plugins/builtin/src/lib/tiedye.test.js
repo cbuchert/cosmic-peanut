@@ -20,6 +20,7 @@ import {
   PULSE_MAX, createBlooms, createSpin, DEFAULT_SPEED, TWIST_DEPTH,
   createFlow, FLOW_MAX, createRecord, REC_CAP, MIN_BAND, MAX_BAND, createDominant,
   createMorph, PHRASE_BEATS, LOOKS, MORPH_TIME, PHRASE_SECONDS,
+  driftPalette, createPaletteDrift, MAX_HUE_DRIFT,
 } from "./tiedye.js";
 
 describe("createBandWidths", () => {
@@ -544,13 +545,16 @@ describe("createDominant", () => {
 const morphIn = (o = {}) => ({ auto: true, home: 0, beat: false, tempo: false, energy: 0.5, reduceMotion: false, ...o });
 
 describe("createMorph", () => {
-  it("holds the chosen pattern when one is picked", () => {
+  it("holds the chosen pattern when one is picked, still marking phrases (for the palette drift)", () => {
     const m = createMorph();
-    for (let f = 0; f < 60 * 120; f++) {
+    let phrases = 0;
+    for (let f = 1; f <= 60 * 120; f++) {
       m.step(1 / 60, morphIn({ auto: false, home: 2, beat: f % 30 === 0, tempo: true }));
       expect(m.a).toBe(2);
       expect(m.mix).toBe(0);
+      if (m.phrase) phrases++;
     }
+    expect(phrases).toBe(Math.floor(240 / PHRASE_BEATS));
   });
 
   it("auto: morphs smoothly to the next look once a phrase (PHRASE_BEATS beats) with a tempo", () => {
@@ -614,6 +618,52 @@ describe("createMorph", () => {
       return n;
     };
     expect(run(true)).toBeCloseTo(2 * run(false), -1);
+  });
+});
+
+describe("palette drift", () => {
+  /** Hue angle (radians) of an RGB color in opponent space, the rotation driftPalette applies. */
+  const hue = (/** @type {ArrayLike<number>} */ c, i = 0) => {
+    const [r, g, b] = [c[i * 3], c[i * 3 + 1], c[i * 3 + 2]];
+    return Math.atan2(Math.sqrt(3) * (g - b), 2 * r - g - b);
+  };
+  const wrap = (/** @type {number} */ a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+  it("rotates each dye's hue by the drift (none at 0), staying a valid color", () => {
+    const base = new Float32Array(MAX_COLORS * 3);
+    const n = paletteOf("rainbow", base);
+    const out = new Float32Array(MAX_COLORS * 3);
+    driftPalette(base, n, 0, out);
+    expect(Array.from(out)).toEqual(Array.from(base));
+    driftPalette(base, n, 0.3, out);
+    for (let i = 0; i < n; i++) {
+      expect(wrap(hue(out, i) - hue(base, i))).toBeCloseTo(0.3, 1);
+      for (let c = 0; c < 3; c++) {
+        expect(out[i * 3 + c]).toBeGreaterThanOrEqual(0);
+        expect(out[i * 3 + c]).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("drifts the hue gradually on phrases, within ±MAX_HUE_DRIFT, never jumping", () => {
+    const d = createPaletteDrift(5);
+    let h = d.step(1 / 60, false);
+    expect(h).toBe(0);
+    for (let f = 0; f < 600; f++) h = d.step(1 / 60, false);
+    expect(h).toBe(0); // no phrase, no drift
+    /** @type {number[]} */
+    const settled = [];
+    for (let p = 0; p < 6; p++) {
+      for (let f = 0; f < 60 * 16; f++) {
+        const next = d.step(1 / 60, f === 0);
+        expect(Math.abs(next - h)).toBeLessThan(0.004);
+        expect(Math.abs(next)).toBeLessThanOrEqual(MAX_HUE_DRIFT);
+        h = next;
+      }
+      settled.push(+h.toFixed(3));
+    }
+    expect(new Set(settled).size).toBeGreaterThanOrEqual(5);
+    expect(Math.max(...settled.map(Math.abs))).toBeGreaterThan(MAX_HUE_DRIFT / 3);
   });
 });
 
