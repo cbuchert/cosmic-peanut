@@ -925,3 +925,21 @@ describe("local effects pause for the beat", () => {
     expect(slow.radius).toBeLessThan(full.radius);
   });
 });
+
+describe("createWaveBend smoothing", () => {
+  it("a waveform that flips every frame averages out instead of jittering the stripe edges", () => {
+    for (const hz of [60, 120]) {
+      const b = createWaveBend(32);
+      const wave = new Float32Array(2048);
+      let prev = 0;
+      let most = 0;
+      for (let f = 0; f < hz * 2; f++) {
+        wave.fill(f % 2 ? 0.6 : -0.6);
+        const v = b.step(wave, 1 / hz)[5];
+        if (f > hz) most = Math.max(most, Math.abs(v - prev) * hz);
+        prev = v;
+      }
+      expect(most).toBeLessThan(0.15 * WAVE_SLEW);
+    }
+  });
+});

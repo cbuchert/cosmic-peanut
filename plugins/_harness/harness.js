@@ -126,10 +126,15 @@ function createMotionProbe(radius) {
       const maxs = [], rates = [];
       for (let i = 0; i < n; i++) if (mask[i]) { maxs.push(maxWin[i]); rates.push(total[i] / seconds); }
       const p = (/** @type {number[]} */ a, /** @type {number} */ q) => [...a].sort((x, y) => x - y)[Math.floor(q * (a.length - 1))];
+      // Where the worst pixels are (probe x, y; screen units from the centre), for debugging.
+      const worst = [];
+      for (let i = 0; i < n; i++) if (mask[i]) worst.push([maxWin[i], i]);
+      worst.sort((a, b) => b[0] - a[0]);
+      const at = worst.slice(0, 5).map(([m, i]) => [m / 2, +((((i % W) + 0.5) / W * 2 - 1) * (W / H)).toFixed(2), +(1 - ((Math.floor(i / W) + 0.5) / H) * 2).toFixed(2)]);
       // An alternation (Hz) is a black→white→black cycle: two flips.
       return {
         motion, onsets,
-        altHzP95: p(maxs, 0.95) / 2, altHzP99: p(maxs, 0.99) / 2, altHzMax: Math.max(...maxs) / 2,
+        altHzP95: p(maxs, 0.95) / 2, altHzP99: p(maxs, 0.99) / 2, altHzMax: Math.max(...maxs) / 2, altMaxAt: at,
         meanFlipRateP95: p(rates, 0.95),
       };
     },

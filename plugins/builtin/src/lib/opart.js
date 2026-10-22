@@ -58,8 +58,8 @@ const BREATHE_SLEW = 0.4; // rad per unit of field, per second
 /** Flow (units/s) at Speed 1 and full energy; the marble warp evolves with it. */
 export const FLOW_RATE = 0.04;
 /** Outward drift (rad/s of phase) at Speed 1: idle (silence) and added at full energy. */
-export const DRIFT_IDLE = 0.3;
-export const DRIFT_GAIN = 1.2;
+export const DRIFT_IDLE = 0.35;
+export const DRIFT_GAIN = 1.7;
 /**
  * Extra drift (rad/s) a full beat surge adds (by surge², so weak onsets only nudge): the loops
  * lurch outward on each beat, within what the budget leaves.
@@ -322,6 +322,8 @@ export function createRippleTrigger() {
 /** Waveform bend: most phase (rad) it shifts a stripe by, and how fast (units/s) it may change. */
 export const WAVE_PHASE = 2;
 export const WAVE_SLEW = 0.8;
+/** Seconds of smoothing after the slew limit. */
+const WAVE_SMOOTH = 0.15;
 
 /**
  * The waveform, block-averaged into `n` points and slew-limited, for bending the stripes around
@@ -331,6 +333,7 @@ export const WAVE_SLEW = 0.8;
  * @param {number} n
  */
 export function createWaveBend(n) {
+  const slewed = new Float32Array(n);
   const out = new Float32Array(n);
   const w = {
     /** Phase rate (rad/s) the bend used at its worst pixel in the last step. */
@@ -344,6 +347,7 @@ export function createWaveBend(n) {
     step(waveform, dt, pace = 1) {
       const len = waveform.length;
       const maxStep = WAVE_SLEW * clamp(pace, 0, 1) * Math.max(0, dt);
+      const k = 1 - Math.exp(-Math.max(0, dt) / WAVE_SMOOTH);
       let most = 0;
       for (let i = 0; i < n; i++) {
         const a = Math.floor((i * len) / n);
@@ -354,7 +358,10 @@ export function createWaveBend(n) {
           if (x > -2 && x < 2) sum += x; // skips NaN and wild values
         }
         const target = clamp((len ? sum / (b - a) : 0) * 1.5, -1, 1);
-        const step = clamp(target - out[i], -maxStep, maxStep);
+        slewed[i] += clamp(target - slewed[i], -maxStep, maxStep);
+        // Then smoothed: a frame-to-frame jumble (noise, a waveform caught at random phase) averages
+        // out instead of jittering the edges. Smoothing can't speed a slew-limited signal up.
+        const step = (slewed[i] - out[i]) * k;
         out[i] += step;
         most = Math.max(most, Math.abs(step));
       }
