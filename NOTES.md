@@ -3,6 +3,30 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Beat tracking: Ballroom baseline (2026-10-22)
+
+`uv run python -m tools.beat_eval` streams all 698 Ballroom clips hop by hop through the real
+Analyzer (9 s on 10 cores) and scores the beats (each `beatPhase` wrap while `bpm > 0`) with
+mir_eval against the Krebs annotations. `tests/test_beat_eval_ballroom.py` holds these as a floor
+when the dataset is present (`--fetch`, 1.5 GB to `~/.cache/tidalviz/ballroom`).
+
+| Current tracker (ACF tempo + onset PLL) | F | CMLt | AMLt | Acc1 | Acc2 |
+| --- | --- | --- | --- | --- | --- |
+| All 698 | 0.524 | 0.378 | 0.592 | 0.646 | 0.913 |
+| ChaChaCha (best) | 0.717 | 0.696 | 0.908 | 0.991 | 0.991 |
+| Quickstep (~200 BPM) | 0.485 | 0.001 | 0.720 | 0.000 | 1.000 |
+| Waltz (3/4) | 0.284 | 0.119 | 0.235 | 0.309 | 0.700 |
+
+- **Tempo is mostly right up to an octave (Acc2 0.91); phase and continuity are the weak part
+  (CMLt 0.38).** Quickstep sits above the 60–180 BPM search range, so it always halves.
+- **Libraries ruled out:** madmom (last PyPI release 2018, breaks on Python ≥ 3.10, models
+  CC BY-NC-SA), BeatNet (needs madmom + PyTorch), BTrack/aubio (GPL) and essentia (AGPL) under
+  our MIT license, librosa (offline only). Next: a clean-room port of Stark/Davies/Plumbley's
+  real-time cumulative-score tracker (DAFx 2009) in `analysis/rhythm.py`, judged by this table.
+- **Tie-Dye moves on the beat:** with a confident tempo an onset's surge is scaled to 0.2 and the
+  dye swell follows the beat; before, an off-beat onset pushed the flow further than a beat
+  (0.161 vs 0.129 unit radii).
+
 ## More reactive backgrounds: Tie-Dye, Skull Trip, Dark Sun, Eclipse, Marbling (2026-10-21)
 
 Background motion = mean frame-to-frame pixel change over the background (subject excluded),

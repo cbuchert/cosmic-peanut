@@ -26,6 +26,7 @@ uv run pytest -m "not live and not e2e"   # fast unit suite (includes perf check
 uv run pytest -m perf                     # wall-clock checks only (non-blocking in CI)
 uv run pytest -m live                     # needs real audio playing + capture permission
 uv run pytest -m e2e                      # Playwright/WebKit end to end
+uv run python -m tools.beat_eval           # beat-tracking accuracy on Ballroom (--fetch first)
 uv run ruff check && uv run ruff format --check
 uv run pyright                            # Linux: uv run pyright -p pyrightconfig.linux.json
 uv run tidalviz --dev <plugin folder>     # run from source, Web Inspector on
