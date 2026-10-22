@@ -263,6 +263,8 @@ export function createCurrents(seed) {
   let bassS = 0;
   let surge = 0;
   let lastStep = 0;
+  let enSlow = 0;
+  let stir = 0;
   /** Smoothed level of each 16-band group. */
   const lv = new Float64Array(4);
 
@@ -274,8 +276,10 @@ export function createCurrents(seed) {
       const sigma = v < 2 ? BIG_SIGMA[v] : LOCAL_SIGMA;
       const home = v < 2 ? 0.5 : 0.14 + 0.24 * (v - 2);
       const reach = v < 2 ? 0.3 : 0.08;
-      rate[o] = aspect * (home + reach * Math.sin(ph[p] + ph[p + 2] * t));
-      rate[o + 1] = 0.5 + 0.28 * Math.sin(ph[p + 1] + ph[p + 3] * t);
+      // A build-up draws the first big swirl to the middle of the page (the stir).
+      const pull = v === 0 ? stir : 0;
+      rate[o] = aspect * (home + (1 - pull) * reach * Math.sin(ph[p] + ph[p + 2] * t));
+      rate[o + 1] = 0.5 + (1 - pull) * 0.28 * Math.sin(ph[p + 1] + ph[p + 3] * t);
       rate[o + 2] = 1 / (sigma * sigma);
     }
   }
@@ -295,8 +299,11 @@ export function createCurrents(seed) {
     step(audio, energy, dt, params, env) {
       t += dt;
       const target = audio.silent ? 0 : energy;
-      en += (target - en) * (1 - Math.exp(-dt / (target > en ? 0.4 : 1)));
+      en += (target - en) * (1 - Math.exp(-dt / (target > en ? 0.4 : 0.6)));
       if (target === 0 && en < 0.004) en = 0;
+      // A build-up (loudness climbing above its slow average) stirs a slow central spiral.
+      enSlow += (en - enSlow) * (1 - Math.exp(-dt / 4));
+      stir += (clamp01((en - enSlow - 0.05) * 5) - stir) * (1 - Math.exp(-dt / 0.8));
       const s = en * Math.min(2, Math.max(0, params.reactivity) * Math.max(0, params.currents));
       const bands = audio.bands;
       const quiet = audio.silent;
@@ -316,7 +323,7 @@ export function createCurrents(seed) {
       surge = audio.onset && !quiet ? Math.max(surge, clamp01(audio.onsetStrength)) : surge * Math.exp(-dt / 0.2);
       const boost = 1 + 1.2 * surge;
       const swell = 0.25 + 0.75 * clamp01(bassS / 0.8);
-      rate[2 + 3] = BIG_A * s * swell * boost;
+      rate[2 + 3] = BIG_A * s * swell * boost * (1 + 1.5 * stir);
       rate[6 + 3] = -BIG_A * s * swell * boost;
       for (let g = 0; g < 4; g++) {
         const p = (2 + g) * 4;
@@ -656,6 +663,10 @@ const COMB_DIRS = [
   [0, -1],
 ];
 const COMB_W = 0.05;
+/** Flicks: at most this many at once, each a straight stroke this long (s), this narrow. */
+const MAX_FLICKS = 2;
+const FLICK_DUR = 0.18;
+const FLICK_INV_S2 = 1 / (0.01 * 0.01);
 /** Dropper drops per second at full loudness (Pour 1). */
 const DROPPER_RATE = 7;
 
@@ -724,6 +735,8 @@ export function createMarbler(seed) {
   let combD = 0;
   let combDir = 0;
   let lastComb = -1e9;
+  /** Quick strokes on snares and hats: per slot (x, y, dir x, dir y, speed, seconds left). */
+  const flicks = new Float64Array(MAX_FLICKS * 6);
 
   /**
    * Start a comb across the whole page, in the next of four directions, taking ~a bar.
@@ -842,6 +855,8 @@ export function createMarbler(seed) {
     count: 0,
     /** Paint drops landed and strokes begun this frame. */
     started: 0,
+    /** Flicks (quick strokes) started so far. */
+    flicks: 0,
     /** Combs started so far. */
     combs: 0,
     /** A stone (big downbeat drop) landed this frame. */
@@ -882,6 +897,12 @@ export function createMarbler(seed) {
         p.x += v[0];
         p.y += v[1];
       }
+      for (let o = 0; o < flicks.length; o += 6) {
+        if (flicks[o + 5] <= 0) continue;
+        flowDisp(f, flicks[o], flicks[o + 1], v);
+        flicks[o] += v[0];
+        flicks[o + 1] += v[1];
+      }
       if (sx >= 0) {
         flowDisp(f, sx, sy, v);
         sx += v[0];
@@ -898,6 +919,7 @@ export function createMarbler(seed) {
       now += dt;
       const drops0 = m.drops;
       const combs0 = m.combs;
+      const flicks0 = m.flicks;
       const bands = audio.bands;
       // Energy 0–1: half relative to the recent loudest (auto-gain), half absolute.
       const rms = audio.silent ? 0 : audio.rms;
@@ -922,6 +944,22 @@ export function createMarbler(seed) {
         // Loud beats pour several drops at once.
         m.hits = 1 + Math.floor(3 * clamp01(energy * audio.onsetStrength * params.reactivity * Math.min(1, pour)));
         for (let j = 1; j < m.hits; j++) dropFrom(region, 0.75, audio, params, env, hx(), hy());
+        // Snares and hats flick a quick stroke through the paint near the hit.
+        if (region > 0 && params.rake > 0)
+          for (let i = 0; i < MAX_FLICKS; i++) {
+            const o = i * 6;
+            if (flicks[o + 5] > 0) continue;
+            const a = rand() * 2 * Math.PI;
+            const len = (0.05 + 0.07 * clamp01(audio.onsetStrength)) * Math.min(2, params.rake);
+            flicks[o] = hx();
+            flicks[o + 1] = hy();
+            flicks[o + 2] = Math.cos(a);
+            flicks[o + 3] = Math.sin(a);
+            flicks[o + 4] = len / FLICK_DUR;
+            flicks[o + 5] = FLICK_DUR;
+            m.flicks++;
+            break;
+          }
       }
       // Tempo: count beats from the predicted beat phase; each bar's downbeat drops a stone — a
       // big drop that shoves everything outward.
@@ -1064,6 +1102,26 @@ export function createMarbler(seed) {
           spawn(sx, sy, r, 0, -1, -1, 0.12, 0);
         }
       }
+      for (let i = 0; i < MAX_FLICKS; i++) {
+        const o = i * 6;
+        if (flicks[o + 5] <= 0) continue;
+        flicks[o + 5] -= dt;
+        const step = flicks[o + 4] * dt;
+        v[0] = flicks[o + 2] * step * STYLUS_GRIP;
+        v[1] = flicks[o + 3] * step * STYLUS_GRIP;
+        clampDrag(FLICK_INV_S2, v);
+        evA[n * 4] = EV_DRAG;
+        evA[n * 4 + 1] = flicks[o];
+        evA[n * 4 + 2] = flicks[o + 1];
+        evA[n * 4 + 3] = FLICK_INV_S2;
+        evB[n * 4] = v[0];
+        evB[n * 4 + 1] = v[1];
+        evB[n * 4 + 2] = 0;
+        evB[n * 4 + 3] = 0;
+        n++;
+        flicks[o] += flicks[o + 2] * step;
+        flicks[o + 1] += flicks[o + 3] * step;
+      }
       for (let i = 0; i < 64; i++) prevBands[i] = bands[i] ?? 0;
 
       // Emit this frame's slice of every drop being poured.
@@ -1097,7 +1155,7 @@ export function createMarbler(seed) {
         if (u >= 1) p.state = 0;
       }
       m.count = n;
-      m.started = m.drops - drops0 + m.combs - combs0;
+      m.started = m.drops - drops0 + m.combs - combs0 + m.flicks - flicks0;
     },
   };
   return m;

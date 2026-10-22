@@ -755,6 +755,19 @@ describe("createCurrents", () => {
     expect(fulls).toBeGreaterThan(5);
   });
 
+  it("stirs a slow central spiral while the music builds up", () => {
+    /** |A| of the first big swirl and its distance from the page centre, after `frames` of `energyAt`. */
+    const run = (/** @type {(f: number) => number} */ energyAt) => {
+      const c = createCurrents(2);
+      for (let f = 0; f < 600; f++) c.step(music(0.5), energyAt(f), DT, CP, ENV);
+      return { a: Math.abs(c.rate[5]), d: Math.hypot(c.rate[2] - ENV.aspect / 2, c.rate[3] - 0.5) };
+    };
+    const steady = run(() => 0.85);
+    const build = run((f) => (f < 300 ? 0.2 : 0.2 + (0.65 * (f - 300)) / 300));
+    expect(build.a).toBeGreaterThan(1.3 * steady.a);
+    expect(build.d).toBeLessThan(0.15);
+  });
+
   it("is deterministic given the seed and the audio", () => {
     const run = () => {
       const c = createCurrents(9);
@@ -1000,5 +1013,27 @@ describe("comb", () => {
     const free = run({ rms: 0.4, bpm: 0, beatPhase: 0 });
     expect(free.starts.length).toBeGreaterThan(0);
     for (let i = 1; i < free.starts.length; i++) expect(free.starts[i] - free.starts[i - 1]).toBeGreaterThanOrEqual(6 * 60);
+  });
+
+  it("flicks a quick stroke through the paint on snares and hats, not on kicks, at most two at once", () => {
+    const RAKE = { ...PARAMS, rake: 1 };
+    const run = (/** @type {number} */ lo, /** @type {number} */ hi, params = RAKE) => {
+      const m = createMarbler(2);
+      let maxDrags = 0;
+      for (let f = 0; f < 600; f++) {
+        const onset = f % 8 === 0;
+        m.step(audioFrame({ rms: 0.3, onset, onsetStrength: 0.9, bands: onset ? bandsHit(lo, hi) : new Float32Array(64) }), DT, params, ENV);
+        let drags = 0;
+        for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === EV_DRAG) drags++;
+        maxDrags = Math.max(maxDrags, drags);
+      }
+      return { flicks: m.flicks, maxDrags };
+    };
+    const snare = run(20, 40);
+    expect(snare.flicks).toBeGreaterThan(30);
+    expect(snare.maxDrags).toBeLessThanOrEqual(3); // the stylus and two flicks
+    expect(run(48, 64).flicks).toBeGreaterThan(30);
+    expect(run(0, 6).flicks).toBe(0);
+    expect(run(20, 40, { ...RAKE, rake: 0 }).flicks).toBe(0);
   });
 });
