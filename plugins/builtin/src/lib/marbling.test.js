@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { FLOW_VORTICES, CURRENT_MAX_SPEED, createCurrents, FLOW_LEN, FLOW_MAX_GRAD, flowBound, flowDisp, flowInverse, createEventQueue, MAX_PENDING, resizeMap, toOldPage, DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
+import { EV_COMB, COMB_MAX_AMP, combForward, combInverse, FLOW_VORTICES, CURRENT_MAX_SPEED, createCurrents, FLOW_LEN, FLOW_MAX_GRAD, flowBound, flowDisp, flowInverse, createEventQueue, MAX_PENDING, resizeMap, toOldPage, DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
 
 const out = new Float64Array(2);
 
@@ -804,17 +804,18 @@ describe("marbler and currents", () => {
     expect(s0[0]).toBeCloseTo(s2[0] + ds[0], 3);
   });
 
-  it("counts the paint drops it lays and the drop slices and strokes it starts each frame", () => {
+  it("counts the paint drops it lays, and the drops and strokes that begin each frame", () => {
     const m = createMarbler(3);
     const RAKE = { ...PARAMS, rake: 1 };
     m.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    m.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
     expect(m.drops).toBe(0);
-    expect(m.started).toBe(1); // the stylus step
+    expect(m.started).toBe(0); // the stylus keeps raking: nothing new begins
     m.step(audioFrame({ rms: 0.2, onset: true, onsetStrength: 1, bands: bandsHit(0, 6) }), DT, RAKE, ENV);
-    let ev = 0;
-    for (let i = 0; i < m.count; i++) if (m.evA[i * 4] === EV_DROP || m.evA[i * 4] === EV_DRAG) ev++;
-    expect(m.started).toBe(ev);
     expect(m.drops).toBeGreaterThan(1);
+    expect(m.started).toBe(m.drops);
+    m.step(audioFrame({ rms: 0.2 }), DT, RAKE, ENV);
+    expect(m.started).toBe(0); // still pouring, but nothing new
   });
 });
 
@@ -880,5 +881,124 @@ describe("pour follows the music", () => {
     expect(quiet).toBeGreaterThan(1.5);
     expect(loud).toBeGreaterThan(6);
     expect(loud).toBeGreaterThan(2 * quiet);
+  });
+
+  it("lands each hit where its sound sits in the spectrum: bass to the left, highs to the right", () => {
+    const meanX = (/** @type {number} */ lo, /** @type {number} */ hi) => {
+      let sum = 0;
+      let n = 0;
+      for (let seed = 1; seed <= 30; seed++) {
+        const m = createMarbler(seed);
+        m.step(audioFrame(), DT, PARAMS, ENV);
+        m.step(audioFrame({ onset: true, onsetStrength: 1, bands: bandsHit(lo, hi) }), DT, PARAMS, ENV);
+        sum += m.evA[1] / ENV.aspect;
+        n++;
+      }
+      return sum / n;
+    };
+    expect(meanX(0, 6)).toBeLessThan(0.3);
+    expect(meanX(24, 32)).toBeGreaterThan(0.35);
+    expect(meanX(24, 32)).toBeLessThan(0.65);
+    expect(meanX(56, 64)).toBeGreaterThan(0.7);
+  });
+});
+
+/** 120 BPM: beatPhase ramps 0→1 every 30 frames; onsets on each beat. @param {number} f @param {object} [o] */
+const beatFrame = (f, o = {}) =>
+  audioFrame({ rms: 0.3, bpm: 120, beatPhase: (f % 30) / 30, onset: f % 30 === 0, onsetStrength: 0.9, bands: bandsHit(0, 40), ...o });
+
+describe("tempo", () => {
+
+  it("drops a big stone on each bar's downbeat when the tempo is known and the music is up", () => {
+    const m = createMarbler(4);
+    const stones = [];
+    for (let f = 0; f < 30 * 16; f++) {
+      m.step(beatFrame(f), DT, PARAMS, ENV);
+      if (m.stone) stones.push(f);
+    }
+    expect(stones.length).toBeGreaterThanOrEqual(3);
+    for (let i = 1; i < stones.length; i++) expect(stones[i] - stones[i - 1]).toBe(120); // every 4 beats
+    // No tempo, no stones; quiet music, none either.
+    const m2 = createMarbler(4);
+    const m3 = createMarbler(4);
+    let none = 0;
+    for (let f = 0; f < 30 * 16; f++) {
+      m2.step(beatFrame(f, { bpm: 0, beatPhase: 0 }), DT, PARAMS, ENV);
+      m3.step(beatFrame(f, { rms: 0.004 }), DT, PARAMS, ENV);
+      none += (m2.stone ? 1 : 0) + (m3.stone ? 1 : 0);
+    }
+    expect(none).toBe(0);
+  });
+});
+
+describe("comb", () => {
+  // A comb moving right (m = +x), its front at x = 0.8, tines every 0.1 along y.
+  const c = new Float32Array([0.8, 1 / 0.05, 0.01, 1, 0, 0.1, 0, 0.004]);
+
+  it("drags paint along the comb's motion near its front, most at the tines, keeping each row on its line", () => {
+    const p = new Float64Array(2);
+    combForward(c, 0.8, 0.05, p); // on a tine (tines at y = 0.05 + 0.1k), at the front
+    expect(p[0] - 0.8).toBeCloseTo(0.01, 7);
+    expect(p[1]).toBe(0.05);
+    combForward(c, 0.8, 0.1, p); // midway between tines: much less
+    expect(p[0] - 0.8).toBeLessThan(0.002);
+    combForward(c, 1.2, 0.05, p); // far from the front: nothing
+    expect(p[0] - 1.2).toBeLessThan(1e-12);
+  });
+
+  it("inverts to well under a texel within its steepness limit", () => {
+    const strong = Float32Array.from(c);
+    strong[2] = COMB_MAX_AMP * 0.05; // amp limit is per front width
+    const p = new Float64Array(2);
+    const back = new Float64Array(2);
+    for (let i = 0; i < 400; i++) {
+      const x = (i * 0.618) % 1.7;
+      const y = (i * 0.414) % 1;
+      combForward(strong, x, y, p);
+      combInverse(strong, p[0], p[1], back);
+      expect(Math.hypot(back[0] - x, back[1] - y)).toBeLessThan(1e-6);
+    }
+  });
+
+  it("combs the whole page in time with the bars, direction alternating, harder and more often when loud", () => {
+    const RAKE = { ...PARAMS, rake: 1 };
+    const run = (/** @type {object} */ o, frames = 30 * 64) => {
+      const m = createMarbler(5);
+      const starts = [];
+      const dirs = [];
+      let maxAmpW = 0;
+      let prevFront = NaN;
+      for (let f = 0; f < frames; f++) {
+        m.step(beatFrame(f, o), DT, RAKE, ENV);
+        let combs = 0;
+        for (let i = 0; i < m.count; i++) {
+          if (m.evA[i * 4] !== EV_COMB) continue;
+          combs++;
+          maxAmpW = Math.max(maxAmpW, m.evA[i * 4 + 3] * m.evA[i * 4 + 2]);
+          const front = m.evA[i * 4 + 1];
+          if (!(Math.abs(front - prevFront) < 0.1)) {
+            starts.push(f);
+            dirs.push([m.evB[i * 4], m.evB[i * 4 + 1]]);
+          }
+          prevFront = front;
+        }
+        expect(combs).toBeLessThanOrEqual(1);
+        if (combs === 0) prevFront = NaN;
+      }
+      return { starts, dirs, maxAmpW };
+    };
+    const loud = run({ rms: 0.4 });
+    expect(loud.starts.length).toBeGreaterThanOrEqual(6); // 64 beats: one every 2 bars
+    for (const f of loud.starts) expect((f - loud.starts[0]) % 240).toBe(0); // on a downbeat, every 2 bars
+    for (let i = 1; i < loud.dirs.length; i++) expect(loud.dirs[i]).not.toEqual(loud.dirs[i - 1]);
+    expect(loud.maxAmpW).toBeLessThanOrEqual(COMB_MAX_AMP + 1e-6);
+    const mid = run({ rms: 0.02 });
+    expect(mid.starts.length).toBeGreaterThan(0);
+    expect(mid.starts.length).toBeLessThan(loud.starts.length);
+    expect(run({ rms: 0.004 }).starts.length).toBe(0);
+    // Without a tempo, strong hits in loud passages still comb now and then, never back to back.
+    const free = run({ rms: 0.4, bpm: 0, beatPhase: 0 });
+    expect(free.starts.length).toBeGreaterThan(0);
+    for (let i = 1; i < free.starts.length; i++) expect(free.starts[i] - free.starts[i - 1]).toBeGreaterThanOrEqual(6 * 60);
   });
 });

@@ -4,15 +4,15 @@
 // The page as it is now = the baked ink texture pushed through the pending events. For a point,
 // walk the events newest → oldest through their exact inverse maps to find where its paint was
 // at the last bake; a point inside a drop takes that drop's ink instead (antialiased over one
-// texel). Mirrors dropInverse / dragInverse in src/lib/marbling.js.
+// texel). Mirrors dropInverse / dragInverse / combInverse in src/lib/marbling.js.
 // Ink texture channels: amounts of inks 0–3 (paper = 1 − their sum).
 
 const int MAX_PENDING = 48;
 const int DRAG_ITERS = 7;
 uniform int u_n;
-uniform vec4 u_a[MAX_PENDING];   // (type, x, y, R² | 1/σ² | 0)
-uniform vec4 u_b[MAX_PENDING];   // drop: (cell r², ...); drag: (vx, vy, ...)
-uniform vec4 u_c[MAX_PENDING];   // drop: cell ink
+uniform vec4 u_a[MAX_PENDING];   // (type, x, y, R² | 1/σ² | 0); comb: (4, front, 1/w, amp)
+uniform vec4 u_b[MAX_PENDING];   // drop: (cell r², ...); drag: (vx, vy, ...); comb: (m, spacing, phase)
+uniform vec4 u_c[MAX_PENDING];   // drop: cell ink; comb: (λ, ...)
 uniform vec4 u_d[MAX_PENDING];   // drop: rim ink
 // The bath's currents since the last bake, the newest "event": [0] = (drift, on, 0), then six
 // vortices (cx, cy, k, A) of the divergence-free displacement d = drift + curl(A·exp(−k|p − c|²)).
@@ -68,8 +68,23 @@ vec4 marble(vec2 p) {
         vec2 d = p - a.yz;
         p = p0 - v * exp(-dot(d, d) * a.w);
       }
-    } else {                        // SHIFT
+    } else if (a.x < 3.5) {         // SHIFT
       p -= a.yz;
+    } else {                        // COMB step (Newton on t + amp·g·h(t) = t' along m)
+      vec4 b = u_b[k];
+      vec2 m = b.xy;
+      float nn = -m.y * p.x + m.x * p.y;
+      float t1 = dot(m, p);
+      float u = nn / b.z + b.w;
+      float lam = u_c[k].x;
+      float ag = a.w * lam / (lam + b.z * abs(fract(u) - 0.5));
+      float t = t1;
+      for (int i = 0; i < 3; i++) {
+        float z = (t - a.y) * a.z;
+        float h = exp(-z * z);
+        t -= (t + ag * h - t1) / (1.0 - 2.0 * ag * h * z * a.z);
+      }
+      p = m * t + vec2(-m.y, m.x) * nn;
     }
   }
   return acc + T * sampleInk(p * H);

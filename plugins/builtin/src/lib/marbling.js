@@ -361,6 +361,72 @@ export function createCurrents(seed) {
   return c;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Comb: a row of tines dragged across the page (the classic combed pattern), applied a frame at
+// a time as its front passes.
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Largest per-frame amplitude of a comb step, per unit of front width: keeps 1 + ∂(displacement)/∂t
+ * ≥ 0.5 so the map stays invertible and {@link combInverse}'s Newton steps converge.
+ */
+export const COMB_MAX_AMP = 0.5 / Math.sqrt(2 / Math.E);
+const COMB_ITERS = 3;
+
+/**
+ * One comb step. c = [front, 1/w, amp, mx, my, spacing, phase, λ]: the comb moves along the unit
+ * vector m and its tines are lines parallel to m every `spacing` across it. Paint moves along m by
+ * amp·g·h: g = λ/(λ + distance to the nearest tine) (Jaffer's tine falloff: sharp V's at the
+ * tines), h = exp(−((m·p − front)/w)²) (only near the front). The cross-coordinate never changes.
+ * @param {ArrayLike<number>} c
+ * @param {number} px
+ * @param {number} py
+ * @param {Float64Array | number[]} out
+ */
+export function combForward(c, px, py, out) {
+  const mx = c[3];
+  const my = c[4];
+  const t = mx * px + my * py;
+  const z = (t - c[0]) * c[1];
+  const s = c[2] * combG(c, -my * px + mx * py) * Math.exp(-z * z);
+  out[0] = px + mx * s;
+  out[1] = py + my * s;
+  return out;
+}
+
+/** The tine falloff at cross-coordinate nn. @param {ArrayLike<number>} c @param {number} nn */
+function combG(c, nn) {
+  const u = nn / c[5] + c[6];
+  const d = c[5] * Math.abs(u - Math.floor(u) - 0.5);
+  return c[7] / (c[7] + d);
+}
+
+/**
+ * Exact-to-Newton inverse of {@link combForward}: solve t + amp·g·h(t) = t' along m (g is fixed,
+ * the cross-coordinate doesn't move). Mirrored in events.glsl.
+ * @param {ArrayLike<number>} c
+ * @param {number} px
+ * @param {number} py
+ * @param {Float64Array | number[]} out
+ */
+export function combInverse(c, px, py, out) {
+  const mx = c[3];
+  const my = c[4];
+  const nn = -my * px + mx * py;
+  const t1 = mx * px + my * py;
+  const ag = c[2] * combG(c, nn);
+  const iw = c[1];
+  let t = t1;
+  for (let i = 0; i < COMB_ITERS; i++) {
+    const z = (t - c[0]) * iw;
+    const h = Math.exp(-z * z);
+    t -= (t + ag * h - t1) / (1 - 2 * ag * h * z * iw);
+  }
+  out[0] = mx * t - my * nn;
+  out[1] = my * t + mx * nn;
+  return out;
+}
+
 /**
  * Seeded PRNG (mulberry32): drop positions and choices are deterministic given the audio and time.
  * @param {number} seed
@@ -404,6 +470,30 @@ export function strongestRegion(bands, prev) {
     }
   }
   return best;
+}
+
+/**
+ * Where across the spectrum a hit sits, 0 (lowest band) … 1 (highest): the mean band index
+ * weighted by each band's rise since the previous frame (by its level if nothing rose).
+ * @param {ArrayLike<number>} bands
+ * @param {ArrayLike<number>} prev
+ */
+export function risePosition(bands, prev) {
+  let w = 0;
+  let sum = 0;
+  for (let i = 0; i < 64; i++) {
+    const d = bands[i] - prev[i];
+    if (d > 0) {
+      w += d;
+      sum += d * i;
+    }
+  }
+  if (w === 0)
+    for (let i = 0; i < 64; i++) {
+      w += bands[i];
+      sum += bands[i] * i;
+    }
+  return w > 0 ? sum / w / 63 : 0.5;
 }
 
 /**
@@ -488,6 +578,7 @@ export const MAX_POURS = 24;
 export const EV_DROP = 1;
 export const EV_DRAG = 2;
 export const EV_SHIFT = 3;
+export const EV_COMB = 4;
 
 /**
  * Per-region drop recipe (page units: the page is 1 tall). radius: base radius; rimT: thickness of
@@ -512,6 +603,8 @@ const RECIPES = [
  * @property {number} peak
  * @property {number} centroid
  * @property {boolean} silent
+ * @property {number} [bpm] tempo, 0 until confident
+ * @property {number} [beatPhase] 0–1 between predicted beats
  */
 /**
  * @typedef {object} PourParams
@@ -551,6 +644,18 @@ const GROUND_POUR = 1.2;
 
 /** Shortest gap between hit drops (s): every beat pours, a double-trigger doesn't. */
 const BEAT_GAP = 0.06;
+/** Downbeat stones: radius (page), seconds to bloom, and the loudness they need. */
+const STONE_R = 0.11;
+const STONE_POUR = 0.5;
+const STONE_ENERGY = 0.3;
+/** Comb directions in turn (m), and the width of its front (page). */
+const COMB_DIRS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+const COMB_W = 0.05;
 /** Dropper drops per second at full loudness (Pour 1). */
 const DROPPER_RATE = 7;
 
@@ -609,6 +714,41 @@ export function createMarbler(seed) {
   let clearClock = 0;
   let nextClear = CLEAR_EVERY;
   let act = 0;
+  let beats = 0;
+  let lastPhase = 0;
+  // The comb sweeping the page (combForward's params) and its schedule.
+  const comb = new Float64Array(8);
+  let combOn = false;
+  let combEnd = 0;
+  let combSpeed = 0;
+  let combD = 0;
+  let combDir = 0;
+  let lastComb = -1e9;
+
+  /**
+   * Start a comb across the whole page, in the next of four directions, taking ~a bar.
+   * @param {number} energy @param {number} bpm @param {PourParams} params @param {PourEnv} env
+   */
+  function startComb(energy, bpm, params, env) {
+    const d = COMB_DIRS[combDir++ % 4];
+    const span = d[0] !== 0 ? env.aspect : 1;
+    const lo = d[0] + d[1] < 0 ? -span : 0;
+    const w = COMB_W;
+    const dur = Math.min(3, Math.max(1.2, bpm > 0 ? 240 / bpm : 2));
+    comb[0] = lo - 2 * w;
+    comb[1] = 1 / w;
+    comb[3] = d[0];
+    comb[4] = d[1];
+    comb[5] = 0.16 - 0.08 * energy;
+    comb[6] = rand();
+    comb[7] = 0.012;
+    combEnd = lo + span + 2 * w;
+    combSpeed = (combEnd - comb[0]) / dur;
+    combD = (0.03 + 0.07 * energy) * Math.min(2, params.rake * params.reactivity);
+    combOn = true;
+    lastComb = now;
+    m.combs++;
+  }
 
   /**
    * Queue a drop. Returns the slot, or -1 when every slot is busy (the drop is skipped: the cap).
@@ -700,8 +840,12 @@ export function createMarbler(seed) {
     evD,
     /** Number of events this frame. */
     count: 0,
-    /** Drop slices and strokes among them (not drift). */
+    /** Paint drops landed and strokes begun this frame. */
     started: 0,
+    /** Combs started so far. */
+    combs: 0,
+    /** A stone (big downbeat drop) landed this frame. */
+    stone: false,
     /** Hit drops poured for this frame's beat. */
     hits: 0,
     /** Paint (not clear) drops laid so far. */
@@ -752,6 +896,8 @@ export function createMarbler(seed) {
      */
     step(audio, dt, params, env) {
       now += dt;
+      const drops0 = m.drops;
+      const combs0 = m.combs;
       const bands = audio.bands;
       // Energy 0–1: half relative to the recent loudest (auto-gain), half absolute.
       const rms = audio.silent ? 0 : audio.rms;
@@ -768,11 +914,39 @@ export function createMarbler(seed) {
       }
       m.hits = 0;
       if (region >= 0) {
-        dropFrom(region, 1, audio, params, env);
+        // Where the hit sits in the spectrum sets where it lands: bass left … highs right.
+        const pos = risePosition(bands, prevBands);
+        const hx = () => env.aspect * clamp01(0.1 + 0.8 * pos + 0.14 * (rand() - 0.5));
+        const hy = () => 0.5 + 0.8 * (rand() - 0.5);
+        dropFrom(region, 1, audio, params, env, hx(), hy());
         // Loud beats pour several drops at once.
         m.hits = 1 + Math.floor(3 * clamp01(energy * audio.onsetStrength * params.reactivity * Math.min(1, pour)));
-        for (let j = 1; j < m.hits; j++) dropFrom(region, 0.75, audio, params, env);
+        for (let j = 1; j < m.hits; j++) dropFrom(region, 0.75, audio, params, env, hx(), hy());
       }
+      // Tempo: count beats from the predicted beat phase; each bar's downbeat drops a stone — a
+      // big drop that shoves everything outward.
+      m.stone = false;
+      const bpm = audio.bpm ?? 0;
+      const phase = audio.beatPhase ?? 0;
+      if (bpm > 0 && !audio.silent) {
+        if (phase < lastPhase - 0.5) {
+          beats++;
+          const every = energy > 0.55 ? 8 : 16;
+          if (beats % every === 1 && energy > 0.2 && params.rake > 0 && !combOn) startComb(energy, bpm, params, env);
+          if (beats % 4 === 1 && energy > STONE_ENERGY) {
+            m.stone = true;
+            const r = STONE_R * params.size * (0.85 + 0.3 * energy);
+            spawn(env.aspect * (0.25 + 0.5 * rand()), 0.3 + 0.4 * rand(), r, 0.004, 1, 0, STONE_POUR, 0);
+          }
+        }
+      } else {
+        beats = 0;
+        // No tempo yet: a strong hit in a loud passage combs now and then.
+        if (audio.onset && !audio.silent && audio.onsetStrength >= 0.7 && energy > 0.45 && params.rake > 0 && !combOn && now - lastComb >= 6)
+          startComb(energy, 0, params, env);
+      }
+      lastPhase = phase;
+
       // The dropper: while music plays a stream of small drops feeds the page, at a rate that
       // follows the loudness, from a nozzle the spectral centroid steers across the page; the ink
       // is the loudest part of the spectrum's.
@@ -830,6 +1004,28 @@ export function createMarbler(seed) {
           const y = 0.2 + 0.6 * rand();
           spawn(x, y, 0.08 + 0.06 * rand(), 0, -1, -1, CLEAR_POUR, 0);
         }
+      }
+
+      // The comb's step this frame: its front advances; the paint it passes moves by combD in all.
+      if (combOn) {
+        const step = combSpeed * dt;
+        const amp = Math.min((combD * step * comb[1]) / Math.sqrt(Math.PI), (0.8 * COMB_MAX_AMP) / comb[1]);
+        comb[0] += step;
+        comb[2] = amp;
+        evA[n * 4] = EV_COMB;
+        evA[n * 4 + 1] = comb[0];
+        evA[n * 4 + 2] = comb[1];
+        evA[n * 4 + 3] = amp;
+        evB[n * 4] = comb[3];
+        evB[n * 4 + 1] = comb[4];
+        evB[n * 4 + 2] = comb[5];
+        evB[n * 4 + 3] = comb[6];
+        evC[n * 4] = comb[7];
+        evC[n * 4 + 1] = 0;
+        evC[n * 4 + 2] = 0;
+        evC[n * 4 + 3] = 0;
+        n++;
+        if (comb[0] >= combEnd) combOn = false;
       }
 
       // The stylus rakes through the paint: height from the (smoothed) spectral centroid, a
@@ -901,9 +1097,7 @@ export function createMarbler(seed) {
         if (u >= 1) p.state = 0;
       }
       m.count = n;
-      let started = 0;
-      for (let i = 0; i < n; i++) if (evA[i * 4] === EV_DROP || evA[i * 4] === EV_DRAG) started++;
-      m.started = started;
+      m.started = m.drops - drops0 + m.combs - combs0;
     },
   };
   return m;
