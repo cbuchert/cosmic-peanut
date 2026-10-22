@@ -449,6 +449,7 @@ def test_eclipse_manifest():
         "clouds",
         "tint",
         "sky",
+        "water",
         "rotation",
     ]
     r = params["reactivity"]
@@ -458,11 +459,14 @@ def test_eclipse_manifest():
     assert params["tint"]["default"] == "monochrome"
     assert params["sky"]["options"] == ["black", "none"]
     assert params["sky"]["default"] == "black"
+    # lib/eclipse.js WATERS; fitEclipse falls back to low for anything else.
+    assert params["water"]["options"] == ["off", "low", "mid"]
+    assert params["water"]["default"] == "low"
     # lib/eclipse.js DEFAULT_ROTATION: Reduce motion slows the drift only while it's at this default.
     rot = params["rotation"]
     assert rot["default"] == 0.03
     assert rot["min"] < 0 < rot["max"]
-    for f in ("fullscreen.vert", "noise.glsl", "eclipse.frag", "clouds.frag"):
+    for f in ("fullscreen.vert", "noise.glsl", "eclipse.frag", "clouds.frag", "water.frag"):
         assert (REPOS["builtin"] / "shaders/eclipse" / f).is_file(), f
 
 

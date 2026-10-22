@@ -341,15 +341,17 @@ export function createRipple(count = SECTORS) {
 }
 
 /**
- * The density at which the marbled clouds' edge is cut (shaders/eclipse): more Clouds and louder
- * mids (smoothed, 0–1) lower it, so the ink spreads.
+ * The density at which the marbled clouds' edge is cut (shaders/eclipse): more Clouds, louder
+ * mids (smoothed, 0–1) and more energy (createFlow) lower it, so the ink spreads; −0.2…0.2.
  * @param {number} clouds Clouds param, 0–1
  * @param {number} mid smoothed mids, 0–1
+ * @param {number} [energy] createFlow().energy, 0–1
  */
-export function cloudThreshold(clouds, mid) {
+export function cloudThreshold(clouds, mid, energy = 0) {
   const c = clouds > 0 ? (clouds < 1 ? clouds : 1) : 0; // NaN → 0
   const m = mid > 0 ? (mid < 1 ? mid : 1) : 0;
-  return 0.18 - 0.26 * c - 0.12 * m;
+  const th = 0.2 - 0.26 * c - 0.12 * m - 0.09 * unit(energy);
+  return th > -0.2 ? th : -0.2;
 }
 
 /** Clamp to 0–1 (NaN → 0). @param {number} x */
@@ -363,14 +365,14 @@ const ENERGY_ATTACK = 0.25;
 const ENERGY_RELEASE = 1.2;
 /** Cloud orbit (rad/s): a drift in silence, ORBIT_LOUD at full energy. */
 const ORBIT_IDLE = 0.012;
-const ORBIT_LOUD = 0.22;
+const ORBIT_LOUD = 0.08;
 /** A beat's surge (rad/s at full strength): eased in over SURGE_RISE, fading over SURGE_DECAY. */
-const ORBIT_SURGE = 0.35;
-const SURGE_RISE = 0.06;
-const SURGE_DECAY = 0.4;
+const ORBIT_SURGE = 0.6;
+const SURGE_RISE = 0.04;
+const SURGE_DECAY = 0.15;
 /** The clouds' formation clock (noise-time units/s): masses form and dissolve this fast. */
 const EVOLVE_IDLE = 0.03;
-const EVOLVE_LOUD = 0.32;
+const EVOLVE_LOUD = 0.22;
 
 /**
  * The clouds' orbital flow around the eclipse: `energy` (0–1) follows the raw loudness (`rms`,
@@ -382,6 +384,7 @@ const EVOLVE_LOUD = 0.32;
  */
 export function createFlow() {
   let kick = 0;
+  let ease = 0;
   const f = {
     surge: 0,
     energy: 0,
@@ -405,10 +408,15 @@ export function createFlow() {
       const react = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
       kick *= Math.exp(-dt / SURGE_DECAY);
       if (onset) kick = unit(kick + unit(strength));
-      f.surge += (kick - f.surge) * (1 - Math.exp(-dt / SURGE_RISE));
-      f.speed = (ORBIT_IDLE + (ORBIT_LOUD * f.energy + ORBIT_SURGE * f.surge) * react) * drift;
+      // Two cascaded easings: an S-shaped rise, so the orbit's speed never steps.
+      const ka = 1 - Math.exp(-dt / SURGE_RISE);
+      ease += (kick - ease) * ka;
+      f.surge += (ease - f.surge) * ka;
+      // A beat's surge scales with the energy too (backgroundDrive): quiet beats barely stir it.
+      const surge = f.surge * (0.1 + 0.9 * f.energy);
+      f.speed = (ORBIT_IDLE + (ORBIT_LOUD * f.energy + ORBIT_SURGE * surge) * react) * drift;
       f.angle = (f.angle + f.speed * dt) % (2 * Math.PI);
-      const rate = EVOLVE_IDLE + EVOLVE_LOUD * (0.8 * f.energy + 0.4 * f.surge) * react;
+      const rate = EVOLVE_IDLE + EVOLVE_LOUD * (0.8 * f.energy + surge) * react;
       f.evolve = (f.evolve + rate * drift * dt) % 1000;
     },
   };
@@ -467,7 +475,7 @@ export function createCloudBias(count = SECTORS) {
 /** Sky pulse pool size (uniform vec2 array length in the shaders). */
 export const PULSES = 4;
 /** Sky pulse speed (units/s), amplitude decay (s), and where it's gone (past the ring's edge). */
-const PULSE_SPEED = 0.7;
+const PULSE_SPEED = 1.2;
 const PULSE_DECAY = 0.7;
 const PULSE_END = 2.2;
 
@@ -497,7 +505,8 @@ export function createPulses() {
         if (data[2 * i + 1] < FLARE_MIN || data[2 * i] > PULSE_END) data[2 * i] = data[2 * i + 1] = 0;
       }
       if (!onset) return;
-      const amp = (0.3 + 0.7 * unit(strength)) * unit(reactivity);
+      const st = unit(strength);
+      const amp = (0.1 + 0.9 * st * st) * unit(reactivity); // beats ≫ hats
       if (amp < FLARE_MIN) return;
       let slot = 0;
       for (let i = 0; i < PULSES; i++) {
@@ -720,4 +729,16 @@ export function createWater() {
     },
   };
   return w;
+}
+
+/**
+ * The reactivity the background's responses (beat pulses, billows, rim light, bass light, water,
+ * the spectrum's pull on the clouds) run at: × the energy (createFlow), so a quiet passage stays
+ * calm and stark while a loud one turns turbulent; a quarter of it remains in the quiet.
+ * @param {number} reactivity 0–2
+ * @param {number} energy createFlow().energy, 0–1
+ */
+export function backgroundDrive(reactivity, energy) {
+  const react = reactivity > 0 ? (reactivity < 2 ? reactivity : 2) : 0;
+  return react * (0.25 + 0.75 * unit(energy));
 }

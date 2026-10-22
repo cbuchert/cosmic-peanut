@@ -226,7 +226,7 @@
     {
       "id": "eclipse",
       "name": "Eclipse",
-      "description": "A black sun in a blazing white ring, after The Sky's Gone Out: the spectrum wraps around the ring and each frequency's corona branches out as far as it is loud; bass swells the ring, beats send flares outward, marbled ink clouds drift.",
+      "description": "A black sun in a blazing white ring, after The Sky's Gone Out: the spectrum wraps around the ring and each frequency's corona branches out as far as it is loud; bass swells the ring, beats send flares outward. Marbled ink clouds orbit faster when it's loud, form and dissolve with the music and billow out on beats; a dark sea below mirrors it all, rippling with the waveform, rolling with the bass and ringing on beats.",
       "author": "Tidalviz",
       "entry": "src/eclipse.js",
       "renderer": "webgl2",
@@ -238,6 +238,7 @@
         { "id": "clouds", "type": "number", "label": "Clouds", "min": 0, "max": 1, "step": 0.01, "default": 0.45 },
         { "id": "tint", "type": "select", "label": "Tint", "options": ["monochrome", "silver", "sepia", "cold blue"], "default": "monochrome" },
         { "id": "sky", "type": "select", "label": "Sky", "options": ["black", "none"], "default": "black" },
+        { "id": "water", "type": "select", "label": "Water", "options": ["off", "low", "mid"], "default": "low" },
         { "id": "rotation", "type": "number", "label": "Rotation (rad/s)", "min": -0.3, "max": 0.3, "step": 0.005, "default": 0.03 }
       ]
     },

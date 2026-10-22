@@ -20,6 +20,7 @@ import {
   WATERS,
   createWater,
   RINGS,
+  backgroundDrive,
   PULSES,
   DEFAULT_REACTIVITY,
   DEFAULT_ROTATION,
@@ -405,7 +406,12 @@ describe("cloudThreshold", () => {
     expect(Math.abs(cloudThreshold(0.5, 0.51) - cloudThreshold(0.5, 0.5))).toBeLessThan(0.002);
   });
 
-  it("the mids erode and spread the ink strongly: full mids shift the edge by ≥ 0.1", () => {
+  it("loud passages spread more ink (energy lowers the edge); quiet ones leave the sky starker", () => {
+    expect(cloudThreshold(0.45, 0.3, 0) - cloudThreshold(0.45, 0.3, 1)).toBeGreaterThanOrEqual(0.08);
+    expect(cloudThreshold(1, 1, 1)).toBeGreaterThanOrEqual(-0.2);
+  });
+
+    it("the mids erode and spread the ink strongly: full mids shift the edge by ≥ 0.1", () => {
     expect(cloudThreshold(0.45, 0) - cloudThreshold(0.45, 1)).toBeGreaterThanOrEqual(0.1);
   });
 });
@@ -434,27 +440,40 @@ describe("createFlow", () => {
 
   it("a beat surges the orbit: it rises smoothly within ~0.2 s, then settles back; bounded", () => {
     const f = createFlow();
-    run((dt) => f.step(0.1, 1, false, 0, dt, 1), 3);
+    run((dt) => f.step(0.3, 1, false, 0, dt, 1), 3);
     const base = f.speed;
     let peak = base;
     let prev = base;
     let maxStep = 0;
     run((dt, i) => {
-      f.step(0.1, 1, i === 0, 0.9, dt, 1);
+      f.step(0.3, 1, i === 0, 0.9, dt, 1);
       peak = Math.max(peak, f.speed);
       maxStep = Math.max(maxStep, Math.abs(f.speed - prev));
       prev = f.speed;
     }, 0.25);
     expect(peak).toBeGreaterThan(base + 0.15);
     expect(maxStep).toBeLessThan(0.4 * (peak - base)); // no one-frame jump
-    run((dt) => f.step(0.1, 1, false, 0, dt, 1), 2);
+    run((dt) => f.step(0.3, 1, false, 0, dt, 1), 2);
     expect(f.speed).toBeCloseTo(base, 2);
     // A drum roll can't run away.
     run((dt) => f.step(0.3, 2, true, 1, dt, 2), 3);
     expect(f.speed).toBeLessThan(1.5);
   });
 
-  it("is frame-rate independent (60 vs 120 Hz), and Reactivity 0 leaves only the idle drift", () => {
+  it("beats in a quiet passage barely stir the orbit; in a loud one they surge it", () => {
+    const avg = (/** @type {number} */ rms) => {
+      const f = createFlow();
+      let sum = 0;
+      run((dt, i) => {
+        f.step(rms, 1.2, i % 30 === 0, 0.9, dt, 1);
+        if (i >= 120) sum += f.speed;
+      }, 4);
+      return sum / 120;
+    };
+    expect(avg(0.3)).toBeGreaterThan(4 * avg(0.03));
+  });
+
+    it("is frame-rate independent (60 vs 120 Hz), and Reactivity 0 leaves only the idle drift", () => {
     const drive = (/** @type {number} */ dt, /** @type {number} */ react) => {
       const f = createFlow();
       const per = Math.round(0.5 / dt); // a beat every 0.5 s
@@ -561,6 +580,14 @@ describe("createPulses", () => {
     weak.step(true, 0.2, DT, 1);
     strong.step(true, 1, DT, 1);
     expect(strong.data[1]).toBeGreaterThan(weak.data[1]);
+  });
+
+  it("an off-beat hat (strength 0.4) sends a much fainter pulse than a beat (0.9)", () => {
+    const hat = createPulses();
+    const beat = createPulses();
+    hat.step(true, 0.4, DT, 1);
+    beat.step(true, 0.9, DT, 1);
+    expect(hat.data[1]).toBeLessThan(0.5 * beat.data[1]);
   });
 });
 
@@ -707,5 +734,17 @@ describe("createWater", () => {
     const off = createWater();
     off.step(wf, 1, true, 1, DT, 0);
     expect(off.rings[3]).toBe(0);
+  });
+});
+
+describe("backgroundDrive", () => {
+  it("the background's beat and bass responses scale with the energy: calm when quiet, × Reactivity", () => {
+    expect(backgroundDrive(1, 1)).toBe(1);
+    expect(backgroundDrive(1, 0)).toBeGreaterThan(0); // a quiet beat still stirs it, gently
+    expect(backgroundDrive(1, 0)).toBeLessThan(0.35);
+    expect(backgroundDrive(1, 0.5)).toBeGreaterThan(backgroundDrive(1, 0.2));
+    expect(backgroundDrive(2, 1)).toBe(2);
+    expect(backgroundDrive(0, 1)).toBe(0);
+    expect(backgroundDrive(1, NaN)).toBe(backgroundDrive(1, 0));
   });
 });
