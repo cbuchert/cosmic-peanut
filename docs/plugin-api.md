@@ -76,6 +76,7 @@ field path and reason.
 | `visualizers[].thumbnail` | no | Repo-relative image, shown in the library |
 | `visualizers[].libs` | no | Host-provided libraries. v1: `["three"]` |
 | `visualizers[].fallback` | no | `webgpu` only: `id` of another entry to run when WebGPU is unavailable |
+| `visualizers[].depth` | no | `webgl2` and `three` only: `false` creates the canvas without a depth buffer (saves GPU memory when you never depth-test the default framebuffer). Default `true` |
 | `visualizers[].params` | no | Controls the host renders for the user (below) |
 
 ### Params
@@ -90,8 +91,9 @@ field path and reason.
 Beyond the schema, the host checks: visualizer ids and param ids (per visualizer) are unique;
 `number` params have `min < max` and `min <= default <= max`; a `select` default is one of its
 `options`; `fallback` appears only on `webgpu` entries and names another, non-`webgpu` entry;
-renderer `three` requires `"libs": ["three"]`; `entry` and `thumbnail` exist inside the repo
-(symlinks may not point outside it).
+`depth` appears only on `webgl2` and `three` entries; renderer `three` requires
+`"libs": ["three"]`; `entry` and `thumbnail` exist inside the repo (symlinks may not point
+outside it).
 
 Values persist per visualizer and can be reset by the user. Read them from `ctx.params` (always
 current); implement `params(changed)` if you need to react to a change (rebuild geometry, etc.).
@@ -147,8 +149,8 @@ Renderer details:
 
 - **`2d`** — `ctx.ctx2d` is a `CanvasRenderingContext2D`.
 - **`webgl2`** — `ctx.gl`, created with `powerPreference: "high-performance"`, `antialias: false`,
-  `preserveDrawingBuffer: false`. The default framebuffer is cleared by the browser each frame;
-  keep feedback effects in your own framebuffers.
+  `preserveDrawingBuffer: false`, and `depth: false` when the manifest says so. The default
+  framebuffer is cleared by the browser each frame; keep feedback effects in your own framebuffers.
 - **`webgpu`** — `ctx.gpu = { adapter, device, context, format }`, context already configured.
   List a `fallback` entry for machines without WebGPU.
 - **`three`** — declare `"libs": ["three"]`. `ctx.three = { THREE, renderer, scene, camera,
@@ -175,7 +177,7 @@ keep (`myCopy.set(audio.bands)`).
 | `onsetStrength` | number | Onset detection function |
 | `onset` | boolean | A transient/beat landed this frame (carried forward if its audio frame was replaced before being drawn, so you see each onset exactly once) |
 | `onsetAge` | number | Seconds from the latest onset to this frame's newest sample (sub-hop accurate; ≤ 10, 10 before the first onset) |
-| `bpm` | number | Tempo, 0 until confident |
+| `bpm` | number | Tempo, 0 until confident; held through beatless passages, 0 again after 1 s of silence |
 | `beatPhase` | number | 0–1 between predicted beats |
 | `centroid` | number | Spectral brightness, 0–1 |
 | `flux` | number | Spectral change, ≈0–1 |

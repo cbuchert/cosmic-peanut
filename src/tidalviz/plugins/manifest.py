@@ -180,6 +180,10 @@ def _semantic_errors(obj: object) -> Iterator[ManifestError]:
                 yield ManifestError(
                     format_path([*at, "fallback"]), "must name a visualizer that isn't webgpu"
                 )
+        if "depth" in v and v.get("renderer") not in ("webgl2", "three"):
+            yield ManifestError(
+                format_path([*at, "depth"]), "is only allowed on webgl2 and three visualizers"
+            )
         libs = v.get("libs", [])
         if v.get("renderer") == "three" and isinstance(libs, list) and "three" not in libs:
             yield ManifestError(

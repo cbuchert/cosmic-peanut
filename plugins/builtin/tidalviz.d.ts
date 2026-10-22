@@ -61,7 +61,7 @@ export interface AudioFrame {
    * 10.7 ms apart). Keeps growing between onsets; capped at 10, and 10 before the first onset.
    */
   readonly onsetAge: number;
-  /** Tempo estimate in BPM, 0 until confident. */
+  /** Tempo estimate in BPM, 0 until confident; held through beatless passages, 0 again after 1 s of silence. */
   readonly bpm: number;
   /** 0–1 position between predicted beats (0 = on the beat). 0 while bpm is 0. */
   readonly beatPhase: number;
@@ -245,6 +245,8 @@ export interface VisualizerManifestEntry {
   renderer: RendererKind;
   /** For webgpu entries: `id` of another entry in this manifest to use when WebGPU is unavailable. */
   fallback?: string;
+  /** webgl2 and three only: false creates the canvas without a depth buffer. Default true. */
+  depth?: boolean;
   /** Host-provided libraries. v1: "three". */
   libs?: "three"[];
   /** Repo-relative image path. */

@@ -70,6 +70,7 @@ async function start(opts, init, port, load) {
         gpu: navigator.gpu,
         importThree: () => load("three"),
         fallback: opts.manifest.fallback,
+        depth: opts.manifest.depth,
       }),
     raf: (cb) => requestAnimationFrame(cb),
     caf: (id) => cancelAnimationFrame(id),

@@ -109,6 +109,12 @@ SCHEMA_CASES: list[tuple[str, Any, str, str]] = [
         "relative",
     ),
     ("unknown-lib", lambda m: _set(m, (*V, "libs"), ["react"]), "visualizers[0].libs[0]", "three"),
+    (
+        "non-boolean-depth",
+        lambda m: _set(m, (*V, "depth"), "no"),
+        "visualizers[0].depth",
+        "boolean",
+    ),
     ("empty-name", lambda m: _set(m, (*V, "name"), ""), "visualizers[0].name", "empty"),
     (
         "unknown-viz-field",
@@ -255,6 +261,12 @@ SEMANTIC_CASES: list[tuple[str, Any, str, str]] = [
         "webgpu",
     ),
     (
+        "depth-on-webgpu",
+        lambda m: _set(m, ("visualizers", 1, "depth"), False),
+        "visualizers[1].depth",
+        "webgl2",
+    ),
+    (
         "three-needs-lib",
         lambda m: _set(m, (*V, "renderer"), "three"),
         "visualizers[0].libs",
@@ -283,6 +295,13 @@ def test_two_viz_fixture_with_fallback_is_valid() -> None:
 def test_three_with_lib_is_valid() -> None:
     m = valid()
     m["visualizers"][0].update(renderer="three", libs=["three"])
+    assert validate_manifest(m) == []
+
+
+@pytest.mark.parametrize("renderer", ["webgl2", "three"])
+def test_depth_opt_out_is_valid_on_gl_renderers(renderer: str) -> None:
+    m = valid()
+    m["visualizers"][0].update(renderer=renderer, libs=["three"], depth=False)
     assert validate_manifest(m) == []
 
 

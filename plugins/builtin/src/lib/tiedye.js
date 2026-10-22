@@ -423,6 +423,8 @@ const SURGE_ATTACK = 0.035;
 export const BEAT_STRENGTH = 0.6;
 /** The kick of a tempo beat (on each beatPhase wrap). */
 const TEMPO_KICK = 0.8;
+/** With a confident tempo, an onset's kick is scaled by this: the beat leads, onsets only accent. */
+const ONSET_ACCENT = 0.2;
 
 /**
  * Loudness 0–1 from rms: −40 dBFS and below → 0, −10 dBFS and above → 1.
@@ -457,8 +459,8 @@ export function createFlow() {
       const level = Math.min(1, loudness(o.rms) + 0.3 * Math.max(0, Math.min(1, o.bassAtt - 1)));
       s.energy += (level - s.energy) * (1 - Math.exp(-dt / ENERGY_TAU));
       kick *= Math.exp(-dt / SURGE_DECAY);
-      if (o.onset) kick = Math.max(kick, Math.max(0, Math.min(1, o.onsetStrength)) ** 1.5);
       const tempo = o.bpm > 0;
+      if (o.onset) kick = Math.max(kick, (tempo ? ONSET_ACCENT : 1) * Math.max(0, Math.min(1, o.onsetStrength)) ** 1.5);
       s.beat = tempo ? o.beatPhase < phase - 0.5 : o.onset && o.onsetStrength >= BEAT_STRENGTH;
       phase = tempo ? o.beatPhase : 0;
       if (tempo && s.beat) kick = Math.max(kick, TEMPO_KICK);
