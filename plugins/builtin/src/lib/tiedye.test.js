@@ -6,7 +6,7 @@ import {
   createArmWarp, warpAmount, WARP_MAX,
   WARP_N,
   PALETTES,
-  PATTERNS,
+  PATTERNS, PATTERN_OPTIONS, isAutoPattern,
   FABRICS,
   paletteOf,
   patternIndex,
@@ -338,6 +338,10 @@ describe("selection", () => {
     expect(PATTERNS).toEqual(["spiral", "bullseye", "crumple", "shibori"]);
     PATTERNS.forEach((p, i) => expect(patternIndex(p)).toBe(i));
     expect(patternIndex("paisley")).toBe(0);
+    expect(PATTERN_OPTIONS).toEqual(["auto", ...PATTERNS]);
+    expect(isAutoPattern("auto")).toBe(true);
+    expect(isAutoPattern("spiral")).toBe(false);
+    expect(isAutoPattern(undefined)).toBe(false);
     expect(FABRICS).toEqual(["white", "none"]);
     expect(fabricIndex("none")).toBe(1);
     expect(fabricIndex(undefined)).toBe(0);

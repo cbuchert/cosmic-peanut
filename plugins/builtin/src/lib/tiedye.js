@@ -247,6 +247,10 @@ export function createArmWarp() {
 
 /** Pattern options, in shader-index order. */
 export const PATTERNS = ["spiral", "bullseye", "crumple", "shibori"];
+/** The Pattern param's options: "auto" morphs through the patterns with the song. */
+export const PATTERN_OPTIONS = ["auto", ...PATTERNS];
+/** @param {unknown} name the Pattern param */
+export const isAutoPattern = (name) => name === "auto";
 /** Fabric options: white cotton shows through, or undyed areas are transparent. */
 export const FABRICS = ["white", "none"];
 /** Palette options; each is a list of dye colors (sRGB hex) in band order. */
