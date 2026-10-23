@@ -18,6 +18,12 @@ export const FOG_START = 0.5;
 export const NEAR = [1.2, 3];
 /** The box's half side, in Fog distances: bands are black for the last stretch before they wrap. */
 export const BOX = 1.1;
+/**
+ * The cinematic look's focus target (./dof.js) is the nearest band ahead: lit at least this much
+ * and its centre within this share of the view's half angles of the axis.
+ */
+export const AHEAD_FADE = 0.3;
+export const AHEAD_CONE = 0.5;
 /** Floats per instance: offset xyz, fade | quaternion xyzw | scale, row offset, hue, wring side. */
 export const INST = 12;
 
@@ -126,6 +132,8 @@ export function createField(count, seed, fog) {
     angle: new Float32Array(layout.count),
     /** The visible bands' instance data, {@link INST} floats each (first `pack()` of them). */
     inst: new Float32Array(layout.count * INST),
+    /** After `pack`: view depth of the nearest lit band ahead ({@link AHEAD_CONE}), Infinity if none. */
+    ahead: Infinity,
     /**
      * Write the bands that are lit and at least partly in view (bounding sphere of radius
      * reach × scale against the frustum) into `inst`, compacted.
@@ -140,6 +148,7 @@ export function createField(count, seed, fog) {
       const secY = Math.sqrt(1 + tanY * tanY);
       const out = f.inst;
       let n = 0;
+      let ahead = Infinity;
       for (let k = 0; k < f.count; k++) {
         if (f.fade[k] <= 0) continue;
         const x = f.rel[k * 3];
@@ -149,6 +158,9 @@ export function createField(count, seed, fog) {
         const vx = view[0] * x + view[4] * y + view[8] * z;
         const vy = view[1] * x + view[5] * y + view[9] * z;
         const depth = -(view[2] * x + view[6] * y + view[10] * z);
+        if (depth > 0 && depth < ahead && f.fade[k] >= AHEAD_FADE) {
+          if (Math.abs(vx) <= depth * tanX * AHEAD_CONE && Math.abs(vy) <= depth * tanY * AHEAD_CONE) ahead = depth;
+        }
         const r = reach * scale[k];
         if (depth <= -r) continue;
         if (Math.abs(vx) > depth * tanX + r * secX || Math.abs(vy) > depth * tanY + r * secY) continue;
@@ -174,6 +186,7 @@ export function createField(count, seed, fog) {
         out[o + 11] = side[k];
         n++;
       }
+      f.ahead = ahead;
       return n;
     },
     /** Advance every band's spin. @param {number} dt seconds */

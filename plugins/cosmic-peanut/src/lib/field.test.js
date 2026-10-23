@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { BOX, FOG_START, INST, HUE, JITTER, NEAR, SCALE, SPIN, bandFade, createField, createLayout, fieldCount, rowLag } from "./field.js";
+import { AHEAD_CONE, AHEAD_FADE, BOX, FOG_START, INST, HUE, JITTER, NEAR, SCALE, SPIN, bandFade, createField, createLayout, fieldCount, rowLag } from "./field.js";
 import { createFly } from "./fly.js";
 
 describe("createLayout", () => {
@@ -185,6 +185,35 @@ describe("createField", () => {
     expect(seen.size).toBe(n);
     expect(n).toBeGreaterThan(3);
     expect(n).toBeLessThan(field.count / 4);
+  });
+
+  it("reports the nearest lit band ahead (centre near the view axis) as the focus target", () => {
+    const fog = 12;
+    const reach = 1.5;
+    const field = createField(216, 5, fog);
+    const view = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); // looking down −z
+    const tan = 0.5;
+    let found = 0;
+    for (const cam of [
+      [3, 1, -2],
+      [0, 0, 0],
+      [-7, 2, 11],
+      [5, -4, 1],
+    ]) {
+      field.place(cam, reach);
+      field.pack(view, tan, tan, reach, 30);
+      let want = Infinity;
+      for (let k = 0; k < field.count; k++) {
+        const [x, y, z] = field.rel.subarray(k * 3, k * 3 + 3);
+        const depth = -z;
+        if (depth <= 0 || field.fade[k] < AHEAD_FADE) continue;
+        if (Math.abs(x) > depth * tan * AHEAD_CONE || Math.abs(y) > depth * tan * AHEAD_CONE) continue;
+        want = Math.min(want, depth);
+      }
+      expect(field.ahead).toBeCloseTo(want, 5);
+      if (want < Infinity) found++;
+    }
+    expect(found).toBeGreaterThan(1);
   });
 
   it("spins each band slowly about its own axis, at its own rate", () => {
