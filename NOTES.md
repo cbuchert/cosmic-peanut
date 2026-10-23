@@ -3,6 +3,31 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Lattice strut structures: octet, diamond, bitruncated (2026-10-23)
+
+Three new options of Lattice's Structure param (`shaders/lattice/README.md` → Strut lattices).
+Cubic and Tentacle Lattice are unchanged: 7 stills (Lattice default, brass, ink over light,
+high + thick + fog 0.8, explicit cubic at thin rods; Tentacle Lattice default and ink over light;
+`still=372`) match the previous build byte for byte (exact RGBA compare).
+
+- **Geometry was measured before it was designed.** A brute-force search for the widest straight
+  free lines: octet ⟨110⟩ channels clear the strut axes by (√3 − 1)/2 = 0.366 and meet three at a
+  time at junctions; diamond ⟨110⟩ channels 0.608 (the dual network's bond midpoints are
+  junctions); bitruncated ⟨111⟩ 0.612 and ⟨100⟩ 0.354 through cell centres. Through a B-spline
+  turn, octet drops to 0.211 at √2 spacing, so its walk uses half steps (0.311).
+- **Exact distances everywhere** (all three checked against brute force), so full march steps.
+  Octet's struts are whole lines (6 families, two roundings each); its node cube at the nearest
+  node is exact too at these sizes. Octet uses the cubic rods and cubes × 0.75.
+- **Pulse metric:** octet and diamond are exact graph distances (BFS-checked). The sodalite net
+  (the honeycomb's edges) has no closed form; vertices are estimated as max(r, √2 r − 0.29) cells,
+  within 1.6 hops by 4 hops out.
+- **Camera** (60 s, 120 BPM, Speed 1): acceleration along the path 0.32 for all; across 2.8 octet
+  and diamond, 4.2 bitruncated (cubic 4.2); jerk 9.5 / 9.5 / 17.8 (cubic 17.8); angular velocity
+  0.97 / 0.97 / 1.43 rad/s (cubic 1.45).
+- **Frame time** (1440p, medium, `sync=1`, 4 frames per rAF, WebKit; GPU shared with other
+  agents, so ±1 ms): p50 / p99 octet 4.75 / 6.25 ms, diamond 8 / 9.5, bitruncated 4.5 / 6.25,
+  cubic 1.5 / 2. A single-frame run read diamond's CPU p50 as 12 ms once: noise.
+
 ## Lattice camera: smooth, with turns on the beat (2026-10-22)
 
 The user, watching Tentacle Lattice: "It's jumpy." Diagnosis came first: 60 s at 120 BPM through
