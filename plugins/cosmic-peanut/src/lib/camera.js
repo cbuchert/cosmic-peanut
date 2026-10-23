@@ -122,12 +122,13 @@ export const FOV = (38 * Math.PI) / 180;
 export const RADIUS = 1;
 
 /**
- * Camera distance that fits the sphere at maximum swell with a 1.32 margin; divided by the aspect
+ * Camera distance that fits the shape at maximum swell with a 1.32 margin; divided by the aspect
  * ratio when the view is taller than wide, so nothing clips in portrait.
  * @param {number} amp Amplitude param
  * @param {number} aspect width ÷ height
+ * @param {number} [extent] the undisplaced shape's reach from the center (default: the sphere)
  */
-export function cameraDistance(amp, aspect) {
-  const fit = ((RADIUS + amp) * 1.32) / Math.tan(FOV / 2);
+export function cameraDistance(amp, aspect, extent = RADIUS) {
+  const fit = ((extent + amp) * 1.32) / Math.tan(FOV / 2);
   return aspect < 1 ? fit / aspect : fit;
 }

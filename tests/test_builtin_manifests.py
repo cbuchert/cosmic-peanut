@@ -127,35 +127,56 @@ def test_pulsar_manifest():
     assert params["color"]["default"] == "#ffffff"
 
 
-def test_cosmic_peanut_manifest_matches_prd():
-    (v,) = _manifest("cosmic-peanut")["visualizers"]
-    assert (v["id"], v["name"], v["renderer"], v["entry"]) == (
-        "cosmic-peanut",
-        "Cosmic Peanut",
-        "webgl2",
-        "src/cosmic-peanut.js",
-    )
-    assert "libs" not in v
-    got = {
+COSMIC_PEANUT_PARAMS = {
+    "travel": ("number", "Travel time", 7, 2, 20, None),
+    "amp": ("number", "Amplitude", 0.22, 0, 0.6, None),
+    "detail": ("number", "Detail", 0.7, 0, 1, None),
+    "pulse": ("number", "Bass pulse", 0.35, 0, 1, None),
+    "orbit": ("number", "Orbit speed", 0.12, -0.6, 0.6, None),
+    "bright": ("number", "Brightness", 1, 0.2, 2, None),
+    "density": ("select", "Rings", "medium", None, None, ["sparse", "medium", "dense"]),
+    "palette": ("select", "Palette", "nebula", None, None, ["nebula", "ember", "phosphor"]),
+    "lines": ("select", "Lines", "soft", None, None, ["soft", "fine"]),
+    # Added after the PRD at the user's request: 2× MSAA for soft lines costs ~7.5 MB of GPU
+    # memory at 1440p, so it can be switched off.
+    "antialias": ("boolean", "Antialias soft lines", True, None, None, None),
+}
+
+
+def _param_table(v: dict) -> dict:
+    return {
         p["id"]: tuple(p.get(k) for k in ("type", "label", "default", "min", "max", "options"))
         for p in v["params"]
     }
-    assert got == {
-        "travel": ("number", "Travel time", 7, 2, 20, None),
-        "amp": ("number", "Amplitude", 0.22, 0, 0.6, None),
-        "detail": ("number", "Detail", 0.7, 0, 1, None),
-        "pulse": ("number", "Bass pulse", 0.35, 0, 1, None),
-        "orbit": ("number", "Orbit speed", 0.12, -0.6, 0.6, None),
-        "bright": ("number", "Brightness", 1, 0.2, 2, None),
-        "density": ("select", "Rings", "medium", None, None, ["sparse", "medium", "dense"]),
-        "palette": ("select", "Palette", "nebula", None, None, ["nebula", "ember", "phosphor"]),
-        "lines": ("select", "Lines", "soft", None, None, ["soft", "fine"]),
-        # Added after the PRD at the user's request: 2× MSAA for soft lines costs ~7.5 MB of GPU
-        # memory at 1440p, so it can be switched off.
-        "antialias": ("boolean", "Antialias soft lines", True, None, None, None),
-    }
+
+
+def test_cosmic_peanut_pack_is_the_sphere_and_the_mobius_strip():
+    vs = _manifest("cosmic-peanut")["visualizers"]
+    assert [(v["id"], v["name"]) for v in vs] == [
+        ("cosmic-peanut", "Cosmic Peanut"),
+        ("mobius", "Möbius"),
+    ]
+    for v in vs:  # one entry module drives both; the shape is picked by ctx.id
+        assert (v["renderer"], v["entry"]) == ("webgl2", "src/cosmic-peanut.js")
+        assert "libs" not in v
+        assert v["thumbnail"] == f"thumbs/{v['id']}.jpg"
+
+
+def test_cosmic_peanut_manifest_matches_prd():
+    (v,) = [v for v in _manifest("cosmic-peanut")["visualizers"] if v["id"] == "cosmic-peanut"]
+    got = _param_table(v)
+    assert got == COSMIC_PEANUT_PARAMS
     assert [p["id"] for p in v["params"]] == list(got)
     assert {p["id"]: p.get("step") for p in v["params"]}["travel"] == 0.5
+
+
+def test_mobius_has_cosmic_peanuts_params_plus_width():
+    vs = {v["id"]: v for v in _manifest("cosmic-peanut")["visualizers"]}
+    sphere, mobius = vs["cosmic-peanut"], vs["mobius"]
+    assert mobius["params"][: len(sphere["params"])] == sphere["params"]
+    (width,) = mobius["params"][len(sphere["params"]) :]
+    assert (width["id"], width["type"], width["label"]) == ("width", "number", "Strip width")
+    assert 0.35 <= width["default"] <= 0.45 and width["min"] > 0 and width["max"] < 1
 
 
 def test_stargate_manifest():

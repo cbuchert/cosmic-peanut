@@ -1,20 +1,22 @@
 // @ts-check
 /**
  * Cosmic Peanut — each moment's waveform becomes a ring on an invisible sphere; rings drift from
- * the north pole to the south pole while the camera slowly orbits. `webgl2` renderer.
+ * the north pole to the south pole while the camera slowly orbits. `webgl2` renderer. The pack's
+ * Möbius visualizer is the same module with another vertex shader and extent (./lib/shapes.js).
  *
  * All geometry is computed on the GPU from a static (j, i) vertex grid and an M × N R32F history
  * texture used as a circular buffer, so a frame is a few uniforms, at most a few one-row uploads,
  * and one drawElements call (plus a blit in Soft lines mode). The logic lives in ./lib (pure,
  * tested); this file is the GL glue. frame() allocates nothing.
  */
-import { cameraDistance, createCamera, RADIUS } from "./lib/camera.js";
+import { cameraDistance, createCamera } from "./lib/camera.js";
 import { buildGrid } from "./lib/geometry.js";
 import { createProgram } from "./lib/gl.js";
 import { createHistory } from "./lib/history.js";
 import { GENTLE, gentle } from "./lib/motion.js";
-import { densityRings, paletteIndex, renderPath, ringGain } from "./lib/params.js";
+import { densityRings, paletteIndex, paramDefault, renderPath, ringGain } from "./lib/params.js";
 import { createPulse } from "./lib/pulse.js";
+import { shapeFor } from "./lib/shapes.js";
 
 /** Points per ring: high, so the waveform stays jagged. */
 const M = 512;
@@ -22,19 +24,18 @@ const M = 512;
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
   const gl = /** @type {WebGL2RenderingContext} */ (ctx.gl);
+  const shape = shapeFor(ctx.id);
   const [ringVs, ringFs, blitVs, blitFs, manifest] = await Promise.all([
-    ctx.assets.text("shaders/rings.vert"),
+    ctx.assets.text(shape.vert),
     ctx.assets.text("shaders/rings.frag"),
     ctx.assets.text("shaders/blit.vert"),
     ctx.assets.text("shaders/blit.frag"),
     ctx.assets.json("tidalviz.json"),
   ]);
   // Manifest defaults decide whether the user has touched Orbit speed / Bass pulse (reduced motion).
-  const specs = /** @type {import('../tidalviz').Manifest} */ (manifest).visualizers[0].params ?? [];
-  /** @param {string} id */
-  const defaultOf = (id) => Number(specs.find((p) => p.id === id)?.default);
-  const orbitDefault = defaultOf("orbit");
-  const pulseDefault = defaultOf("pulse");
+  const m = /** @type {import('../tidalviz').Manifest} */ (manifest);
+  const orbitDefault = paramDefault(m, ctx.id, "orbit");
+  const pulseDefault = paramDefault(m, ctx.id, "pulse");
 
   const rings = createProgram(gl, ringVs, ringFs, "shaders/rings");
   const blit = createProgram(gl, blitVs, blitFs, "shaders/blit");
@@ -117,6 +118,8 @@ export default async function create(ctx) {
       const orbit = gentle(Number(p.orbit), orbitDefault, ctx.reduceMotion, GENTLE.orbit);
       const strength = gentle(Number(p.pulse), pulseDefault, ctx.reduceMotion, GENTLE.pulse);
       const amp = Number(p.amp);
+      const halfWidth = Number(p.width); // Möbius only (NaN for the sphere, which ignores it)
+      const extent = shape.extent(halfWidth);
       const path = renderPath(p.lines, p.antialias);
       const fine = path === "canvas";
 
@@ -128,7 +131,7 @@ export default async function create(ctx) {
       camera.update(dt, orbit);
       const { width, height } = ctx.size;
       const aspect = width / height;
-      const dist = cameraDistance(amp, aspect);
+      const dist = cameraDistance(amp, aspect, extent);
       camera.writeMatrices(aspect, dist);
 
       if (fine) {
@@ -151,7 +154,8 @@ export default async function create(ctx) {
       gl.uniform1i(U.uM, M);
       gl.uniform1f(U.uFrac, history.frac);
       gl.uniform1f(U.uAmp, amp);
-      gl.uniform1f(U.uRadius, RADIUS);
+      gl.uniform1f(U.uRadius, extent);
+      gl.uniform1f(U.uWidth ?? null, halfWidth);
       gl.uniform1f(U.uCamDist, dist);
       gl.uniform1f(U.uGain, ringGain(Number(p.bright), history.N, fine));
       gl.uniform1f(U.uPalette, paletteIndex(p.palette));

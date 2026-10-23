@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { densityRings, paletteIndex, ringGain, renderPath } from "./params.js";
+import { densityRings, paletteIndex, paramDefault, ringGain, renderPath } from "./params.js";
 
 describe("densityRings", () => {
   it("maps sparse/medium/dense to 120/240/400 rings, medium for anything else", () => {
@@ -38,5 +38,24 @@ describe("renderPath", () => {
   });
   it("treats a missing antialias value as on (the manifest default)", () => {
     expect(renderPath("soft", undefined)).toBe("msaa");
+  });
+});
+
+describe("paramDefault", () => {
+  const manifest = /** @type {import("../../tidalviz").Manifest} */ (/** @type {unknown} */ ({
+    apiVersion: 1,
+    visualizers: [
+      { id: "a", params: [{ id: "orbit", default: 0.12 }] },
+      { id: "b", params: [{ id: "orbit", default: 0.3 }, { id: "pulse", default: 0.5 }] },
+    ],
+  }));
+  it("reads a number param's default from the entry whose id is ctx.id, not the first one", () => {
+    expect(paramDefault(manifest, "b", "orbit")).toBe(0.3);
+    expect(paramDefault(manifest, "a", "orbit")).toBe(0.12);
+    expect(paramDefault(manifest, "b", "pulse")).toBe(0.5);
+  });
+  it("is NaN when the entry or the param is missing", () => {
+    expect(paramDefault(manifest, "a", "pulse")).toBeNaN();
+    expect(paramDefault(manifest, "zzz", "orbit")).toBeNaN();
   });
 });

@@ -51,4 +51,21 @@ motion on, Orbit speed and Bass pulse act as 0 and 0.1 until you move them off t
 - **Camera** (`camera.js`): yaw += orbit·dt, pitch sways ±0.3 rad around 0.42, framed to fit the
   sphere at full swell (also in portrait). Matrices are written into preallocated arrays.
 
+## Möbius
+
+The pack's second visualizer, `mobius`: the same rings on a Möbius strip. It is the same entry
+module; `src/lib/shapes.js` picks the vertex shader and the scene's extent (camera fit and depth
+fade radius) by `ctx.id`. History, scheduler, pulse, camera, `rings.frag` and the blit are shared.
+
+- **Mapping** (`shaders/mobius.vert`): each ring is an open slice across the strip's width
+  (v = −W…W as j = 0…M) and travels along it. Age 0…1 maps to u = 4π·age, and
+  p(u, v) = ((R + v·cos(u/2))·cos u, v·sin(u/2), (R + v·cos(u/2))·sin u) with R = 1: the strip
+  lies flat in the horizontal plane and twists out of it. The waveform pushes along the analytic
+  surface normal; the bass pulse swells the whole strip by up to 6%, as on the sphere.
+- **Two laps**: the half twist brings a slice back upside down after one lap (the normal has
+  flipped, so the waveform now pushes the other way) and lined up after two. Rings are born and
+  fade out at the same place (u = 0 ≡ 4π), where the age fades hide the overlap.
+- **Params**: all of Cosmic Peanut's, plus `width` (Strip width, 0.15–0.7, default 0.4), the half
+  width W. Travel time covers both laps. The camera fits R + W + amp with the sphere's 1.32 margin.
+
 `frame()` allocates nothing. Tests: `cd web && npx vitest run ../plugins/cosmic-peanut`.
