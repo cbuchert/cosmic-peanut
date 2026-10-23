@@ -48,7 +48,6 @@ uniform vec2 u_lift;          // ripple and spectrum-heave heights (world units)
 uniform vec2 u_Iw;            // the impact on the face now (disk units)
 uniform vec2 u_treble;        // shimmer strength, time
 uniform float u_fog;
-uniform float u_near;         // 0–1: the camera is close to the coin
 
 const float PI = 3.14159265;
 
@@ -103,6 +102,47 @@ float faceHeight(vec2 w) {
   if (r >= 1.0) return 0.0;
   float h = u_lift.x * rippleLift(u_kick.x, hdist(pdist(w, u_Iw)), u_kick.y) + u_lift.y * specLift(hdist(r));
   return h * (1.0 - smoothstep(0.82, 0.98, r));
+}
+
+// ---- Ambient occlusion -------------------------------------------------------------------------
+
+// The carved outline as a V groove: depth GROOVE_D of its half-width gw at the outline, nothing
+// beyond gw (world units, d the distance to the outline).
+const float GROOVE_W = 0.045;  // the groove's half-width, tile units (tiles are 0.5 across)
+const float GROOVE_D = 0.6;
+float groove(float d, float gw) { return GROOVE_D * gw * (1.0 - smoothstep(0.0, gw, d)); }
+
+// Face AO by a horizon test on a few samples of the surface around the point: the groove's walls
+// either side at 0.5, 1 and 2 groove half-widths, and the music's relief (the ripple and the heave,
+// faceHeight) in four directions at 0.04 and 0.1 world units. Lifted neighbours and groove walls
+// rising above the point darken it, in proportion to how steeply they rise.
+float faceAO(vec2 w, float h0, float dw, float gw) {
+  float occ = 0.0;
+  float g0 = groove(dw, gw);
+  for (int i = 0; i < 3; i++) {
+    float r = gw * (i == 0 ? 0.5 : i == 1 ? 1.0 : 2.0);
+    float up = max(0.0, g0 - groove(dw + r, gw)) + max(0.0, g0 - groove(abs(dw - r), gw));
+    occ += up / r * (i == 2 ? 0.35 : 0.6);
+  }
+  for (int i = 0; i < 2; i++) {
+    float r = i == 0 ? 0.04 : 0.1;
+    float o = r / u_coinG.x;
+    float rise = max(0.0, faceHeight(w + vec2(o, 0.0)) - h0) + max(0.0, faceHeight(w - vec2(o, 0.0)) - h0) +
+                 max(0.0, faceHeight(w + vec2(0.0, o)) - h0) + max(0.0, faceHeight(w - vec2(0.0, o)) - h0);
+    occ += rise / r * 0.5;
+  }
+  return clamp(1.0 - 0.55 * occ, 0.35, 1.0);
+}
+
+// Rim AO: the classic three samples of the coin's distance field out along the normal; the
+// hollows between the waveform's bumps darken.
+float rimAO(vec3 p, vec3 n) {
+  float occ = 0.0;
+  for (int i = 1; i <= 3; i++) {
+    float h = 0.025 * float(i);
+    occ += (h - coinSdf(p + n * h)) / h / float(i);
+  }
+  return clamp(1.0 - 0.6 * occ, 0.4, 1.0);
 }
 
 // ---- The sphere wall ---------------------------------------------------------------------------
@@ -220,31 +260,45 @@ void main() {
       vec2 w = wface;
       vec3 vl = normalize(ro - pf);
       float hgt = faceHeight(w);
-      vec2 shift = hgt * vl.xz / max(abs(vl.y), 0.25) / u_coinG.x;
-      w += vec2(shift.x, -side * shift.y);
+      // The slope (for the normal and the parallax), at the unshifted point.
       float e = 0.004;
       float gx = (faceHeight(w + vec2(e, 0.0)) - faceHeight(w - vec2(e, 0.0))) / (2.0 * e * u_coinG.x);
       float gy = (faceHeight(w + vec2(0.0, e)) - faceHeight(w - vec2(0.0, e))) / (2.0 * e * u_coinG.x);
+      // Parallax w′ = w + h(w) pc, so dw′ = (I + pc ∇hᵀ) dw. On a bump's far slope that folds the
+      // print over itself (a speckle) once pc·∇h < −1, so the shift is scaled to keep it ≥ −0.6;
+      // and capped at grazing angles.
+      vec2 pc = vec2(vl.x, -side * vl.z) / max(abs(vl.y), 0.6) / u_coinG.x;
+      vec2 gw = vec2(gx, gy) * u_coinG.x;
+      float k = dot(pc, gw);
+      pc *= k < -0.6 ? 0.6 / -k : 1.0;
+      w += hgt * pc;
       vec3 nl = normalize(vec3(-gx, 1.0, side * gy)) * vec3(1.0, side, 1.0);
       vec3 N = normalize(transpose(u_coin) * nl);
       float rw = length(w);
-      float px = sqrt(abs(determinant(Jpx)));
+      // The parallax stretches or squeezes the print: w′ = w + h(w) pc, so dw′ = (I + pc ∇hᵀ) dw.
+      mat2 Jp = (mat2(1.0) + mat2(pc * gw.x, pc * gw.y)) * Jpx;
+      float px = sqrt(abs(determinant(Jp)));
       float tileSize = rw < 1.0 ? 0.5 * u_kiteA * (1.0 - rw * rw) / max(px, 1e-6) : 0.0;
       vec3 base = u_tInk;
+      float ao = 1.0;
       if (tileSize > 0.6 * fpx) {
-        base = mix(u_tInk, diskShade(w, 1.0, Jpx, tileSize).rgb, smoothstep(0.6 * fpx, 1.6 * fpx, tileSize));
+        base = mix(u_tInk, diskShade(w, 1.0, Jp, tileSize).rgb, smoothstep(0.6 * fpx, 1.6 * fpx, tileSize));
         // Tiles the beat or the spectrum lifts: lighter tops, deeper cuts round them.
         float lt = u_lift.x * rippleLift(u_kick.x, hdist(g_dk.impactD), u_kick.y) / 0.05 +
                    u_lift.y * specLift(hdist(g_dk.centreD)) / 0.05;
         lt = clamp(lt, 0.0, 2.0);
         float cut = 1.0 - smoothstep(0.0, 5.0 * fpx, g_dk.dpx);
         base *= (1.0 + 0.3 * lt) * (1.0 - 0.35 * lt * cut);
-        // Carved outlines read as grooves when the camera is close.
-        base *= 1.0 - 0.3 * u_near * cut;
+        // The carved outlines' grooves and the music's relief occlude: a tile-scaled groove
+        // (faded out where tiles are too small to carve), the ripple and heave around.
+        float tw = g_dk.dpx / max(g_dk.dist, 1e-6) * px * u_coinG.x;  // world per tile unit
+        float carve = smoothstep(12.0 * fpx, 40.0 * fpx, tileSize);
+        ao = mix(1.0, faceAO(w, faceHeight(w), g_dk.dpx * px * u_coinG.x, GROOVE_W * tw), carve);
         // Treble glints along the gouges.
         float x = g_dk.dist / 0.03;
         float idx = floor(x);
         float line = (1.0 - smoothstep(0.08, 0.3, abs(fract(x) - 0.5))) * step(0.5, idx) * step(idx, 6.0);
+        line *= smoothstep(3.0, 6.0, 0.03 * g_dk.dpx / max(g_dk.dist, 1e-6));  // gouges under ~4 px apart alias
         float glint = 0.5 + 0.5 * sin(u_treble.y * 23.0 + idx * 2.1 + g_dk.uv.x * 31.0 + g_dk.uv.y * 17.0);
         base += u_treble.x * line * glint * glint * 0.35 * (u_tPaper + 0.2);
       }
@@ -253,8 +307,9 @@ void main() {
       float nl0 = max(dot(N, u_light), 0.0);
       float nv = max(dot(N, V), 1e-3);
       float fr = 0.04 + 0.96 * pow(1.0 - nv, 5.0);
-      vec3 refl = wallCheap(pw, reflect(rd, N));
-      float ao = 1.0 - 0.25 * u_near * smoothstep(0.88, 1.0, rw);
+      // On the music's bumps the reflected wall would be minified to a speckle: it fades to the
+      // wall's mean colour as the slope (and so the normal's turn per pixel) grows.
+      vec3 refl = mix(wallCheap(pw, reflect(rd, N)), 0.9 * u_tAvg, smoothstep(0.02, 0.12, length(vec2(gx, gy))));
       col = base * (0.66 + 0.34 * nl0) * ao * (1.0 - 0.7 * fr) + 0.7 * fr * refl;
       col += ggx(N, V, u_light, 0.16) * vec3(1.0, 0.97, 0.9) * 0.8;
     } else {
@@ -270,7 +325,7 @@ void main() {
       vec3 metal = mix(u_tInk, u_tPaper, 0.42) * vec3(1.06, 0.97, 0.82);
       float nv = max(dot(N, V), 1e-3);
       float fr = 0.04 + 0.96 * pow(1.0 - nv, 5.0);
-      col = metal * (0.3 + 0.7 * max(dot(N, u_light), 0.0)) * (0.82 + 0.36 * streak);
+      col = metal * (0.3 + 0.7 * max(dot(N, u_light), 0.0)) * (0.82 + 0.36 * streak) * rimAO(pl, nloc);
       col += aniso * (0.6 + 0.4 * streak) * vec3(1.0, 0.95, 0.85) * 0.9;
       col = mix(col, wallCheap(pw, reflect(rd, N)), 0.35 * fr + 0.1);
     }

@@ -21,7 +21,7 @@
  * alone, exactly as it first was (its drag carries the plane).
  * frame() allocates nothing.
  */
-import { CLEAR, COIN, coinDistance, createCoinMotion, createCounterSpin, createDirector, createDrive, createKicks, createWaveRim, SPHERE_R } from "./lib/disk3d.js";
+import { COIN, createCoinMotion, createCounterSpin, createDirector, createDrive, createKicks, createWaveRim, SPHERE_R } from "./lib/disk3d.js";
 import { faceCells, sphereTables } from "./lib/cube-sphere.js";
 import { sphereFrame, threeClassColors } from "./lib/sphere-view.js";
 import { createTessPipeline } from "./lib/tess-gl.js";
@@ -177,7 +177,6 @@ export default async function create(ctx) {
   let blendPhase = 0;
   let treble = 0;
   let clock = 0;
-  let near = 0;
   let react = 1;
 
   /** The camera basis (columns right, up, forward) from the director's eye and target. */
@@ -273,7 +272,6 @@ export default async function create(ctx) {
     gl.uniform2f(u.u_lift, RIPPLE_H * react, HEAVE_H * react);
     gl.uniform2f(u.u_treble, treble, clock);
     gl.uniform1f(u.u_fog, FOG);
-    gl.uniform1f(u.u_near, near);
   };
 
   /** The impact's place on the face now: T⁻¹ of the tracked tiling point (T is a rotation). */
@@ -317,7 +315,8 @@ export default async function create(ctx) {
     counter.step(dt, coin.spinRate, opts.spin);
 
     // The tiling: a drift at the drive's pace, plus a kick along a new direction each beat.
-    const travel = drive.level * dt * (ctx.reduceMotion ? REDUCED_GLIDE : 1);
+    const pace = drive.level * Math.max(0, opts.speed);
+    const travel = pace * dt * (ctx.reduceMotion ? REDUCED_GLIDE : 1);
     first = true; // the flat scene re-bases its travel when it comes back
     kickIn.env = s.env;
     kickIn.reactivity = ctx.reduceMotion ? react * 0.3 : react;
@@ -347,14 +346,13 @@ export default async function create(ctx) {
     treble += (tr - treble) * (1 - Math.exp(-dt / TREBLE_TAU));
 
     dirIn.stepped = s.stepped;
-    dirIn.speed = drive.level;
+    dirIn.speed = pace;
     dirIn.intensity = drive.surge + drive.presence * Math.max(0, drive.bass);
     dirIn.reduceMotion = ctx.reduceMotion;
     dirIn.camera = opts.camera;
     director.step(dt, dirIn);
     cameraMatrix();
     coinMatrix();
-    near = Math.max(0, Math.min(1, (1.6 - coinDistance(director.eye, coin.normal, COIN.face + COIN.bevel)) / (1.6 - CLEAR)));
 
     sphereFrame(counter.angle, WALL_TILT, wall);
     for (let i = 0; i < 3; i++) pole[i] = wall[i] * poleW[0] + wall[3 + i] * poleW[1] + wall[6 + i] * poleW[2];
