@@ -105,6 +105,8 @@ export const WRING = 0.2;
 export const BREATH = 0.07;
 /** Brightness lift of the newest slices per unit of envelope × Beat (rings.frag `uGlow`). */
 export const GLOW = 0.25;
+/** Extra amplitude of rings pushed at the envelope's peak, per unit of Beat. */
+export const STAMP = 0.8;
 /** Under Reduce flashing the glow is scaled by this (and limited to 3 rises per second). */
 const REDUCED_GLOW = 0.25;
 
@@ -123,6 +125,15 @@ export function wring(swing, beat) {
  */
 export function breath(env, beat) {
   return 1 + BREATH * env * beat;
+}
+
+/**
+ * Gain for the rings pushed now (`history.step`'s `gain`): the beat is baked into the history,
+ * so each beat travels along the strip as a band of louder slices.
+ * @param {number} env createBeat's `env` @param {number} beat the Beat param (after `gentle`)
+ */
+export function stamp(env, beat) {
+  return 1 + STAMP * env * beat;
 }
 
 /** The newest slices' beat glow (rings.frag `uGlow`), flash-limited under Reduce flashing. */

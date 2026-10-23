@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { BEAT_STRENGTH, GLOW, REFRACTORY, WRING, breath, createBeat, createGlow, wring } from "./beat.js";
+import { BEAT_STRENGTH, GLOW, REFRACTORY, STAMP, WRING, breath, createBeat, createGlow, stamp, wring } from "./beat.js";
 
 /** A reusable fake audio frame carrying only what the beat envelope reads. */
 function frame(bpm = 0) {
@@ -231,7 +231,15 @@ describe("wring, breath and glow", () => {
     expect(2 * GLOW).toBeGreaterThan(0.45); // Beat 2 ≈ the first cut's 0.6 × 0.8
   });
 
+  it("stamps rings pushed on the beat up to 1 + 0.8 × Beat louder", () => {
+    expect(STAMP).toBeCloseTo(0.8, 12);
+    expect(stamp(1, 1)).toBeCloseTo(1.8, 12);
+    expect(stamp(0.5, 2)).toBeCloseTo(1.8, 12);
+    expect(stamp(0, 1)).toBe(1);
+  });
+
   it("does nothing at Beat 0, which is what the sphere gets (no beat param)", () => {
+    expect(stamp(1, 0)).toBe(1);
     expect(wring(1, 0)).toBe(0);
     expect(breath(1, 0)).toBe(1);
     const g = createGlow();

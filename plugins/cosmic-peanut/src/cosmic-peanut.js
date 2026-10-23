@@ -11,7 +11,7 @@
  * tested); this file is the GL glue. frame() allocates nothing.
  */
 import { cameraDistance, createCamera } from "./lib/camera.js";
-import { breath, createBeat, createGlow, wring } from "./lib/beat.js";
+import { breath, createBeat, createGlow, stamp, wring } from "./lib/beat.js";
 import { buildGrid } from "./lib/geometry.js";
 import { createProgram } from "./lib/gl.js";
 import { createHistory } from "./lib/history.js";
@@ -131,11 +131,12 @@ export default async function create(ctx) {
       const path = renderPath(p.lines, p.antialias);
       const fine = path === "canvas";
 
-      // Push the rings that are due (fixed rate), one texSubImage2D row each.
-      gl.bindTexture(gl.TEXTURE_2D, hist);
-      history.step(audio.waveform, dt, Number(p.travel), Number(p.detail));
-      const pulseAmt = pulse.step(audio, dt) * strength;
+      // Push the rings that are due (fixed rate), one texSubImage2D row each; on Möbius the beat
+      // envelope scales them, so each beat rides along the strip.
       beat.step(audio, dt);
+      gl.bindTexture(gl.TEXTURE_2D, hist);
+      history.step(audio.waveform, dt, Number(p.travel), Number(p.detail), stamp(beat.env, beatMotion));
+      const pulseAmt = pulse.step(audio, dt) * strength;
       const glowAmt = glow.step(beat.env, beatAmt, dt, ctx.reduceFlashing);
 
       camera.update(dt, orbit);

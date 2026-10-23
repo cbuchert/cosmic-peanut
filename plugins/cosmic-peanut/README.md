@@ -72,7 +72,7 @@ fade radius) by `ctx.id`. History, scheduler, pulse, camera, `rings.frag` and th
   where it is. With a confident tempo (`bpm` > 0) beats are the `beatPhase` wraps and
   onsets only accent (× 0.2, no extra beats); otherwise onsets with `onsetStrength` ≥ 0.6 are
   beats, at least 0.2 s apart. The same rule as Tie-Dye's `createFlow`, copied since packs can't
-  import from each other. Three effects ride the envelope:
+  import from each other. Four effects ride the envelope:
   - **Wring**: a twist offset φ joins the half twist, u/2 + φ, so the strip rolls about its centre
     line. φ = 0.2 rad × envelope × Beat, alternating sides each beat (the signed envelope eases
     through the same rise, so the flip is no sharper than a beat's rise). φ is the same along
@@ -82,10 +82,14 @@ fade radius) by `ctx.id`. History, scheduler, pulse, camera, `rings.frag` and th
   - **Glow**: the newest slices (age < 0.18) brighten by up to 25% × envelope × Beat
     (`uGlow` in `rings.frag`). With Reduce flashing on it's a quarter of that and passes through
     `lib/flash.js` (a copy of the builtin pack's limiter): at most 3 rises per second.
+  - **Stamp**: the rings pushed while the envelope is up are scaled by 1 + 0.8 × envelope × Beat
+    (`history.step`'s `gain`, applied after the auto-gain and clamp, so the tracked peak never
+    learns from it). The beat is baked into the history: each one rides along the strip as a band
+    of louder slices, showing where it landed.
 - **Params**: all of Cosmic Peanut's, plus `width` (Strip width, 0.15–0.7, default 0.4), the half
-  width W, and `beat` (Beat, 0–2, default 1), which scales the wring, breath and glow together
+  width W, and `beat` (Beat, 0–2, default 1), which scales the wring, breath, glow and stamp together
   (0 turns them off; 2 is about as strong as the first, too-strong cut). Travel time covers both laps. The camera fits R + W + amp with the sphere's
-  1.32 margin. With Reduce motion on, Beat acts as 0.25 for the wring and breath until you move it
+  1.32 margin. With Reduce motion on, Beat acts as 0.25 for the wring, breath and stamp until you move it
   off its default (the glow isn't motion and keeps the Beat value). The sphere has no Beat param:
   its uniforms leave it exactly as before.
 

@@ -39,13 +39,17 @@ export function createHistory(M, N, upload) {
      * @param {number} dt seconds
      * @param {number} travel seconds pole to pole
      * @param {number} detail 0–1
+     * @param {number} [gain] scales the finished rings (after auto-gain and clamp, so the
+     *   tracked peak never sees it): Möbius stamps the beat into the history this way
      * @returns {number} rings pushed
      */
-    step(wave, dt, travel, detail) {
+    step(wave, dt, travel, detail, gain = 1) {
       const n = clock.step(dt, h.N / travel);
       for (let k = 0; k < n; k++) {
         h.head = (h.head + 1) % h.N;
-        upload(h.head, builder.build(wave, detail));
+        const ring = builder.build(wave, detail);
+        if (gain !== 1) for (let j = 0; j < ring.length; j++) ring[j] *= gain;
+        upload(h.head, ring);
       }
       return n;
     },
