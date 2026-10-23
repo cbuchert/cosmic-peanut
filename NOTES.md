@@ -117,6 +117,37 @@ on the seam above (`shaders/tess/torus.frag`, `src/lib/torus.js`); the engine is
   flashing on and off. Untested on the M1 reference machine; Quality medium brings an
   inside render to about 5 ms (from 7.5).
 
+**Waves (2026-10-23).** The waveform deforms the torus: each ring is born at the hole and rolls a
+full lap round the tube (hole → top → outer equator → underneath → hole) at full height; just
+past the hole the finishing waves cross-fade into the newborn ones over BIRTH (0.2 lap), so the
+lap closes with no step and no dip. Rings close round θ by cross-fading the window's tail into
+its start (no taper). The beat stamp (1 + envelope; 80 ms rise, gone by 0.9 beat) and the bass are
+baked into the row being pushed: nothing on the surface changes size on a beat. Cost (WebKit,
+2560×1440, `sync=1`, interleaved with Metamorphosis under the same shared-GPU load): outside
+4 ms p50 / 5–6 ms p99, inside 6–7 / 7–8 ms, Metamorphosis 6–7 / 7–9; 58.8 fps everywhere.
+
+**Handoff for the next agent (Tiled Torus):**
+- Wave history: `src/lib/torus-wave.js` `createWaveHistory` (trigger, auto-gain, `resampleLoop`
+  seamless θ, `smoothRing`, `SHAPE_BLEND`, `ROW_SLEW`, stamp/bass in `rowGain`); one R16F row per
+  push (COLS 128 × ROWS 72, LAP_ROWS 56 a lap). `dispAt` is the tested definition of the surface.
+- Displacement: `shaders/tess/torus-disp.frag` bakes it each frame into a 512×256 R16F map over
+  (θ/2π, age), REPEAT both ways; `torus.frag` `disp()` is one bilinear tap × `u_amp`. Needs
+  `EXT_color_buffer_float`; without it `amp` = 0 (smooth torus).
+- March: `torus.frag` main loop, exact shell skip (|sdTorus| − `u_dmax`) then over-relaxed
+  (ω 1.5) steps of f × `u_stepK`; `stepFactor` (JS, per frame) bounds |∇disp| from the history and
+  is tested against the real gradient; `liveDisp` sets the shell. Rays that run out of steps in the
+  shell are projected onto the surface.
+- Clearance: `maxDisp` ≤ 0.45 k (tested), so the inside camera (on the centre circle) is ≥ 0.55 k
+  from any wall. Uniforms: `u_dispMap`, `u_amp`, `u_dmax`, `u_stepK`, `u_flow` (fu, fv), `u_side`.
+- Gotchas: the march cost is grazing walls inside the tube (hence `insideScale`, switched under
+  the paper fade, and the fog-scaled tolerance); row-to-row cliffs (beat stamps) shrink the step
+  factor 2–3×, hence the slew limit; zsh doesn't word-split `$var` in loops; the shared scratchpad
+  gets overwritten by other agents, keep scripts in your own folder.
+- Left: spin/twist of the tiles round the tube (a tested implementation, conformal t-shift and
+  twist snapped to whole tile periods per lap, is in the scratchpad patch
+  `torus/spin-twist-and-inside-scale.patch`; apply only its spin/twist hunks), and adopting the
+  relief engine when it lands.
+
 ## Beat tracking: Ballroom harness and a new tracker (2026-10-22)
 
 `uv run python -m tools.beat_eval` streams all 698 Ballroom clips hop by hop through the real
