@@ -37,10 +37,11 @@ describe("createSnake", () => {
   it("places a pushed slice where the head was when its push was due", () => {
     const s = createSnake(8);
     for (let f = 0; f < 30; f++) s.step(1 / 60, 0.2);
-    s.place(3, 0.25, 0.2);
-    expect(s.pos[3]).toBeCloseTo(0.1 - 0.05, 6); // float32 places
-    s.place(4, 0.75, 0.2); // before the start: wraps
-    expect(s.pos[4]).toBeCloseTo(0.95, 6);
+    s.place(3, 0.25, 0.2, 1.1);
+    expect(s.pos[6]).toBeCloseTo(0.1 - 0.05, 6); // float32 places
+    expect(s.pos[7]).toBeCloseTo(1.1, 6); // and the size it was laid at
+    s.place(4, 0.75, 0.2, 1); // before the start: wraps
+    expect(s.pos[8]).toBeCloseTo(0.95, 6);
   });
 
   it("lays slices that stay put, newest at the head, Length of the track from head to tail", () => {
@@ -49,7 +50,7 @@ describe("createSnake", () => {
     const beat = createBeat();
     const a = { bpm: 120, beatPhase: 0, onset: false, onsetStrength: 0 };
     let speed = headSpeed(0.5, 4, 0, 1);
-    const h = createHistory(512, N, (row, _, ago) => snake.place(row, ago, speed));
+    const h = createHistory(512, N, (row, _, ago) => snake.place(row, ago, speed, 1));
     /** @type {Float32Array} */
     let before = new Float32Array(0);
     for (let f = 0; f < 60 * 10; f++) {
@@ -65,13 +66,13 @@ describe("createSnake", () => {
     for (let r = 0; r < N; r++) {
       const age = (h.head - r + N) % N;
       if (age > 70) {
-        expect(snake.pos[r]).toBe(before[r]);
+        expect(snake.pos[r * 2]).toBe(before[r * 2]);
         still++;
       }
     }
     expect(still).toBeGreaterThan(100);
-    const newest = snake.pos[h.head];
-    const oldest = snake.pos[(h.head + 1) % N];
+    const newest = snake.pos[h.head * 2];
+    const oldest = snake.pos[((h.head + 1) % N) * 2];
     const lag = ahead(snake.head, newest);
     expect(Math.min(lag, 1 - lag)).toBeLessThan(0.5 / N + 1e-6); // newest right at the head (float32)
     expect(ahead(newest, oldest)).toBeCloseTo(0.5 * (N - 1) / N, 2); // spans Length
@@ -81,7 +82,7 @@ describe("createSnake", () => {
     const s = createSnake(120);
     s.step(1, 0.3);
     s.resize(400);
-    expect(s.pos.length).toBe(400);
+    expect(s.pos.length).toBe(800); // place, size per row
     expect(s.head).toBeCloseTo(0.3, 9); // the head keeps its place
   });
 });

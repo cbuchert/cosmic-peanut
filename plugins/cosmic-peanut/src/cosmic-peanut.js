@@ -19,7 +19,7 @@ import { createProgram } from "./lib/gl.js";
 import { createHistory } from "./lib/history.js";
 import { GENTLE, gentle } from "./lib/motion.js";
 import { densityRings, paletteIndex, paramDefault, renderPath, ringGain } from "./lib/params.js";
-import { createPulse } from "./lib/pulse.js";
+import { createPulse, swell } from "./lib/pulse.js";
 import { shapeFor } from "./lib/shapes.js";
 import { createSnake, headSpeed } from "./lib/snake.js";
 import { TRACKS, TRACK_SAMPLES, buildTrack, trackIndex } from "./lib/track.js";
@@ -55,12 +55,14 @@ export default async function create(ctx) {
   const hist = gl.createTexture();
   let indexCount = 0;
 
-  // Möbius: the snake places each pushed row on the track at the head speed of this frame.
+  // Möbius: the snake places each pushed row on the track at the head speed of this frame, with
+  // the size it's laid at (beat breath × bass swell): those never touch slices already laid.
   const snake = createSnake(densityRings(ctx.params.density));
   let speed = 0;
+  let size = 1;
   const history = createHistory(M, densityRings(ctx.params.density), (row, ring, ago) => {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, row, M, 1, gl.RED, gl.FLOAT, ring);
-    if (shape.track) snake.place(row, ago, speed);
+    if (shape.track) snake.place(row, ago, speed, size);
   });
   const trackTex = gl.createTexture();
   const posTex = gl.createTexture();
@@ -113,7 +115,7 @@ export default async function create(ctx) {
       snake.resize(history.N);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, posTex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, history.N, 1, 0, gl.RED, gl.FLOAT, snake.pos);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, history.N, 1, 0, gl.RG, gl.FLOAT, snake.pos);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.activeTexture(gl.TEXTURE0);
@@ -177,19 +179,22 @@ export default async function create(ctx) {
       // envelope scales them, so each beat rides along the strip, and the snake's head advances
       // (surging gently on the beat) and places them on the track.
       beat.step(audio, dt);
+      const pulseAmt = pulse.step(audio, dt) * strength;
       const travel = Number(p.travel);
       if (shape.track) {
         speed = headSpeed(Number(p.length), travel, beat.env, beatMotion);
+        size = breath(beat.env, beatMotion) * swell(pulseAmt);
         snake.step(dt, speed);
       }
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, hist);
       const pushed = history.step(audio.waveform, dt, travel, Number(p.detail), stamp(beat.env, beatMotion));
       if (shape.track && pushed > 0) {
+        gl.activeTexture(gl.TEXTURE2); // the places live on unit 2; unit 0 keeps the history
         gl.bindTexture(gl.TEXTURE_2D, posTex);
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, history.N, 1, gl.RED, gl.FLOAT, snake.pos);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, history.N, 1, gl.RG, gl.FLOAT, snake.pos);
+        gl.activeTexture(gl.TEXTURE0);
       }
-      const pulseAmt = pulse.step(audio, dt) * strength;
       const glowAmt = glow.step(beat.env, beatAmt, dt, ctx.reduceFlashing);
 
       camera.update(dt, orbit);
@@ -229,6 +234,7 @@ export default async function create(ctx) {
       gl.blendFunc(gl.ONE, gl.ONE); // additive: overlapping rings glow
       gl.useProgram(rings.program);
       gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, hist);
       gl.uniform1i(U.uHist, 0);
       gl.uniform1i(U.uHead, history.head);
       gl.uniform1i(U.uN, history.N);
@@ -243,7 +249,6 @@ export default async function create(ctx) {
       gl.uniform1f(U.uPulse, pulseAmt);
       gl.uniform1f(U.uGlow ?? null, glowAmt);
       gl.uniform1f(U.uTwist ?? null, wring(beat.swing, beatMotion));
-      gl.uniform1f(U.uBreath ?? null, breath(beat.env, beatMotion));
       if (shape.track) {
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, trackTex);

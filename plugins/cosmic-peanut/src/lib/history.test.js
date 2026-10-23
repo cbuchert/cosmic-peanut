@@ -129,4 +129,30 @@ describe("createHistory", () => {
     expect(frac).toBeCloseTo(0.25, 6);
     for (let k = 0; k < 6; k++) expect(agos[k]).toBeCloseTo((5 - k + frac) / 60, 9);
   });
+
+  it("never touches a row again once written: a beat changes only the rows pushed during it", () => {
+    const N = 240;
+    const tex = new Float32Array(512 * N); // what the GPU texture holds
+    const beat = createBeat();
+    const a = { bpm: 120, beatPhase: 0, onset: false, onsetStrength: 0 };
+    const h = createHistory(512, N, (row, ring) => tex.set(ring, row * 512));
+    /** @type {Float32Array} */
+    let before = new Float32Array(0);
+    let headBefore = 0;
+    for (let f = 0; f < 60 * 3; f++) {
+      a.beatPhase = ((f / 60) * 2) % 1;
+      beat.step(a, 1 / 60);
+      if (f === 148) [before, headBefore] = [tex.slice(), h.head]; // just before the 2.5 s beat
+      h.step(WAVE, 1 / 60, 7, 0.7, stamp(beat.env, 1));
+    }
+    // Every row written before the beat that hasn't been overwritten since is bit-identical.
+    const pushedSince = (h.head - headBefore + N) % N;
+    let same = 0;
+    for (let age = pushedSince; age < N; age++) {
+      const r = (h.head - age + N) % N;
+      for (let j = 0; j < 512; j++) expect(tex[r * 512 + j]).toBe(before[r * 512 + j]);
+      same++;
+    }
+    expect(same).toBeGreaterThan(150);
+  });
 });

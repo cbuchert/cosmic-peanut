@@ -6,17 +6,18 @@
 // uTrack holds, evenly in arc length, the centre line, its unit tangent t and the cross-section
 // direction w with the track's twist already in it (loop: half a turn per lap; figure-8: half a
 // turn one way over one lobe, back over the other). On the beat (src/lib/beat.js) the strip
-// wrings — w turns about t by uTwist — and uBreath swells the width. The waveform pushes along
-// the surface normal t × w.
+// wrings — w turns about t by uTwist, the one frame-wide beat effect (a roll, not a size). The
+// waveform pushes along the surface normal t × w. Size is per slice: uPos.g holds the scale it
+// was laid at (beat breath × bass swell), so nothing already on the strip grows on a beat.
 precision highp float;
 precision highp sampler2D;
 
 in vec2 aIdx;                  // x: point across the strip (0..M), y: ring age index (0 = newest)
 uniform sampler2D uHist;       // M x N waveform history, circular in rows
 uniform sampler2D uTrack;      // K x 3 RGBA32F: centre, tangent, cross-section direction
-uniform sampler2D uPos;        // N x 1 R32F: each row's place on the track, 0..1
+uniform sampler2D uPos;        // N x 1 RG32F: each row's place on the track (0..1) and size
 uniform int uHead, uN, uM;
-uniform float uFrac, uAmp, uPulse, uWidth, uTwist, uBreath;
+uniform float uFrac, uAmp, uWidth, uTwist;
 uniform mat4 uProj, uView;
 out float vAge, vDepth, vSample, vEmpty;
 
@@ -34,7 +35,8 @@ void main() {
   float age = (float(i) + uFrac) / float(uN - 1);         // 0 newest (head) .. 1 oldest (tail)
 
   int K = textureSize(uTrack, 0).x;
-  float f = texelFetch(uPos, ivec2(row, 0), 0).r * float(K);
+  vec2 placed = texelFetch(uPos, ivec2(row, 0), 0).rg;
+  float f = placed.r * float(K);
   float fl = floor(f);
   int k0 = int(fl) % K;
   int k1 = (k0 + 1) % K;
@@ -46,8 +48,8 @@ void main() {
   vec3 b = cross(t, w);
   vec3 ww = cos(uTwist) * w + sin(uTwist) * b;             // the beat's wring
   vec3 n = cross(t, ww);
-  float v = (aIdx.x / float(uM) * 2.0 - 1.0) * uWidth * uBreath;
-  vec3 p = (c + v * ww + uAmp * s * n) * (1.0 + uPulse * 0.06); // waveform along the normal; bass swells it all
+  float v = (aIdx.x / float(uM) * 2.0 - 1.0) * uWidth;
+  vec3 p = c + placed.g * (v * ww + uAmp * s * n);        // this slice's own size; waveform along the normal
   vec4 e = uView * vec4(p, 1.0);
   vAge = age;
   vDepth = -e.z;

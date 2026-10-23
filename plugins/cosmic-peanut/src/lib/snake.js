@@ -3,7 +3,8 @@
  * Möbius's snake: the ribbon covers part of a closed track and its head advances along it. Each
  * slice is placed where the head was when it was pushed and stays there, so older slices trail
  * behind and nothing slides. Places are fractions of the track (0–1), so they survive a Track
- * change. Nothing is allocated per step.
+ * change. Each slice also keeps the size it was laid at (the beat's breath and the bass swell),
+ * so those only ever touch the newest slices and travel with them. Nothing is allocated per step.
  */
 
 /** Extra head speed on the beat, per unit of envelope × Beat (gentle: the envelope eases). */
@@ -27,8 +28,8 @@ export function createSnake(N) {
   const s = {
     /** Head position, fraction of the track. */
     head: 0,
-    /** Each history row's place on the track (fraction), uploaded as the `uPos` texture. */
-    pos: new Float32Array(N),
+    /** Per history row: place on the track (fraction) and size, interleaved (`uPos`, RG32F). */
+    pos: new Float32Array(N * 2),
     /** @param {number} dt seconds @param {number} speed from {@link headSpeed} */
     step(dt, speed) {
       s.head = wrap(s.head + speed * dt);
@@ -36,13 +37,15 @@ export function createSnake(N) {
     /**
      * Place the slice just pushed into `row`, whose push was due `ago` seconds before now.
      * @param {number} row @param {number} ago seconds @param {number} speed current head speed
+     * @param {number} size its scale about the centre line (width and waveform), kept for good
      */
-    place(row, ago, speed) {
-      s.pos[row] = wrap(s.head - speed * ago);
+    place(row, ago, speed, size) {
+      s.pos[row * 2] = wrap(s.head - speed * ago);
+      s.pos[row * 2 + 1] = size;
     },
     /** New density: the history restarts, so do the places. @param {number} n */
     resize(n) {
-      s.pos = new Float32Array(n);
+      s.pos = new Float32Array(n * 2);
     },
   };
   return s;
