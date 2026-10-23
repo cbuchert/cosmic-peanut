@@ -316,7 +316,7 @@
         { "id": "palette", "type": "select", "label": "Palette", "options": ["steel", "brass", "ink"], "default": "steel" },
         { "id": "background", "type": "select", "label": "Background", "options": ["fog", "none"], "default": "fog" },
         { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "medium" },
-        { "id": "structure", "type": "select", "label": "Structure", "options": ["cubic"], "default": "cubic" }
+        { "id": "structure", "type": "select", "label": "Structure", "options": ["cubic", "sponge"], "default": "cubic" }
       ]
     },
     {

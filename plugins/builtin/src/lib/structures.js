@@ -23,7 +23,9 @@
  */
 import { createCamera } from "./lattice-camera.js";
 import { nearestNode } from "./lattice-pulses.js";
+import { createSpongeCamera } from "./sponge-camera.js";
 import { cubicClearance, cubicRuntime } from "./structure-cubic.js";
+import { pathPoint, spongeClearance, spongeRuntime } from "./structure-sponge.js";
 import { tentacleClearance, tentacleRuntime } from "./structure-tentacle.js";
 
 /**
@@ -34,6 +36,8 @@ import { tentacleClearance, tentacleRuntime } from "./structure-tentacle.js";
  * @property {number} bpm the beat tempo used this frame (0 = none)
  * @property {Float64Array} origin the integer origin all shader positions are relative to
  * @property {ReturnType<typeof import('./lattice-pulses.js').createPulses>} pulses
+ * @property {{ pos: Float64Array, depth?: number, scale?: number }} cam the camera provider (a
+ *   zooming one also reports its rebase `depth` and local `scale`)
  */
 
 /**
@@ -92,10 +96,24 @@ export const STRUCTURES = {
     far: 16,
     runtime: tentacleRuntime,
   },
+  sponge: {
+    shader: "structure-sponge.glsl",
+    defines: [],
+    camera: createSpongeCamera,
+    pulseSource: pathPoint,
+    clearance: spongeClearance,
+    // Lengths are local cells (the shader rescales with the zoom); `far` stays well inside the
+    // rendered cube (≤ 14 × 2 frame cells from the camera).
+    scale: 1,
+    steps: 1,
+    fog: 1.3,
+    far: 14,
+    runtime: spongeRuntime,
+  },
 };
 
 /** Lattice's Structure param options (Tentacle Lattice is its own visualizer, fixed to "tentacle"). */
-export const STRUCTURE_OPTIONS = ["cubic"];
+export const STRUCTURE_OPTIONS = ["cubic", "sponge"];
 
 /**
  * The structure to render: Tentacle Lattice's own, else Lattice's Structure param (unknown → cubic).
