@@ -50,6 +50,7 @@ def test_builtin_renderers():
         "laminar": ("webgl2", []),
         "tetraballs": ("webgl2", []),
         "metamorphosis": ("webgl2", []),
+        "tile-horizon": ("webgl2", []),
     }
 
 
@@ -629,4 +630,40 @@ def test_metamorphosis_manifest():
         "shaders/tess/metamorphosis.frag",
         "shaders/tess/paper.frag",
     ):
+        assert (REPOS["builtin"] / name).is_file(), name
+
+
+def test_tile_horizon_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "tile-horizon"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Tile Horizon",
+        "src/tile-horizon.js",
+        "webgl2",
+        "thumbs/tile-horizon.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    # Metamorphosis's params, plus the floor's camera (lib/tess-floor.js maps them, 0-1).
+    assert list(params) == [
+        "symmetry",
+        "palette",
+        "reactivity",
+        "speed",
+        "morph",
+        "ink",
+        "hatching",
+        "height",
+        "tilt",
+        "fog",
+        "quality",
+    ]
+    (meta,) = [m for m in _manifest("builtin")["visualizers"] if m["id"] == "metamorphosis"]
+    for p in meta["params"]:
+        assert params[p["id"]] == p, p["id"]
+    for name in ("height", "tilt", "fog"):
+        assert (params[name]["type"], params[name]["min"], params[name]["max"]) == ("number", 0, 1)
+    # Original work: no artist's name, artwork title or trademark anywhere in its strings.
+    text = json.dumps(v).lower()
+    for word in ("escher", "droste"):
+        assert word not in text
+    for name in ("shaders/tess/tess.glsl", "shaders/tess/tile-horizon.frag"):
         assert (REPOS["builtin"] / name).is_file(), name
