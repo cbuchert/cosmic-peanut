@@ -15,9 +15,15 @@
  * This surface is the flat one: the plane fills the screen and drifts. lib/tess-gl.js renders
  * the print at the Quality scale and presses it into paper at full resolution. frame()
  * allocates nothing.
+ *
+ * Relief (the showcase of the engine's carved block, TESS_RELIEF): the plane becomes the block
+ * the print is pulled from, seen from a camera above it under a raking light (the Light param),
+ * relief-mapped with soft shadows. Every beat sends a wave of tiles lifting out from the centre,
+ * the spectrum heaves the rings (bass inner, treble outer), onsets pop single tiles, and the
+ * figure/ground front turns the tiles over like cards. Relief 0 is the flat print, unchanged.
  */
 import { createTessPipeline } from "./lib/tess-gl.js";
-import { BLEND_PERIOD, createTessState, renderScale, symmetryName } from "./lib/tess-music.js";
+import { BLEND_PERIOD, createTessState, lightDir, reliefParam, renderScale, symmetryName } from "./lib/tess-music.js";
 
 /** Plane units per half the short side of the view (p4 tiles are half a unit: ~9 across). */
 const ZOOM = 2.3;
@@ -28,10 +34,12 @@ const HEADING_RATE = 0.031;
 const TURN = 0.006;
 /** Ring scale: the screen's corners are ring 1 (half-diagonal of 16:9 in half-short-side units). */
 const RING_SPAN = 2.05;
+/** Relief camera height above the block, in half-short-sides of the view (perspective parallax). */
+const CAM_DIST = 2.2;
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
-  const tess = await createTessPipeline(ctx, "shaders/tess/metamorphosis.frag");
+  const tess = await createTessPipeline(ctx, "shaders/tess/metamorphosis.frag", { relief: true });
   const state = createTessState();
   const opts = {
     symmetry: "p4",
@@ -44,7 +52,9 @@ export default async function create(ctx) {
     height: 1,
     reduceMotion: false,
     reduceFlashing: false,
+    relief: 0,
   };
+  const light = new Float32Array(3);
   let ox = 0.37;
   let oy = 0.21;
   let clock = 0;
@@ -60,6 +70,8 @@ export default async function create(ctx) {
     gl.uniform2f(u.u_rot, cr, sr);
     gl.uniform1f(u.u_zoom, ZOOM);
     gl.uniform3f(u.u_tRing, ox, oy, ZOOM * RING_SPAN);
+    gl.uniform3fv(u.u_light, light); // relief programs only (null elsewhere: a no-op)
+    gl.uniform1f(u.u_camD, CAM_DIST * ZOOM);
   };
 
   return {
@@ -76,6 +88,8 @@ export default async function create(ctx) {
       opts.height = ctx.size.height;
       opts.reduceMotion = ctx.reduceMotion;
       opts.reduceFlashing = ctx.reduceFlashing;
+      opts.relief = reliefParam(p.relief);
+      lightDir(Number(p.light), light);
       const s = state.step(audio, dt, opts);
 
       // Drift along a slowly turning heading; the view turns a little as it travels.

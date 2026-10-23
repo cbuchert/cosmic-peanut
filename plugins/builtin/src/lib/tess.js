@@ -486,3 +486,73 @@ export function paletteOf(name, out) {
   }
   return hex.length - 2;
 }
+
+// ---- Relief: the carved block (mirrors tess.glsl tessRelief; tested for the march's bounds) ----
+
+/** A resting tile's top above the groove floor, plane units at Relief 1. */
+export const RELIEF_BLOCK = 0.07;
+/** A bevelled tile tops out this far in from its outline (tile distance units)… */
+export const RELIEF_BEVEL = 0.05;
+/** …a domed one at its centre (the largest tile distance, both groups). */
+export const RELIEF_DOME = 0.25;
+/** Half a card's width across its turning axis (plane units): longer tips are flattened. */
+export const CARD_HALF = 0.36;
+/** A turning card rises this fraction of a rigid card's height: its squeeze across the axis is
+ * true, its height shallow, so it never stands as a wall far above the carving. */
+export const CARD_RISE = 0.3;
+
+/** @param {number} x @param {number} w ease-out ramp 0 → 1 over w, flat at the top */
+const ramp = (x, w) => {
+  const u = Math.min(1, Math.max(0, x / w));
+  return u * (2 - u);
+};
+/** @param {number} x @param {number} w */
+const rampSlope = (x, w) => (x <= 0 || x >= w ? 0 : (2 / w) * (1 - x / w));
+
+/**
+ * A tile's block height (0 at the carved outline, 1 on top) from its interior distance d:
+ * bevelled (profile 0: steep cut, then a flat top RELIEF_BEVEL in) to domed (1: crown at the
+ * centre). @param {number} d @param {number} profile 0–1
+ */
+export const reliefProfile = (d, profile) => ramp(d, RELIEF_BEVEL) + (ramp(d, RELIEF_DOME) - ramp(d, RELIEF_BEVEL)) * profile;
+/** d/dd of reliefProfile: at most 2 / RELIEF_BEVEL. @param {number} d @param {number} profile */
+export const reliefSlope = (d, profile) =>
+  rampSlope(d, RELIEF_BEVEL) + (rampSlope(d, RELIEF_DOME) - rampSlope(d, RELIEF_BEVEL)) * profile;
+
+/**
+ * Height of a card (a tile turning over about its own axis, θ 0 → π) above its bed, at card
+ * coordinate x across the axis, × CARD_RISE. The axis rises to CARD_HALF + hop with sin θ so no
+ * edge dips under the surface; the card is drawn unmirrored on its back (the tile seen at π is the tile
+ * itself in its new colour), so the slope's sign turns over edge-on.
+ * @param {number} x @param {number} theta @param {number} hop extra rise mid-turn
+ */
+export function cardHeight(x, theta, hop) {
+  const s = Math.sin(theta);
+  const xc = Math.max(-CARD_HALF, Math.min(CARD_HALF, x));
+  return CARD_RISE * (s * (CARD_HALF + hop) + xc * s * (Math.cos(theta) >= 0 ? 1 : -1));
+}
+
+/**
+ * @typedef {object} ReliefTile one tile's state at a point
+ * @property {number} prof reliefProfile @property {number} lift beat wave + heave (plane units
+ * at Relief 1, may dip a little under 0 as a spring settles) @property {number} pop onset pop
+ * @property {number} theta card turn, 0–π @property {number} x card coordinate @property {number} hop
+ */
+
+/**
+ * The height field (plane units) at a point (mirrors tess.glsl tessRelief): block × profile
+ * (flattening as a card turns edge-on) plus lift and pop, all × Relief, plus the card.
+ * @param {number} relief 0–1 @param {ReliefTile} t
+ */
+export function reliefHeight(relief, t) {
+  const ac = Math.abs(Math.cos(t.theta));
+  return Math.max(0, relief * (RELIEF_BLOCK * t.prof * ac + t.lift + t.pop) + cardHeight(t.x, t.theta, t.hop));
+}
+
+/**
+ * Upper bound of reliefHeight over the plane: where a relief march starts.
+ * @param {number} relief @param {number} liftMax largest lift now @param {number} popMax
+ * @param {boolean} flipping a card is turning @param {number} hop
+ */
+export const reliefBound = (relief, liftMax, popMax, flipping, hop) =>
+  relief * (RELIEF_BLOCK + Math.max(0, liftMax) + Math.max(0, popMax)) + (flipping ? CARD_RISE * (2 * CARD_HALF + hop) : 0);

@@ -10,12 +10,22 @@ import {
   MAX_TILE_COLORS,
   PALETTES,
   paletteOf,
+  cardHeight,
+  CARD_HALF,
+  CARD_RISE,
   drosteAlpha,
   drosteAt,
   expandAmps,
   fieldAt,
   fitWarp,
   groupOf,
+  RELIEF_BEVEL,
+  RELIEF_BLOCK,
+  RELIEF_DOME,
+  reliefBound,
+  reliefHeight,
+  reliefProfile,
+  reliefSlope,
   tileAt,
   WARP_LIMIT,
   warpAt,
@@ -351,5 +361,86 @@ describe("palettes", () => {
     const b = new Float32Array(6 + MAX_TILE_COLORS * 3);
     expect(paletteOf("nope", a)).toBe(paletteOf("ink", b));
     expect(Array.from(a)).toEqual(Array.from(b));
+  });
+});
+
+describe("relief: the carved block's height field (mirrors tess.glsl tessRelief)", () => {
+  const profiles = [0, 0.35, 1];
+
+  it.each(profiles)("profile %s: 0 at the outline, 1 on the top, never outside 0–1", (pr) => {
+    expect(reliefProfile(0, pr)).toBe(0);
+    expect(reliefProfile(-0.1, pr)).toBe(0);
+    expect(reliefProfile(RELIEF_DOME, pr)).toBeCloseTo(1, 9);
+    expect(reliefProfile(0.4, pr)).toBeCloseTo(1, 9);
+    let last = -1;
+    for (let d = 0; d <= 0.3; d += 0.001) {
+      const h = reliefProfile(d, pr);
+      expect(h).toBeGreaterThanOrEqual(0);
+      expect(h).toBeLessThanOrEqual(1);
+      expect(h).toBeGreaterThanOrEqual(last); // rises from the groove to the top, no ridge
+      last = h;
+    }
+  });
+
+  it("a bevel tops out at its width, a dome only at the tile's centre", () => {
+    expect(reliefProfile(RELIEF_BEVEL, 0)).toBeCloseTo(1, 9);
+    expect(reliefProfile(RELIEF_BEVEL, 1)).toBeLessThan(0.5);
+    expect(RELIEF_BEVEL).toBeLessThan(RELIEF_DOME);
+  });
+
+  it.each(profiles)("profile %s: the slope is the derivative and bounded (raymarch-safe)", (pr) => {
+    const e = 1e-6;
+    for (let d = 0.0005; d < 0.3; d += 0.0037) {
+      const fd = (reliefProfile(d + e, pr) - reliefProfile(d - e, pr)) / (2 * e);
+      expect(reliefSlope(d, pr)).toBeCloseTo(fd, 3);
+      expect(Math.abs(reliefSlope(d, pr))).toBeLessThanOrEqual(2 / RELIEF_BEVEL + 1e-9);
+    }
+  });
+
+  it("a card turning over: flat at 0 and 180 degrees, never below its bed, within its bound", () => {
+    for (const hop of [0, 0.08]) {
+      for (let th = 0; th <= Math.PI + 1e-9; th += Math.PI / 90) {
+        for (let x = -CARD_HALF; x <= CARD_HALF + 1e-9; x += CARD_HALF / 20) {
+          const h = cardHeight(x, th, hop);
+          expect(h).toBeGreaterThanOrEqual(-1e-12);
+          expect(h).toBeLessThanOrEqual(CARD_RISE * (2 * CARD_HALF + hop) * Math.sin(th) + 1e-9);
+        }
+      }
+      for (const x of [-CARD_HALF, 0.1, CARD_HALF]) {
+        expect(cardHeight(x, 0, hop)).toBeCloseTo(0, 12);
+        expect(cardHeight(x, Math.PI, hop)).toBeCloseTo(0, 9);
+      }
+    }
+    // Edge-on, one edge stands up the card's (shallowed) width; the axis is half way. The rise is
+    // shallowed so a card never stands as a wall far taller than the carving.
+    expect(cardHeight(CARD_HALF, Math.PI / 2, 0) + cardHeight(-CARD_HALF, Math.PI / 2, 0)).toBeCloseTo(2 * CARD_RISE * CARD_HALF, 9);
+    expect(cardHeight(0, Math.PI / 2, 0)).toBeCloseTo(CARD_RISE * CARD_HALF, 9);
+    expect(CARD_RISE).toBeLessThanOrEqual(0.4);
+  });
+
+  it("reliefBound covers every height the field can take (the march starts there)", () => {
+    const r = rng(5);
+    for (let i = 0; i < 4000; i++) {
+      const relief = r();
+      const liftMax = r() * 0.3;
+      const popMax = r() * 0.1;
+      const hop = r() * 0.1;
+      const flipping = r() < 0.5;
+      const th = flipping ? r() * Math.PI : 0;
+      const tile = {
+        prof: reliefProfile(r() * 0.3, r()),
+        lift: (r() * 1.2 - 0.2) * liftMax,
+        pop: r() * popMax,
+        theta: th,
+        x: (r() * 2 - 1) * CARD_HALF,
+        hop,
+      };
+      const h = reliefHeight(relief, tile);
+      expect(h).toBeGreaterThanOrEqual(0);
+      expect(h).toBeLessThanOrEqual(reliefBound(relief, liftMax, popMax, flipping, hop) + 1e-9);
+    }
+    // At rest the bound is just the block.
+    expect(reliefBound(1, 0, 0, false, 0)).toBeCloseTo(RELIEF_BLOCK, 9);
+    expect(reliefBound(0, 0, 0, false, 0)).toBe(0);
   });
 });

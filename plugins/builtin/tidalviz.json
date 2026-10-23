@@ -303,7 +303,7 @@
     {
       "id": "metamorphosis",
       "name": "Metamorphosis",
-      "description": "An interlocking tiling printed like a multi-block woodcut: the tiles turn into hooked, lobed, finned and star-like creatures that change shape across the plane and with each bar, the brightness of the music picks the family, bass drifts the print and phrase changes sweep a figure/ground inversion across it.",
+      "description": "An interlocking tiling carved like a woodblock under a raking light: the tiles turn into hooked, lobed, finned and star-like creatures, lift in waves on every beat, heave with the spectrum ring by ring and turn over like cards on phrase changes, while the brightness of the music picks the family.",
       "author": "Tidalviz",
       "entry": "src/metamorphosis.js",
       "renderer": "webgl2",
@@ -316,6 +316,8 @@
         { "id": "morph", "type": "number", "label": "Morph", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
         { "id": "ink", "type": "number", "label": "Ink", "min": 0, "max": 2, "step": 0.05, "default": 1 },
         { "id": "hatching", "type": "number", "label": "Hatching", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "relief", "type": "number", "label": "Relief", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "light", "type": "number", "label": "Light", "min": 0, "max": 360, "step": 1, "default": 135 },
         { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "high" }
       ]
     },

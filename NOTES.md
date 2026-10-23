@@ -3,6 +3,74 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tessellations: relief, the carved block, and music that moves it (2026-10-22)
+
+The engine can now carve the tiling into the block a woodcut is printed from, and the music drives
+that block in 3D. Metamorphosis is the showcase (Relief, Light params); the other surfaces adopt
+it later. Relief off is byte-identical: `run.py --shots` stills of Metamorphosis (Relief 0), Tile
+Horizon, Endless Zoom and Tiled Sphere match the pre-relief build (`cmp`).
+
+- **Block** (`tess.glsl` under `#ifdef TESS_RELIEF`, mirrored and tested in `lib/tess.js`): tiles
+  are raised blocks over a groove floor at 0, height RELIEF_BLOCK (0.07) × Relief × a profile of
+  the tile's interior distance, bevel (tops out 0.05 in) to dome (crown at the centre),
+  `u_tRelief.y` (0.35); slope ≤ 2 / 0.05, so a height-field march is safe. Gouges are cut 0.012
+  and features (eye, spine, fins, star) raised 0.014 as fine detail for the normals only.
+- **Music** (`lib/tess-music.js`, allocation-free, tested): every beat (tempo-locked when
+  confident, strong onsets otherwise) sends a front from ring 0 to 1 over 1.5 beats (≥ 0.6 s);
+  each ring's tiles lift with an 80 ms smoothstep, then settle as a spring released from rest
+  (2.2 Hz, ζ 0.6: a ~10 % dip, at rest by 0.9 s, no slope jump). A bar's first beat lifts 0.18
+  plane units at Reactivity 1 and Relief 1 (others 0.7 of it), so at the defaults a beat lifts a
+  tile by a fifth of its width. Up to 8 waves in flight; a beat with no free slot is dropped,
+  never cut short. Spectrum heave: 64 bands → 32 ring bins (bass inner, treble outer), each over
+  its own decaying peak (τ 6 s), eased (up τ 0.1 s, down 0.3 s) and blurred over neighbours,
+  0.07 peak. Onsets pop single tiles near the newest front (hashed choice, 0.06, 80 ms up,
+  0.25 s down, 3 slots). Each tile varies ± 30 %. Reduce motion: lifts × 0.4, spreading half as
+  fast. Reduce flashing: lifts and pops × 0.4 (their shadows pump the mean light less).
+- **Cards**: in relief the figure/ground cross-fade becomes each tile turning over (θ = π ×
+  the old fade, same flash limit, Reduce flashing still 19.2 s and narrower, hop 0.08 → 0.02).
+  The card is squeezed by |cos θ| across its axis (radial from the ring origin) in the warped
+  plane q, not p: the true p-space centre would need the warp's inverse per tile. It is drawn
+  unmirrored on its back, so at θ = π it is the tile itself in its new colour and the shift
+  lands without a jump. Its height is shallowed (CARD_RISE 0.3): at full height edge-on cards
+  stood as tall walls the march smeared. Outside the squeezed tile the bare bed shows.
+- **Metamorphosis**: a height pass (the surface compiled with `TESS_HEIGHT_PASS`) writes the
+  block's height at 0.35 × the print resolution over the view × 1.12. Then each pixel marches its
+  perspective ray (camera 2.2 half-short-sides above the centre, resting tops where the flat
+  print has them) down from the current bound `u_tRelief.z` (`lib/tess.js reliefBound`: lower
+  when nothing lifts), stepping every 3 height texels of lean (1–16 steps, jittered), with 5
+  bisections. Shading uses the analytic block gradient plus the fine carving's screen
+  derivatives, cut sides of taller neighbours, a soft shadow marched towards the light (≤ 8
+  steps), darker grooves and a faint sheen. A flat top in full light prints at its colour. Light
+  is 0–360° round the view at 32° elevation (default 135°, upper left).
+- **Motion** (`motion_hook.py`, synth music, Reduce flashing off, relief default vs Relief 0,
+  which is the old build): loud 0.0131 → 0.0275, loud/silence 0.90 → 1.56. With the drift
+  stopped (Speed 0), only the music moves it: loud 0.00118 → 0.0222 (19×). The beat ratio
+  (150 ms after / before a strong onset) is 1.01 → 1.04 because waves now overlap continuously.
+- **Cost**: WebKit harness, 2560×1440, Quality high, `sync=1`, measured alternately with the
+  flat print on a GPU shared with other agents. Relief p50 11–16 ms, p99 25–27 ms, 55.6–58.8 fps;
+  flat 7–14 / 8–29 ms in the same runs (one earlier relief run 20 / 28 ms at 45 fps under load).
+  Roughly 1.3–1.6× the flat print. Flash check (10 Hz strobe): Reduce flashing on 0 /s at 5 %;
+  off 1 /s at 5 % (2 at 2 %), from the lifted tiles' shadows, under the 3 /s limit.
+- **Known**: a turning card's cut sides show a fine fringe where the coarse height texture
+  steps. Detail normals use `dFdx`, so they're coarse at silhouettes.
+
+**The relief seam** (`#define TESS_RELIEF` before `// #include tess`; `createTessPipeline(ctx,
+surface, { relief: true })` also builds the `TESS_HEIGHT_PASS` variant and binds its target as
+`u_tHeight` / `u_tHeightTexel` while `state.relief > 0`):
+
+```glsl
+vec3 tessRelief(vec2 p, mat2 S);   // height (plane units, 0 … u_tRelief.z) and dh/dp
+vec4 tessShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail);
+// r: tile, J, blend, h, grad (dh/dp), prof, face (0 front, 1 back), pit; detail = fine carving
+// optional hook: #define TESS_FLIP_DIR(c) …  (unit direction across a card's axis; default radial)
+```
+
+A surface either **displaces geometry** with `tessRelief(p, S).x` along its normal (floor, torus,
+sphere: raymarch with `u_tRelief.z` as the bound), or **shades it as relief** like Metamorphosis
+(flat, zoom: height pass plus a per-pixel march). The state gains `relief`, `profile`, `lift`
+(32 bins), `pops` (3 × vec4), `flipHop`, `flipping` and `reliefMax`, and takes `relief` (0–1)
+in the options. Everything a flat surface reads is unchanged (tested frame by frame).
+
 ## Tessellations: Poincaré Disk, the hyperbolic surface (2026-10-22)
 
 **Poincaré Disk** (`poincare-disk`, webgl2) prints interlocking creatures tiling the hyperbolic
