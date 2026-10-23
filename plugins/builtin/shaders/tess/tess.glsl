@@ -211,10 +211,12 @@ float tessFeatures(vec2 uv, vec4 feat, float uvPx, float fpx) {
 // The print look for one pixel of a tile, for any surface (tessShade below is the flat
 // engine's): t = the tile under the pixel (uv, dist, orient, cls, centre), tf = the tile the
 // colour block shows there (the pixel offset by the registration u_tReg); pxq = plane units per
-// target px, √|det dq/dpixel| (a tile is 0.5 units across); dpx = target px to the outline;
-// m = the blend between the feature sets; q = the tile-plane point (ink-spread grain).
-// TESS_RING(centre) gives each tile its ring.
-vec4 tessPrint(Tile t, Tile tf, float pxq, float dpx, float m, vec2 q) {
+// target px, √|det dq/dpixel| (a tile is 0.5 units across); tileSize = half a tile in target
+// px (0.5 / pxq on the flat plane; a surface whose tiles stretch can pass one size per tile, so
+// features and the fade to the mean go together); dpx = target px to the outline; m = the blend
+// between the feature sets; q = the tile-plane point (ink-spread grain). TESS_RING(centre) gives
+// each tile its ring.
+vec4 tessPrint(Tile t, Tile tf, float pxq, float tileSize, float dpx, float m, vec2 q) {
   float fpx = 1.0 / u_tPxScale;                    // full-resolution px in target px
 
   // Colour blocks, printed slightly out of register with the key block; the figure/ground
@@ -224,7 +226,6 @@ vec4 tessPrint(Tile t, Tile tf, float pxq, float dpx, float m, vec2 q) {
   bool dark = dot(fill, vec3(0.2126, 0.7152, 0.0722)) < 0.18;
   vec3 cut = dark ? u_tPaper : u_tInk;             // what a gouge or a feature shows
   float bandv = u_tBands[int(clamp(TESS_RING(t.centre) * 16.0, 0.0, 15.0))];
-  float tileSize = 0.5 / pxq;                      // half a tile, target px
   vec3 col = fill;
 
   // Woodcut gouges: lines parallel to the outline (levels of the boundary distance), echoing it
@@ -264,7 +265,7 @@ vec4 tessShade(vec2 p, mat2 S) {
   Tile t = tessTile(q);
   float dpx = t.dist / max(length(transpose(M) * t.n), 1e-9); // to the outline, target px
   Tile tf = tessTile(q + M * (u_tReg * u_tPxScale));
-  return tessPrint(t, tf, pxq, dpx, m, q);
+  return tessPrint(t, tf, pxq, 0.5 / pxq, dpx, m, q);
 }
 
 vec4 tessShade(vec2 p, float px) { return tessShade(p, mat2(px)); }
