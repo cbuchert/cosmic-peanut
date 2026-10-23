@@ -491,6 +491,10 @@ export function createTessState() {
     /** Feature weights of set A and B: eye, spine, fins, star (`u_tFeatA`, `u_tFeatB`). */
     featA: new Float32Array(4),
     featB: new Float32Array(4),
+    /** The morph's family weights (FAMILIES order) and turn (rad) of set A, for surfaces with
+     * their own warp (e.g. the hyperbolic one); the same array every frame. */
+    morphW: morph.wA,
+    theta: 0,
     /** Beat envelope 0–1, glide speed and travel, latest morph step, colour shift. */
     env: 0,
     speed: 0,
@@ -526,6 +530,7 @@ export function createTessState() {
       morphIn.reduceMotion = o.reduceMotion;
       morph.step(dt, morphIn);
       s.stepped = morph.stepped;
+      s.theta = morph.thetaA;
       s.family = morph.family;
 
       glideIn.bassAtt = live ? audio.bassAtt : 1;
