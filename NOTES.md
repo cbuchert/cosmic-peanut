@@ -191,6 +191,36 @@ surface shader (`shaders/tess/tile-horizon.frag`) plus a camera (`src/lib/tess-f
   with other agents' harnesses while measuring. Flash check: 0 flashes/s at 5 %, Reduce flashing
   on and off.
 
+**Handoff: the 3D scene (Scene = sphere), work in progress (2026-10-22).** Flat is still the
+default and byte-identical to before (`run.py --shots --prefix _base/` against a `git archive`
+of b1700b2; black, light, and {5,4}/watercolour/drums).
+- *Done:* `lib/disk3d.js` (tested: waveform rim with trigger and seam, mids spin, bass
+  spinning-plate tilt, counter-spin, beat kicks, `rippleLift`, `specLift`, and the camera director
+  with clearance, phrase moves, drag and still). `tess-disk.js` view `nudge()` (exact kick) and `tracked` (impact point
+  carried through rebases). `shaders/tess/disk3d.frag`: ray-marched coin (waveform rim, brushed
+  metal), face = `diskShade` + lacquer (GGX, Fresnel, cheap one-warp-step wall reflection), parallax
+  ripple/heave and per-tile lift shading, treble glints on gouges, the cube-sphere wall (fogged
+  paper), an ink silhouette. Params Scene/Camera/Spin. Shared includes `disk.glsl` (diskShade now
+  takes R and a dw/dpixel Jacobian), `sphere.glsl` (Tiled Sphere byte-identical); `tess-gl.js`
+  splices any `// #include <name>`.
+- *Remains:* reactivity tuning (motion_hook, sphere scene: auto camera loud/silence 0.98, beat
+  1.06; still camera 1.20 / 1.11; before 0.88 / 1.02 — the camera's own path motion swamps it;
+  scale path speed by music more, stronger kicks/tilt). Make sphere the default once good; a
+  bigger visual check of the skim/swoop moves; AO is only a crease/groove darkening; the wall's
+  colouring is Tiled Sphere's (two classes plus seam tiles); the harness flash check on the sphere scene.
+- *Invariants:* the view rebases by rotations only, re-projects T each frame, and records `e0`
+  (colours stay put across rebases; the shader's fold starts at u_gE0). The 3D state runs
+  symmetry p4 (the wall needs it) with u_tCls overridden by `threeClassColors`; flat runs p3 as
+  before. The face colour comes from `tessPrint` via `diskShade`; lighting is applied after it.
+- *Gotchas:* take all dFdx before branches (face chart = analytic plane hit, wall direction
+  computed for every pixel); a face-plane hit inside the printed disk skips the march (nothing
+  rises above the face). `DISK_IMPACT` must be defined before `// #include disk`. Cost: 1440p
+  default (high) ~40 fps in the sphere scene before the march shortcut; after, 58.8 fps at high
+  and medium in one shared-GPU run — re-measure on a quiet machine before choosing a default.
+- *Verify:* vitest (disk3d, tess-disk, tess-gl tests), the flat `--shots` cmp, stills with
+  `p.scene=sphere` (`still=150` overview, `still=2600` skim, `audio=drums` `still=125` vs 150 for
+  on-beat versus between), `motion_hook.py poincare-disk --query p.scene=sphere`.
+
 ## Tessellations: the engine and Metamorphosis (2026-10-22)
 
 **Metamorphosis** (`metamorphosis`, webgl2) is the first of a series of interlocking-tiling
