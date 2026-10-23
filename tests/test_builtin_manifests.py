@@ -50,6 +50,7 @@ def test_builtin_renderers():
         "laminar": ("webgl2", []),
         "tetraballs": ("webgl2", []),
         "metamorphosis": ("webgl2", []),
+        "poincare-disk": ("webgl2", []),
     }
 
 
@@ -628,5 +629,46 @@ def test_metamorphosis_manifest():
         "shaders/tess/tess.glsl",
         "shaders/tess/metamorphosis.frag",
         "shaders/tess/paper.frag",
+    ):
+        assert (REPOS["builtin"] / name).is_file(), name
+
+
+def test_poincare_disk_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "poincare-disk"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Poincaré Disk",
+        "src/poincare-disk.js",
+        "webgl2",
+        "thumbs/poincare-disk.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "tiling",
+        "palette",
+        "reactivity",
+        "speed",
+        "morph",
+        "ink",
+        "hatching",
+        "quality",
+    ]
+    # Option order is lib/tess-disk.js TILINGS, lib/tess.js PALETTES, tess-music QUALITIES.
+    assert params["tiling"]["options"] == ["{7,3}", "{5,4}", "{4,5}", "{6,4}"]
+    assert params["tiling"]["default"] == "{7,3}"
+    assert params["palette"]["options"] == ["ink", "dusk", "four-block", "ochre", "watercolour"]
+    assert params["quality"]["options"] == ["low", "medium", "high"]
+    r = params["reactivity"]
+    assert (r["min"], r["max"], r["default"]) == (0, 2, 1)
+    for pid in ("morph", "hatching"):
+        assert (params[pid]["min"], params[pid]["max"]) == (0, 1)
+    # Original work: no artist's name or artwork titles in any string.
+    text = json.dumps(v).lower()
+    for banned in ("escher", "circle limit"):
+        assert banned not in text
+    for name in (
+        "shaders/tess/tess.glsl",
+        "shaders/tess/disk.frag",
+        "shaders/tess/paper.frag",
+        "src/lib/tess-disk.js",
     ):
         assert (REPOS["builtin"] / name).is_file(), name
