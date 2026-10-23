@@ -22,6 +22,7 @@ and `post.frag`. You shouldn't need anything else from this repo's history.
 | `src/lib/lattice-pulses.js` | shared | `createPulses(snap)`: the beat-pulse pool. |
 | `src/lib/lattice-beat.js`, `lattice-history.js`, `lattice.js` | shared | Beat envelope, history ring, params, palettes, axis light. |
 | `src/lib/tentacle-lattice.js` | tentacle | Pure tested logic mirrored by `structure-tentacle.glsl`. |
+| `shaders/lattice/structure-tpms.glsl`, `src/lib/tpms.js`, `structure-tpms.js`, `net-camera.js` | tpms | The minimal surfaces (below). |
 
 The scene shader is assembled as `assembleShader(lattice.frag, { common, structure, march, shade },
 entry.defines)`. Each `// #include <name>` line is replaced by that part. Each define becomes
@@ -111,9 +112,10 @@ STRUCTURES[name] = {
 None of them may allocate per frame. Upload only your structure's uniforms; the entry already
 uploads everything in `common.glsl`.
 
-Lattice's **Structure** param lists `STRUCTURE_OPTIONS`. Add your name there and to the manifest
+Lattice's **Structure** param lists `STRUCTURE_OPTIONS` (cubic, gyroid, schwarz-p, schwarz-d). Add your name there and to the manifest
 (`plugins/builtin/tidalviz.json`, plus its test in `tests/test_builtin_manifests.py`). Changing
-the param recompiles the scene program and swaps the runtime; the camera and pulses carry on.
+the param recompiles the scene program and swaps the runtime; the camera and pulses carry on,
+unless the new entry's `camera` is a different provider (then the flight restarts in its space).
 Tentacle Lattice is a separate visualizer id, fixed to `"tentacle"` by `structureFor`.
 
 `src/lib/structures.test.js` runs against every table entry. It checks the shape of each entry,
@@ -172,6 +174,56 @@ with an eased amplitude. The shader lights a surface point by how close
   - For a fractal: snap the source to the current zoom centre and measure Euclidean distance.
 
   Fronts are then rings spreading over the walls instead of lights running along struts.
+
+## Triply periodic minimal surfaces (`gyroid`, `schwarz-p`, `schwarz-d`)
+
+Three Structure options share `structure-tpms.glsl` (a define picks f: `TPMS_GYROID`, `TPMS_P`,
+`TPMS_D`), `src/lib/structure-tpms.js` (table pieces and runtime), `src/lib/tpms.js` (f, bounds,
+clearance, pulse topology, the music's bend) and `src/lib/net-camera.js` (the camera).
+
+| | f (at q = k p + phase) | period (cells) | labyrinth net | level shift | `sub` |
+| --- | --- | --- | --- | --- | --- |
+| gyroid | sin x cos y + sin y cos z + sin z cos x | 5 | srs (3 edges, 120°) | ±0.2 | 1 |
+| schwarz-p | cos x + cos y + cos z | 4 | cubic (6) | ±0.25 | 3 |
+| schwarz-d | sin x sin y sin z + sin x cos y cos z + cos x sin y cos z + cos x cos y sin z | 5 | diamond (4) | ±0.18 | 1 |
+
+- **Sheet:** |f − c| ≤ t. The camera flies the labyrinth f > c + t; its net's nodes are f's maxima
+  (listed in `TPMS[name].nodes`, in eighths of a period). The shader's positions are relative to
+  the origin, so the JS uploads `u_tphase` = (origin mod period) × k.
+- **Distance:** `sceneSDF` = (|f − c| − t) / (k surfGrad), about the real distance near the walls
+  (surfGrad is a typical |∇f| there). |∇f| ≤ lip = 1.75 everywhere (√3 is the sampled maximum for
+  all three), so `structStep(d) = d / (lip / surfGrad)`. `tpms.test.js` checks lip and the
+  Hessian bound (2 for G and D, 1 for P) against the real derivatives over a dense sample plus hill
+  climbing, and sphere-traces random rays with that step against a brute-force search.
+- **Clearance:** the larger of two true lower bounds on the distance to the worst-case sheet
+  (thickest walls, the level shifted all the way into the camera's labyrinth): (f − c − t) / (k lip),
+  and the second-order one from this point's |∇f| and the Hessian bound, which is what keeps
+  Schwarz P's necks (where ∇f = 0) from reading as tight. Checked against brute force.
+- **Camera (`createNetCamera`):** `createCamera`'s flight with the walk generalized to a net: node
+  to node along the edges (each split into `sub` control points, so P's long edges stay straight
+  through the necks), smoothed by the same B-spline, with the same speed, view, bank, look-around
+  and substeps. It prefers one axis heading (plus a little of a second, to break ties on the diagonal
+  srs and diamond edges) and at each node takes the edge that best follows it, so it coils along
+  the gyroid's helical channels and zigzags down the diamond's. A beat changes the heading at the
+  next node decision appended (3.5–4.3 cells ahead; the ring holds 4 + max(2, round(4 cells / spacing))
+  points). Worst-case clearance on the test flights: gyroid 0.60, P 0.30, D 0.38 cells.
+- **Pulses:** `pulseSource` = the nearest wall: the closest mid-sheet hit of rays cast in 26
+  directions from the path point, refined by Newton steps. `pulseMetric` is Euclidean, so the front
+  is a ring spreading over the wall from the impact point (and onto nearby walls as it grows).
+- **Surface:** walls are kind 0 (history): age = distance from the camera × 6 rows, band from the
+  normal (0.5 + 0.5 n.y), so nothing has a seam; waveform in soft patches; histEdge fades as the age
+  nears the ring's oldest rows. Ridge lines (kind 1, axis = the plane's axis) mark where a wall
+  crosses the planes q ≡ 0 (mod π); their width is measured in the surface (plane distance over
+  the sine of the wall's angle) and grows with distance, so they don't alias. Their running light
+  streams away from the camera.
+- **Music:** bass (bassAtt) thickens the walls up to +40 %, the mids (midAtt vs 1) shift the level
+  either way. Two exponential stages (0.5 s, 0.8 s) in 1/240 s substeps; Reduce motion × 0.3;
+  silence and Reactivity 0 settle back. Wall half-thickness = 1.5 × Rod thickness (cells).
+- **Table:** `scale 1, steps 1.4` (grazing rays at the saddles need the budget), `fog 2.2` (the walls
+  fill the screen: thicker fog gives depth and makes the pale pulse ring read), `far 24` with
+  `STRUCT_FAR_FADE` (P's straight corridors see far).
+- **Switching structure** at run time builds the new structure's camera when its provider differs
+  (`src/lattice.js`); the pulse pool asks the current structure's `pulseSource`.
 
 ## Identity stills (proving a refactor changes no pixels)
 
