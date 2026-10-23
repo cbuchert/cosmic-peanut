@@ -43,7 +43,7 @@ on a {7,3}, {5,4}, {4,5} or {6,4} tiling (`src/lib/tess-disk.js`, `shaders/tess/
   fold's starting matrix) so the colours on screen don't change.
 - **Rings and rim:** a tile's ring is its hyperbolic distance from the screen centre (the
   centre's image is folded alongside), reaching 1 where kites are 3 px. Fronts and spectrum
-  rings spread from the centre to the rim. One tile size per pixel row, from the disk metric,
+  rings spread from the centre to the rim. A tile size from the disk metric at the pixel (smooth across a kite)
   drives the print's fades (`tessPrint` takes it): the true per-pixel size varies 0.45–3.6×
   across a kite. Kites under ~1 px print as ink (no fold there), then the edge is antialiased
   into paper.
