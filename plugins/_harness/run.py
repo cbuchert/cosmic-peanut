@@ -32,6 +32,7 @@ VIZ = {
     "tetraballs": "builtin",
     "metamorphosis": "builtin",
     "tile-horizon": "builtin",
+    "endless-zoom": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }

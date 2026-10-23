@@ -51,6 +51,7 @@ def test_builtin_renderers():
         "tetraballs": ("webgl2", []),
         "metamorphosis": ("webgl2", []),
         "tile-horizon": ("webgl2", []),
+        "endless-zoom": ("webgl2", []),
     }
 
 
@@ -666,4 +667,32 @@ def test_tile_horizon_manifest():
     for word in ("escher", "droste"):
         assert word not in text
     for name in ("shaders/tess/tess.glsl", "shaders/tess/tile-horizon.frag"):
+        assert (REPOS["builtin"] / name).is_file(), name
+
+
+def test_endless_zoom_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "endless-zoom"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Endless Zoom",
+        "src/endless-zoom.js",
+        "webgl2",
+        "thumbs/endless-zoom.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    # Metamorphosis's params, plus the surface's own before Quality.
+    (m,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "metamorphosis"]
+    shared = [p for p in m["params"] if p["id"] != "quality"]
+    assert v["params"][: len(shared)] == shared
+    assert list(params)[len(shared) :] == ["spiral", "zoom", "direction", "quality"]
+    # Option order is lib/tess-zoom.js SPIRALS and DIRECTIONS (default DEFAULT_SPIRAL).
+    assert params["spiral"]["options"] == ["none", "gentle", "medium", "strong"]
+    assert params["spiral"]["default"] == "gentle"
+    assert params["direction"]["options"] == ["in", "out"]
+    z = params["zoom"]
+    assert (z["label"], z["min"], z["max"], z["default"]) == ("Zoom speed", 0, 2, 1)
+    # Original work: no artist's name, artwork titles or trademarked names in UI strings.
+    text = json.dumps(v).lower()
+    for word in ("escher", "droste", "print gallery"):
+        assert word not in text, word
+    for name in ("shaders/tess/endless-zoom.frag", "shaders/tess/tess.glsl"):
         assert (REPOS["builtin"] / name).is_file(), name

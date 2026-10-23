@@ -3,6 +3,38 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tessellations: Endless Zoom (2026-10-22)
+
+**Endless Zoom** (`endless-zoom`, webgl2) is the second tessellation surface: Metamorphosis's
+woodcut tiling seen through a log-polar map, p = α log z + O (z relative to the vanishing point,
+in half-short-side units), so it spirals self-similarly into the centre and zooms without end.
+
+- **Closure** (`src/lib/tess-zoom.js`, on `tess.js` `drosteAlpha`/`drosteAt`): one turn moves p by
+  V = α·2πi = a e1 + b e2. The tiles close for any integer a, b, but the metamorphosis blend wave
+  must also repeat over V or the shapes jump at the seam: both groups' waves have
+  k·e1 = 1/BLEND_PERIOD, k·e2 = 0, so a = BLEND_PERIOD (6) and b is the twist. Spiral: none /
+  gentle / medium / strong = b 0 / 1 / 3 / 6 (b = 3 still reads as a mild twist; 6 gives real
+  arms). Tested across the seam for every option and group (field, tile class and uv agree).
+  Colour classes survive any lattice translation (p4 parity, p3 sector).
+- **S** is the analytic Jacobian, α / z / hs as a complex multiply; `dFdx` would see the atan
+  wrap. The engine's ink-spread noise (`tessNoise(q · 9)`) is not lattice-periodic, so outline
+  width can step by a few percent where an outline crosses the seam; not visible in stills.
+- **Zoom**: O moves by −α · ZOOM_RATE (0.2 log-scale per unit of glide travel) × Zoom speed ×
+  the eased direction, so bass and the eased beat surge set the pace through `s.travel`. O wraps
+  by whole BLEND_PERIOD lattice steps (tiles and wave both repeat there): seamless, small floats.
+  Direction changes ease the sign through 0 (τ 0.6 s), never a reverse jolt.
+- **Rings** (`TESS_RING`) by log radius Re((c − O)/α), constant round a turn so it agrees across
+  the seam: from the vanishing point's soft edge to the farthest corner. Fronts ripple outward
+  zooming in, inward zooming out; the order only flips while no front is under way.
+- **Centre**: the engine fades sub-10 px tiles to their mean; then a soft point (radius 0.015–0.11)
+  of ink zooming in, paper zooming out (eased with the direction).
+- **Drag** moves the vanishing point (≤ 0.75 units); on release it eases home over 1.4 s with a
+  smoothstep (zero speed at both ends). The ring span follows it.
+- **Cost**: WebKit harness, 2560×1440, Quality high, `sync=1`: p50 6 ms, p99 11 ms, 58.8 fps
+  (Metamorphosis in the same run: 7 / 9 ms); 3 frames per vsync: 50 fps, so ~6.7 ms GPU (shared
+  GPU with other agents' runs, so noisy). CPU (no sync) p50 < 0.1 ms. Flash check, 10 Hz strobe:
+  0 flashes/s at a 5 % threshold, reduceFlashing on and off.
+
 ## Tessellations: Tile Horizon, the floor surface (2026-10-22)
 
 **Tile Horizon** (`tile-horizon`, webgl2) casts the engine's woodcut tiling onto an endless floor
