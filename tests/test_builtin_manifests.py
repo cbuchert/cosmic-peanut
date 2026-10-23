@@ -685,9 +685,15 @@ def test_lattice_manifest():
         "fog",
         "palette",
         "background",
+        "look",
         "quality",
         "structure",
     ]
+    # lib/lattice-look.js LOOKS / DEFAULT_LOOK: classic is the original shading, byte for byte.
+    look = params["look"]
+    assert (look["label"], look["type"]) == ("Look", "select")
+    assert look["options"] == ["classic", "cinematic"]
+    assert look["default"] in look["options"]
     # lib/structures.js STRUCTURE_OPTIONS: one entry per structure file (the seam for new ones).
     assert params["structure"]["type"] == "select"
     assert params["structure"]["options"] == ["cubic"]
@@ -719,6 +725,8 @@ def test_lattice_manifest():
         "post.frag",
         "structure-cubic.glsl",
         "structure-tentacle.glsl",
+        "brdf.glsl",
+        "bloom.frag",
     ):
         assert (REPOS["builtin"] / "shaders/lattice" / f).is_file(), f
 
@@ -746,6 +754,7 @@ def test_tentacle_lattice_manifest():
         "fog",
         "palette",
         "background",
+        "look",
         "quality",
     ]
     # Lattice's params, less Rod thickness and Structure (it's fixed to "tentacle"), unchanged.
