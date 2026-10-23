@@ -399,18 +399,19 @@ function path(move, u, k, eye, at) {
     eye[0] = r * Math.cos(az);
     eye[1] = 0.55 + (0.15 + 0.3 * k) * (1 + Math.sin(1.3 * u));
     eye[2] = r * Math.sin(az);
-    at[0] = 0.4 * Math.cos(az + 2);
+    at[0] = 0.2 * Math.cos(az + 2);
     at[1] = 0;
-    at[2] = 0.4 * Math.sin(az + 2);
+    at[2] = 0.2 * Math.sin(az + 2);
   } else if (move === 2) {
-    // Skim: a low pass over the face, looking ahead across it to the rim and the wall.
-    const az = 0.7 * u;
-    eye[0] = 0.75 * Math.cos(az);
-    eye[1] = 0.5 + (0.02 + 0.12 * k) * Math.sin(1.9 * u);
-    eye[2] = 0.75 * Math.sin(az);
-    at[0] = eye[0] - 1.6 * Math.sin(az);
-    at[1] = -0.05;
-    at[2] = eye[2] + 1.6 * Math.cos(az);
+    // Skim: a low pass in over the rim, looking across the face to its far side (the face fills
+    // the lower part of the frame, the far rim and the wall above it), turning slowly round.
+    const az = 0.35 * u;
+    eye[0] = 0.95 * Math.cos(az);
+    eye[1] = 0.42 + (0.02 + 0.12 * k) * Math.sin(1.9 * u);
+    eye[2] = 0.95 * Math.sin(az);
+    at[0] = 0.55 * Math.cos(az + 2.6);
+    at[1] = -0.12;
+    at[2] = 0.55 * Math.sin(az + 2.6);
   } else {
     // Pull back: the coin small against the tiled wall.
     const az = 0.25 * u + 1;
