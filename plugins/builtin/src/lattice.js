@@ -33,6 +33,11 @@
  * swaying, tapered tentacles per node, materials crossfading (shade.glsl MATERIALS), handshakes
  * along each beat pulse, a quarter-turn twist at its node and a local bass swell.
  *
+ * Look (lib/lattice-look.js; shaders/lattice/README.md → "Shading"): classic is the original
+ * shading, byte for byte; cinematic compiles the scene with brdf.glsl and CINEMATIC (physically
+ * based materials, pulse tube lights packed by lib/lattice-lights.js, analytic fog in-scatter,
+ * soft shadows), then runs the bloom chain (lib/lattice-bloom.js) and tone-maps in post.frag.
+ *
  * Everything per frame writes into preallocated arrays: frame() allocates nothing.
  */
 import { createProgram, createTarget } from "./lib/gl.js";
