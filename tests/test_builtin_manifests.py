@@ -595,6 +595,10 @@ def test_tetraballs_manifest():
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
 
 
+# Metamorphosis's own params until the other surfaces adopt the relief.
+RELIEF_PARAMS = ("relief", "light")
+
+
 def test_metamorphosis_manifest():
     (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "metamorphosis"]
     assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
@@ -612,8 +616,28 @@ def test_metamorphosis_manifest():
         "morph",
         "ink",
         "hatching",
+        "relief",
+        "light",
         "quality",
     ]
+    # Relief (lib/tess-music.js RELIEF_DEFAULT; 0 is the flat print) and the raking light's
+    # direction round the view in degrees (LIGHT_DEFAULT: from the upper left).
+    rel = params["relief"]
+    assert (rel["type"], rel["label"], rel["min"], rel["max"], rel["default"]) == (
+        "number",
+        "Relief",
+        0,
+        1,
+        0.6,
+    )
+    li = params["light"]
+    assert (li["type"], li["label"], li["min"], li["max"], li["default"]) == (
+        "number",
+        "Light",
+        0,
+        360,
+        135,
+    )
     # Option order is lib/tess-music.js SYMMETRIES, lib/tess.js PALETTES, tess-music QUALITIES.
     assert params["symmetry"]["options"] == ["p4", "p3"]
     assert params["palette"]["options"] == ["ink", "dusk", "four-block", "ochre", "watercolour"]
@@ -660,6 +684,8 @@ def test_tile_horizon_manifest():
     ]
     (meta,) = [m for m in _manifest("builtin")["visualizers"] if m["id"] == "metamorphosis"]
     for p in meta["params"]:
+        if p["id"] in RELIEF_PARAMS:
+            continue
         assert params[p["id"]] == p, p["id"]
     for name in ("height", "tilt", "fog"):
         assert (params[name]["type"], params[name]["min"], params[name]["max"]) == ("number", 0, 1)
@@ -682,7 +708,7 @@ def test_endless_zoom_manifest():
     params = {p["id"]: p for p in v["params"]}
     # Metamorphosis's params, plus the surface's own before Quality.
     (m,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "metamorphosis"]
-    shared = [p for p in m["params"] if p["id"] != "quality"]
+    shared = [p for p in m["params"] if p["id"] not in ("quality", *RELIEF_PARAMS)]
     assert v["params"][: len(shared)] == shared
     assert list(params)[len(shared) :] == ["spiral", "zoom", "direction", "quality"]
     # Option order is lib/tess-zoom.js SPIRALS and DIRECTIONS (default DEFAULT_SPIRAL).
