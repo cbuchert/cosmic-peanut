@@ -111,16 +111,76 @@ export function createWaveRim(M = RIM_POINTS) {
   };
 }
 
+// ---- The music drive -----------------------------------------------------------------------------
+
+/** The drive at rest in silence, and with music at average bass and between beats. */
+export const SILENT_LEVEL = 0.25;
+export const MUSIC_LEVEL = 0.6;
+/** Seconds to ease between silence and music (a smoothstep). */
+const PRESENCE_FADE = 1.5;
+/** Drive per unit of bass above its average (lagged), and at the peak of a beat surge. */
+const DRIVE_BASS = 1.2;
+const DRIVE_SURGE = 3;
+/** Bass is read as the passage's energy (slow), so the beat's own push is the surge alone. */
+const DRIVE_BASS_TAU = 0.8;
+/** The surge follows the beat envelope through two lags (s): an eased rise, no corner. */
+const DRIVE_SURGE_TAU = 0.035;
+/** Reduce motion: this much of the surge. */
+const CALM_SURGE = 0.2;
+
+/**
+ * @typedef {object} DriveInput
+ * @property {boolean} live music is playing (not audio.silent)
+ * @property {number} bassAtt audio's (1 = average) @property {number} env the beat envelope
+ * @property {number} reactivity 0–2 @property {boolean} reduceMotion
+ */
+
+/**
+ * What paces the scene: the camera's path, the coin's spin (and so the wall's counter-spin) and
+ * the tiling's drift all run at `level`. In silence it settles to SILENT_LEVEL, a calm drift; with
+ * music it is MUSIC_LEVEL at average bass, more with the passage's bass, and each beat surges it
+ * (an eased rise through two lags, gone before the next beat). `surge` (0–1) is the eased beat, for the move's intensity.
+ */
+export function createDrive() {
+  let fade = 0;
+  let bass = 0;
+  let s1 = 0;
+  const d = {
+    level: SILENT_LEVEL,
+    /** 0–1: how far into music from silence (smoothstep over PRESENCE_FADE s). */
+    presence: 0,
+    surge: 0,
+    /** Bass above its average, lagged (−0.5…1; 0 in silence). */
+    bass: 0,
+    /** @param {number} dt @param {DriveInput} o */
+    step(dt, o) {
+      fade = clamp(fade + (o.live ? dt : -dt) / PRESENCE_FADE, 0, 1);
+      d.presence = smooth(fade);
+      const b = o.live ? clamp(o.bassAtt - 1, -0.5, 1) : 0;
+      bass += (b - bass) * lag(dt, DRIVE_BASS_TAU);
+      d.bass = bass;
+      const g = lag(dt, DRIVE_SURGE_TAU);
+      s1 += ((o.live ? clamp(o.env, 0, 1) : 0) - s1) * g;
+      d.surge += (s1 - d.surge) * g;
+      const react = clamp(o.reactivity, 0, 2);
+      const music = DRIVE_BASS * bass + DRIVE_SURGE * d.surge * (o.reduceMotion ? CALM_SURGE : 1);
+      d.level = Math.max(0, SILENT_LEVEL + d.presence * (MUSIC_LEVEL - SILENT_LEVEL + react * music));
+      return d;
+    },
+  };
+  return d;
+}
+
 // ---- The coin's spin and tilt ----------------------------------------------------------------
 
 /** Spin about the coin's axis (rad/s) at rest, and how much the mids add (per unit of midAtt − 1). */
 const SPIN_BASE = 0.25;
-const MID_GAIN = 1.2;
+const MID_GAIN = 2;
 const SPIN_TAU = 0.6;
 /** Tilt (rad) per unit of bass above 0.9, and per beat surge; the spring's rate (1/s). */
-const TILT_GAIN = 0.22;
-const SURGE_TILT = 0.06;
-const TILT_RATE = 6;
+const TILT_GAIN = 0.35;
+const SURGE_TILT = 0.14;
+const TILT_RATE = 9;
 /** The tilt precesses (rad/s) at this rate, faster with bass. */
 const WOBBLE = 1;
 
@@ -129,6 +189,7 @@ const WOBBLE = 1;
  * @property {number} midAtt @property {number} bassAtt audio's (1 = average)
  * @property {number} env the beat envelope (tess state `env`)
  * @property {number} reactivity 0–2 @property {boolean} reduceMotion
+ * @property {number} [pace] createDrive's level (1 when omitted): spin and wobble run at it
  */
 
 /** The coin's spin (mids) and its spinning-plate tilt (bass, beat surge). */
@@ -149,7 +210,8 @@ export function createCoinMotion() {
       const react = clamp(o.reactivity, 0, 2);
       const calm = o.reduceMotion ? 0.3 : 1;
       const mids = clamp(o.midAtt - 1, -0.5, 1);
-      const rate = SPIN_BASE * (1 + react * MID_GAIN * mids) * calm;
+      const pace = Math.max(0, o.pace ?? 1);
+      const rate = SPIN_BASE * pace * (1 + react * MID_GAIN * mids) * calm;
       c.spinRate += (rate - c.spinRate) * lag(dt, SPIN_TAU);
       c.spin += c.spinRate * dt;
       const bass = clamp(o.bassAtt - 0.9, 0, 1);
@@ -161,7 +223,7 @@ export function createCoinMotion() {
       const b = vt + w * x0;
       c.tilt = Math.min(COIN.maxTilt, Math.max(0, want + (x0 + b * dt) * e));
       vt = (vt - w * b * dt) * e;
-      phi += dt * WOBBLE * (1 + bass) * calm;
+      phi += dt * WOBBLE * pace * (1 + bass) * calm;
       c.tiltX = c.tilt * Math.cos(phi);
       c.tiltZ = c.tilt * Math.sin(phi);
       const st = Math.sin(c.tilt);
@@ -197,14 +259,14 @@ export function createCounterSpin() {
 // ---- Beat kicks, the impact ripple, the spectrum heave -----------------------------------------
 
 /** Hyperbolic distance per second of the kick at the envelope's peak, at Reactivity 1. */
-const KICK = 0.9;
+const KICK = 2.4;
 /** The kick's direction swings round to the new one through this lag (s). */
 const KICK_TURN = 0.1;
 /** Impact points fall within this radius of the face (screen disk units). */
 const IMPACT_R = 0.7;
 /** The ripple travels out at this speed (hyperbolic units/s) and fades with distance e^(−d/REACH). */
 export const RIPPLE_SPEED = 3;
-export const RIPPLE_REACH = 0.7;
+export const RIPPLE_REACH = 1.1;
 
 /**
  * The ripple's lift (0–1) of a tile at hyperbolic distance d from the impact, `age` s after the
@@ -308,27 +370,34 @@ export const MIN_DWELL = 10;
 /** Seconds to ease from one move into the next (Reduce motion: twice that). */
 export const TRANSIT = 5;
 const ELEV_LIMIT = 1.35;
+/** The moves' swing follows the music's intensity through this lag (s). */
+const SWING_TAU = 0.12;
 
 /**
- * A move's eye and look-at point at path parameter u (world; the coin at the origin).
- * @param {number} move index into MOVES @param {number} u @param {Float64Array} eye @param {Float64Array} at
+ * A move's eye and look-at point at path parameter u (world; the coin at the origin). k is the
+ * music's intensity (0 calm, about 1 on a beat or with heavy bass): it widens each move's swing
+ * and leans the eye in.
+ * @param {number} move index into MOVES @param {number} u @param {number} k
+ * @param {Float64Array} eye @param {Float64Array} at
  */
-function path(move, u, eye, at) {
+function path(move, u, k, eye, at) {
   if (move === 0) {
-    // Orbit: round the coin, looking down on the face.
+    // Orbit: round the coin, looking down on the face, bobbing with the music.
     const az = u;
-    eye[0] = 3.4 * Math.cos(0.5) * Math.cos(az);
-    eye[1] = 3.4 * Math.sin(0.5);
-    eye[2] = 3.4 * Math.cos(0.5) * Math.sin(az);
+    const el = 0.5 + (0.03 + 0.16 * k) * Math.sin(2.3 * u);
+    const r = 3.4 * (1 - 0.06 * k);
+    eye[0] = r * Math.cos(el) * Math.cos(az);
+    eye[1] = r * Math.sin(el);
+    eye[2] = r * Math.cos(el) * Math.sin(az);
     at[0] = 0;
     at[1] = -0.1;
     at[2] = 0;
   } else if (move === 1) {
     // Swoop: in and over the face, rising and falling, looking across it.
     const az = 0.8 * u;
-    const r = 2.2 + 0.6 * Math.sin(0.5 * u);
+    const r = 2.2 + 0.6 * Math.sin(0.5 * u) - 0.15 * k;
     eye[0] = r * Math.cos(az);
-    eye[1] = 0.55 + 0.25 * (1 + Math.sin(1.3 * u));
+    eye[1] = 0.55 + (0.15 + 0.3 * k) * (1 + Math.sin(1.3 * u));
     eye[2] = r * Math.sin(az);
     at[0] = 0.4 * Math.cos(az + 2);
     at[1] = 0;
@@ -337,7 +406,7 @@ function path(move, u, eye, at) {
     // Skim: a low pass over the face, looking ahead across it to the rim and the wall.
     const az = 0.7 * u;
     eye[0] = 0.75 * Math.cos(az);
-    eye[1] = 0.5;
+    eye[1] = 0.5 + (0.02 + 0.12 * k) * Math.sin(1.9 * u);
     eye[2] = 0.75 * Math.sin(az);
     at[0] = eye[0] - 1.6 * Math.sin(az);
     at[1] = -0.05;
@@ -345,9 +414,11 @@ function path(move, u, eye, at) {
   } else {
     // Pull back: the coin small against the tiled wall.
     const az = 0.25 * u + 1;
-    eye[0] = 6.6 * Math.cos(0.3) * Math.cos(az);
-    eye[1] = 6.6 * Math.sin(0.3);
-    eye[2] = 6.6 * Math.cos(0.3) * Math.sin(az);
+    const el = 0.3 + (0.03 + 0.11 * k) * Math.sin(1.7 * u);
+    const r = 6.6 * (1 - 0.035 * k);
+    eye[0] = r * Math.cos(el) * Math.cos(az);
+    eye[1] = r * Math.sin(el);
+    eye[2] = r * Math.cos(el) * Math.sin(az);
     at[0] = 0;
     at[1] = 0;
     at[2] = 0;
@@ -357,7 +428,8 @@ function path(move, u, eye, at) {
 /**
  * @typedef {object} DirectorInput
  * @property {boolean} stepped the tess state's bar step
- * @property {number} speed the tess state's glide speed (bass and the beat surge)
+ * @property {number} speed the pace (createDrive's level: calm in silence, bass and the beat surge)
+ * @property {number} [intensity] how wide the moves swing (bass and the eased beat; 0 calm)
  * @property {boolean} reduceMotion
  * @property {string} camera "auto" | "still"
  * @property {ArrayLike<number>} normal the coin's face normal now
@@ -383,6 +455,7 @@ export function createDirector() {
   let dwell = 0;
   let steps = 0;
   let seed = 3;
+  let k = 0;
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   /** @param {Float64Array} p @param {number} yaw @param {number} pitch */
   const orbitBy = (p, yaw, pitch) => {
@@ -408,6 +481,12 @@ export function createDirector() {
     move: MOVES[0],
     /** Vertical field of view (rad). */
     fov: 0.9,
+    /** Jump straight to a move, no ease (tests, stills). @param {number} m index into MOVES */
+    force(m) {
+      from = to = m;
+      blend = 1;
+      d.move = MOVES[m];
+    },
     /** @param {import('../../tidalviz').PointerInput} e */
     pointer(e) {
       drag.pointer(e);
@@ -417,7 +496,7 @@ export function createDirector() {
       const calm = o.reduceMotion;
       drag.step(dt, calm);
       if (o.camera === "still") {
-        path(0, 0.9, eb, tb);
+        path(0, 0.9, 0, eb, tb);
         eb[1] *= 1.25;
         d.eye.set(eb);
         d.target.set(tb);
@@ -433,8 +512,9 @@ export function createDirector() {
         if (calm && to !== 0 && to !== 3) startMove(0);
         blend = Math.min(1, blend + dt / (TRANSIT * (calm ? 2 : 1)));
         const w = smooth(blend);
-        path(from, u, ea, ta);
-        path(to, u, eb, tb);
+        k += ((o.intensity ?? 0) * (calm ? CALM : 1) - k) * lag(dt, SWING_TAU);
+        path(from, u, k, ea, ta);
+        path(to, u, k, eb, tb);
         for (let i = 0; i < 3; i++) {
           d.eye[i] = ea[i] + (eb[i] - ea[i]) * w;
           d.target[i] = ta[i] + (tb[i] - ta[i]) * w;

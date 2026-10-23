@@ -85,7 +85,7 @@ float rippleLift(float age, float d, float period) {
   if (a <= 0.0) return 0.0;
   float fall = max(0.05, 0.9 * period - 0.08);
   float env = a < 0.08 ? smoothstep(0.0, 1.0, a / 0.08) : 1.0 - smoothstep(0.0, 1.0, (a - 0.08) / fall);
-  return env * exp(-d / 0.7);
+  return env * exp(-d / 1.1);
 }
 
 float specLift(float d) {
@@ -238,7 +238,7 @@ void main() {
                    u_lift.y * specLift(hdist(g_dk.centreD)) / 0.05;
         lt = clamp(lt, 0.0, 2.0);
         float cut = 1.0 - smoothstep(0.0, 5.0 * fpx, g_dk.dpx);
-        base *= (1.0 + 0.22 * lt) * (1.0 - 0.3 * lt * cut);
+        base *= (1.0 + 0.3 * lt) * (1.0 - 0.35 * lt * cut);
         // Carved outlines read as grooves when the camera is close.
         base *= 1.0 - 0.3 * u_near * cut;
         // Treble glints along the gouges.

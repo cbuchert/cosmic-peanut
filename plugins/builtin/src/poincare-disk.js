@@ -21,12 +21,12 @@
  * alone, exactly as it first was (its drag carries the plane).
  * frame() allocates nothing.
  */
-import { CLEAR, COIN, coinDistance, createCoinMotion, createCounterSpin, createDirector, createKicks, createWaveRim, SPHERE_R } from "./lib/disk3d.js";
+import { CLEAR, COIN, coinDistance, createCoinMotion, createCounterSpin, createDirector, createDrive, createKicks, createWaveRim, SPHERE_R } from "./lib/disk3d.js";
 import { faceCells, sphereTables } from "./lib/cube-sphere.js";
 import { sphereFrame, threeClassColors } from "./lib/sphere-view.js";
 import { createTessPipeline } from "./lib/tess-gl.js";
 import { createDiskOptions, createDiskView, createDiskWarp, diskGeometry, diskGroup, readDiskParams } from "./lib/tess-disk.js";
-import { createTessState, renderScale } from "./lib/tess-music.js";
+import { createTessState, REDUCED_GLIDE, renderScale } from "./lib/tess-music.js";
 import { MAX_TILE_COLORS, paletteOf } from "./lib/tess.js";
 
 /** The disk's radius: this fraction of half the short side. */
@@ -40,8 +40,8 @@ const WALL_CELLS = faceCells(12);
 const WALL_TILT = 0.2;
 const FACE_RING_R = 4.6;
 const FOG = 0.045;
-const RIPPLE_H = 0.05;
-const HEAVE_H = 0.035;
+const RIPPLE_H = 0.1;
+const HEAVE_H = 0.06;
 const TREBLE_TAU = 0.08;
 /** Key light and the wall's ring pole (world). */
 const LIGHT = [-0.45, 0.78, 0.43];
@@ -150,6 +150,7 @@ export default async function create(ctx) {
   };
 
   // ---- The sphere scene ----------------------------------------------------------------------
+  const drive = createDrive();
   const coin = createCoinMotion();
   const counter = createCounterSpin();
   const kicks = createKicks();
@@ -167,9 +168,10 @@ export default async function create(ctx) {
   const light = unit(LIGHT);
   const poleW = unit(POLE);
   const iw = new Float64Array(2);
-  const coinIn = { midAtt: 1, bassAtt: 1, env: 0, reactivity: 1, reduceMotion: false };
+  const driveIn = { live: false, bassAtt: 1, env: 0, reactivity: 1, reduceMotion: false };
+  const coinIn = { midAtt: 1, bassAtt: 1, env: 0, reactivity: 1, reduceMotion: false, pace: 1 };
   const kickIn = { env: 0, reactivity: 1, period: 0.5 };
-  const dirIn = { stepped: false, speed: 1, reduceMotion: false, camera: "auto", normal: coin.normal };
+  const dirIn = { stepped: false, speed: 1, intensity: 0, reduceMotion: false, camera: "auto", normal: coin.normal };
   let palName = "";
   let nTiles = 3;
   let blendPhase = 0;
@@ -298,19 +300,25 @@ export default async function create(ctx) {
     react = Math.max(0, Math.min(2, opts.reactivity));
     clock += dt;
     const live = !audio.silent;
+    driveIn.live = live;
+    driveIn.bassAtt = live ? audio.bassAtt : 1;
+    driveIn.env = s.env;
+    driveIn.reactivity = react;
+    driveIn.reduceMotion = ctx.reduceMotion;
+    drive.step(dt, driveIn);
 
     coinIn.midAtt = live ? audio.midAtt : 1;
     coinIn.bassAtt = live ? audio.bassAtt : 1;
     coinIn.env = s.env;
     coinIn.reactivity = react;
     coinIn.reduceMotion = ctx.reduceMotion;
+    coinIn.pace = drive.level;
     coin.step(dt, coinIn);
     counter.step(dt, coin.spinRate, opts.spin);
 
-    // The tiling: the glide's drift, plus a kick along a new direction each beat.
-    const travel = first ? 0 : s.travel - lastTravel;
-    first = false;
-    lastTravel = s.travel;
+    // The tiling: a drift at the drive's pace, plus a kick along a new direction each beat.
+    const travel = drive.level * dt * (ctx.reduceMotion ? REDUCED_GLIDE : 1);
+    first = true; // the flat scene re-bases its travel when it comes back
     kickIn.env = s.env;
     kickIn.reactivity = ctx.reduceMotion ? react * 0.3 : react;
     kickIn.period = live && audio.bpm > 0 ? 60 / audio.bpm : 0.5;
@@ -339,7 +347,8 @@ export default async function create(ctx) {
     treble += (tr - treble) * (1 - Math.exp(-dt / TREBLE_TAU));
 
     dirIn.stepped = s.stepped;
-    dirIn.speed = s.speed;
+    dirIn.speed = drive.level;
+    dirIn.intensity = drive.surge + drive.presence * Math.max(0, drive.bass);
     dirIn.reduceMotion = ctx.reduceMotion;
     dirIn.camera = opts.camera;
     director.step(dt, dirIn);

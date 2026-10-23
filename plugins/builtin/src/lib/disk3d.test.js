@@ -8,9 +8,11 @@ import {
   createCoinMotion,
   createCounterSpin,
   createDirector,
+  createDrive,
   createKicks,
   createWaveRim,
   MOVES,
+  MUSIC_LEVEL,
   RIM_POINTS,
   rippleLift,
   SCENES,
@@ -129,7 +131,7 @@ describe("coin motion: mids spin it, bass tilts and wobbles it", () => {
     }
     expect(most).toBeGreaterThan(0.1);
     expect(most).toBeLessThanOrEqual(COIN.maxTilt);
-    expect(jump).toBeLessThan(0.01);
+    expect(jump).toBeLessThan(0.02);
     expect(seen.size).toBeGreaterThanOrEqual(4); // the tilt has gone round
   });
 
@@ -146,6 +148,19 @@ describe("coin motion: mids spin it, bass tilts and wobbles it", () => {
     expect(c.spinRate).toBeGreaterThan(0);
     expect(calm.spinRate).toBeLessThan(0.5 * r.spinRate);
     expect(calm.tilt).toBeLessThan(0.5 * r.tilt);
+  });
+});
+
+describe("coin motion: the drive paces it", () => {
+  it("spins and wobbles at the drive's pace: calm in silence, quick with the music", () => {
+    const silent = createCoinMotion();
+    const music = createCoinMotion();
+    for (let i = 0; i < 300; i++) {
+      silent.step(DT, { midAtt: 1, bassAtt: 1, env: 0, reactivity: 1, reduceMotion: false, pace: 0.25 });
+      music.step(DT, { midAtt: 1, bassAtt: 1, env: 0, reactivity: 1, reduceMotion: false, pace: 2 });
+    }
+    expect(silent.spinRate).toBeGreaterThan(0);
+    expect(music.spinRate).toBeGreaterThan(6 * silent.spinRate);
   });
 });
 
@@ -221,7 +236,8 @@ describe("beat kicks and the impact ripple", () => {
     expect(Math.max(...dist)).toBeGreaterThan(0.005);
     expect(Math.min(...dist)).toBeGreaterThanOrEqual(0);
     // Eased: the step grows and shrinks gradually.
-    for (let i = 1; i < dist.length; i++) expect(Math.abs(dist[i] - dist[i - 1])).toBeLessThan(0.01);
+    const most = Math.max(...dist);
+    for (let i = 1; i < dist.length; i++) expect(Math.abs(dist[i] - dist[i - 1])).toBeLessThan(0.35 * most); // the envelope's 80 ms smoothstep: ≤ 1.5 × 1/5 a frame
     expect(new Set(dirs.map((d) => d.toFixed(1))).size).toBeGreaterThan(3);
     expect(Math.hypot(k.impact[0], k.impact[1])).toBeLessThan(0.75);
     // Reactivity 0: no kick.
@@ -324,6 +340,37 @@ describe("camera director", () => {
     expect(pc).toBeLessThan(0.5 * ps);
   });
 
+  it("the music's intensity widens every move, eased (the eye never jumps on a beat)", () => {
+    for (const m of [0, 1, 2, 3]) {
+      const span = (/** @type {(i: number) => number} */ k) => {
+        const d = createDirector();
+        d.force(m);
+        let lo = Infinity;
+        let hi = -Infinity;
+        let jump = 0;
+        const e = Float64Array.from(d.eye);
+        for (let i = 0; i < 60 * 40; i++) {
+          d.step(DT, opts({ intensity: k(i) }));
+          if (i > 60 * 6) {
+            const r = Math.hypot(d.eye[0], d.eye[1], d.eye[2]);
+            lo = Math.min(lo, d.eye[1] / r);
+            hi = Math.max(hi, d.eye[1] / r);
+            jump = Math.max(jump, Math.hypot(d.eye[0] - e[0], d.eye[1] - e[1], d.eye[2] - e[2]));
+          }
+          e.set(d.eye);
+        }
+        return { range: hi - lo, jump };
+      };
+      const calm = span(() => 0);
+      const beat = span((i) => {
+        const a = (i % 30) / 30;
+        return a < 0.16 ? (a / 0.16) ** 2 * (3 - (2 * a) / 0.16) : Math.max(0, 1 - (a - 0.16) / 0.74);
+      });
+      expect(beat.range, MOVES[m]).toBeGreaterThan(1.3 * calm.range + 0.01);
+      expect(beat.jump, MOVES[m]).toBeLessThan(0.08);
+    }
+  });
+
   it("a drag takes over and eases back; Camera still holds a fixed view", () => {
     const d = createDirector();
     for (let i = 0; i < 60; i++) d.step(DT, opts());
@@ -341,5 +388,82 @@ describe("camera director", () => {
     const s0 = Float64Array.from(still.eye);
     for (let i = 0; i < 300; i++) still.step(DT, opts({ camera: "still", stepped: i % 30 === 0, speed: 2 }));
     expect(Math.hypot(still.eye[0] - s0[0], still.eye[1] - s0[1], still.eye[2] - s0[2])).toBeLessThan(1e-9);
+  });
+});
+
+describe("the music drive: what paces the camera, the spin and the drift", () => {
+  const input = (over = {}) => ({ live: true, bassAtt: 1, env: 0, reactivity: 1, reduceMotion: false, ...over });
+  /** A beat envelope at 120 BPM: 80 ms smoothstep rise, linear-ish fall over 0.9 beat. @param {number} t */
+  const beatEnv = (t) => {
+    const a = t % 0.5;
+    if (a < 0.08) return smoothstep(a / 0.08);
+    return Math.max(0, 1 - (a - 0.08) / 0.37);
+  };
+  /** @param {number} x */
+  function smoothstep(x) {
+    return x * x * (3 - 2 * x);
+  }
+
+  it("silence settles to a calm drift well under the music's pace, eased both ways", () => {
+    const d = createDrive();
+    let jump = 0;
+    let last = d.level;
+    let silent = 0;
+    let loud = 0;
+    for (let i = 0; i < 60 * 12; i++) {
+      const live = i >= 60 * 6;
+      d.step(DT, input({ live, bassAtt: live ? 1 + 0.5 * Math.sin(i * 0.1) : 1, env: live ? beatEnv(i * DT) : 0 }));
+      jump = Math.max(jump, Math.abs(d.level - last));
+      last = d.level;
+      if (i === 60 * 6 - 1) silent = d.level;
+      if (i >= 60 * 10) loud += d.level / (60 * 2);
+    }
+    expect(silent).toBeLessThan(0.35);
+    expect(silent).toBeGreaterThan(0);
+    expect(loud).toBeGreaterThan(3 * silent);
+    expect(jump).toBeLessThan(0.6); // never a click: a beat's surge (~3) rises over several frames
+  });
+
+  it("each beat surges it: an eased rise, back down before the next beat", () => {
+    const d = createDrive();
+    for (let i = 0; i < 120; i++) d.step(DT, input());
+    const rest = d.level;
+    /** @type {number[]} */
+    const lv = [];
+    for (let i = 0; i < 60; i++) {
+      d.step(DT, input({ env: i < 30 ? beatEnv(i * DT) : 0 }));
+      lv.push(d.level);
+    }
+    const peak = Math.max(...lv);
+    const at = lv.indexOf(peak);
+    expect(peak).toBeGreaterThan(rest + 1);
+    expect(at).toBeGreaterThan(3); // eased, not on the first frame
+    expect(at).toBeLessThan(15); // but within a quarter second
+    expect(lv[29]).toBeLessThan(rest + 0.35 * (peak - rest)); // gone by the next beat
+    // Eased as the beat envelope is (an 80 ms smoothstep): no frame takes more than a third of it.
+    for (let i = 1; i < lv.length; i++) expect(Math.abs(lv[i] - lv[i - 1])).toBeLessThan(0.33 * (peak - rest));
+    expect(d.surge).toBeGreaterThanOrEqual(0);
+  });
+
+  it("bass raises it; Reactivity 0 keeps the plain pace; Reduce motion damps the surge", () => {
+    const low = createDrive();
+    const high = createDrive();
+    const flat = createDrive();
+    const calm = createDrive();
+    let pc = 0;
+    let pn = 0;
+    const norm = createDrive();
+    for (let i = 0; i < 300; i++) {
+      low.step(DT, input({ bassAtt: 0.7 }));
+      high.step(DT, input({ bassAtt: 1.6 }));
+      flat.step(DT, input({ bassAtt: 1.6, env: beatEnv(i * DT), reactivity: 0 }));
+      calm.step(DT, input({ env: beatEnv(i * DT), reduceMotion: true }));
+      norm.step(DT, input({ env: beatEnv(i * DT) }));
+      pc = Math.max(pc, calm.level);
+      pn = Math.max(pn, norm.level);
+    }
+    expect(high.level).toBeGreaterThan(1.5 * low.level);
+    expect(flat.level).toBeCloseTo(MUSIC_LEVEL, 6);
+    expect(pc - MUSIC_LEVEL).toBeLessThan(0.5 * (pn - MUSIC_LEVEL));
   });
 });
