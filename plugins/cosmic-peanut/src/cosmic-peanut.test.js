@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import create from "./cosmic-peanut.js";
+import createField from "./mobius-field.js";
 
 // Node built-ins are loaded untyped so node's globals don't leak into the DOM-typed program.
 /** @type {(specifier: string) => Promise<any>} */
@@ -14,17 +15,24 @@ const { fileURLToPath } = await load("node:url");
 /** @param {string} p path under the pack @returns {string} */
 const pack = (p) => fileURLToPath(new URL(`../${p}`, import.meta.url));
 
+/** Whether the fake copies texture uploads (off while counting the entry's own allocations). */
+let recordUploads = true;
+
 /** A WebGL2 stand-in that records float uniforms by name and R32F/RG32F row uploads. */
 function fakeGl() {
   /** @type {Map<string, number>} */
   const uniforms = new Map();
-  /** @type {{ tex: any, w: number, ch: number, data: Float32Array }[]} */
+  /** @type {{ tex: any, w: number, y: number, ch: number, data: Float32Array }[]} */
   const uploads = [];
   /** @type {any[]} */
   const units = [];
   let unit = 0;
   /** @type {any[]} textures on unit 0 at each draw */
   const drawUnit0 = [];
+  /** @type {{ kind: string, instances: number }[]} every draw call */
+  const draws = [];
+  /** @type {any[]} every array handed to the GPU (uniform matrices, buffer uploads) */
+  const sent = [];
   /** @type {Record<string, any>} */
   const impl = {
     createShader: () => ({ src: "" }),
@@ -42,12 +50,23 @@ function fakeGl() {
     createTexture: () => ({}),
     activeTexture: (/** @type {string} */ u) => (unit = Number(String(u).replace("TEXTURE", ""))),
     bindTexture: (/** @type {any} */ _t, /** @type {any} */ tex) => (units[unit] = tex),
-    drawElements: () => drawUnit0.push(units[0]),
+    drawElements: () => {
+      drawUnit0.push(units[0]);
+      draws.push({ kind: "elements", instances: 1 });
+    },
+    drawElementsInstanced: (/** @type {any[]} */ ...a) => {
+      drawUnit0.push(units[0]);
+      draws.push({ kind: "instanced", instances: a[4] });
+    },
+    drawArrays: () => draws.push({ kind: "arrays", instances: 1 }),
+    bufferSubData: (/** @type {any[]} */ ...a) => sent.push(a[2]),
+    uniformMatrix4fv: (/** @type {any[]} */ ...a) => sent.push(a[2]),
     texSubImage2D: (/** @type {any[]} */ ...a) => {
       // (target, level, x, y, w, h, format, type, data)
+      if (!recordUploads) return;
       const ch = a[6] === "RG" ? 2 : 1;
       if (a[4] === 512) units[unit].isHistory = true;
-      uploads.push({ tex: units[unit], w: a[4], ch, data: Float32Array.from(a[8].subarray(0, a[4] * a[5] * ch)) });
+      uploads.push({ tex: units[unit], w: a[4], y: a[3], ch, data: Float32Array.from(a[8].subarray(0, a[4] * a[5] * ch)) });
     },
   };
   /** @param {any} p */
@@ -67,7 +86,7 @@ function fakeGl() {
       return () => ({});
     },
   });
-  return { gl, uniforms, uploads, drawUnit0 };
+  return { gl, uniforms, uploads, drawUnit0, draws, sent };
 }
 
 /** @param {string} id */
@@ -91,8 +110,9 @@ async function start(id, /** @type {Record<string, unknown>} */ overrides = {}) 
       json: async (/** @type {string} */ p) => JSON.parse(await readFile(pack(p), "utf8")),
     },
   });
-  const viz2 = await create(ctx);
-  const vert = await readFile(pack(viz.id === "mobius" ? "shaders/mobius.vert" : "shaders/rings.vert"), "utf8");
+  const viz2 = await (id === "mobius-field" ? createField : create)(ctx);
+  const shaders = { mobius: "mobius.vert", "mobius-field": "field.vert", "cosmic-peanut": "rings.vert" };
+  const vert = await readFile(pack(`shaders/${shaders[/** @type {keyof typeof shaders} */ (id)]}`), "utf8");
   return { viz: viz2, ...fake, vert };
 }
 
@@ -113,9 +133,9 @@ function audioAt(/** @type {number} */ f) {
   });
 }
 
-describe("Möbius on the beat", () => {
+describe.each(["mobius", "mobius-field"])("%s on the beat", (id) => {
   it("changes nothing frame-wide about the strip's size or amplitude (only the wring rolls it)", async () => {
-    const { viz, uniforms, vert } = await start("mobius");
+    const { viz, uniforms, vert } = await start(id);
     // Every float uniform the vertex shader reads, except the age clock and the wring.
     const geom = [...vert.matchAll(/uniform\s+float\s+([^;]+);/g)]
       .flatMap((m) => m[1].split(",").map((/** @type {string} */ s) => s.trim()))
@@ -133,25 +153,29 @@ describe("Möbius on the beat", () => {
   });
 
   it("bakes each slice's size at push: beat slices are bigger, slices already laid never change", async () => {
-    const { viz, uploads } = await start("mobius");
+    const { viz, uploads } = await start(id);
     const N = 240;
     /** @type {Float32Array[]} */
     const rows = []; // the per-row place/size texture after each frame
+    /** History rows written while the beat at 6 s plays (their sizes are new). */
+    const rewritten = new Set();
     for (let f = 0; f < 60 * 8; f++) {
       uploads.length = 0;
       viz.frame(audioAt(f), /** @type {any} */ ({ dt: 1 / 60, t: f / 60 }));
       const pos = uploads.filter((u) => u.w === N).at(-1);
       rows.push(pos ? pos.data : rows[rows.length - 1]);
+      if (f >= 60 * 6 - 1 && f <= 60 * 6 + 10) for (const u of uploads) if (u.w === 512) rewritten.add(u.y);
     }
     const last = rows[rows.length - 1];
-    expect(last.length).toBe(N * 2); // RG: place, size
+    expect(last.length).toBe(N * 2); // RG: place (the field's bands don't read it), size
     // Rows laid before the beat at 6 s keep both values through it.
     const before = rows[60 * 6 - 2];
     let kept = 0;
     for (let r = 0; r < N; r++) {
       const after = rows[60 * 6 + 10];
       if (before[r * 2 + 1] === 0) continue; // not written yet
-      if (after[r * 2] !== before[r * 2]) continue; // overwritten by a newer slice
+      if (rewritten.has(r)) continue; // overwritten by a newer slice
+      expect(after[r * 2]).toBe(before[r * 2]);
       expect(after[r * 2 + 1]).toBe(before[r * 2 + 1]);
       kept++;
     }
@@ -167,9 +191,75 @@ describe("Möbius on the beat", () => {
   });
 
   it("always draws with the waveform history on unit 0 (uHist), pushes or not", async () => {
-    const { viz, drawUnit0 } = await start("mobius");
+    const { viz, drawUnit0 } = await start(id);
     for (let f = 0; f < 120; f++) viz.frame(audioAt(f), /** @type {any} */ ({ dt: 1 / 60, t: f / 60 }));
     expect(drawUnit0.length).toBe(120);
     expect(drawUnit0.filter((t) => !t?.isHistory).length).toBe(0);
   });
 });
+
+/** Count typed arrays made while `fn` runs (constructors and the prototype methods that copy). */
+function typedArraysMade(/** @type {() => void} */ fn) {
+  const g = /** @type {any} */ (globalThis);
+  const kinds = ["Float32Array", "Float64Array", "Int32Array", "Uint32Array", "Uint16Array", "Uint8Array"];
+  const saved = kinds.map((k) => g[k]);
+  const proto = Object.getPrototypeOf(Float32Array.prototype);
+  const methods = ["subarray", "slice", "map", "filter"];
+  const savedMethods = methods.map((m) => proto[m]);
+  let made = 0;
+  kinds.forEach((k, i) => {
+    g[k] = class extends saved[i] {
+      constructor(/** @type {any[]} */ ...a) {
+        super(...a);
+        made++;
+      }
+    };
+  });
+  methods.forEach((m, i) => {
+    proto[m] = function (/** @type {any[]} */ ...a) {
+      made++;
+      return savedMethods[i].apply(this, a);
+    };
+  });
+  try {
+    fn();
+  } finally {
+    kinds.forEach((k, i) => (g[k] = saved[i]));
+    methods.forEach((m, i) => (proto[m] = savedMethods[i]));
+  }
+  return made;
+}
+
+describe("Möbius Field", () => {
+  const time = (/** @type {number} */ f) => /** @type {any} */ ({ dt: 1 / 60, t: f / 60 });
+
+  it("draws every band in one instanced call per frame, with the history on unit 0", async () => {
+    const { viz, draws, drawUnit0 } = await start("mobius-field");
+    for (let f = 0; f < 120; f++) {
+      draws.length = 0;
+      viz.frame(audioAt(f), time(f));
+      const bands = draws.filter((d) => d.kind !== "arrays"); // the soft-lines blit is drawArrays
+      expect(bands.length).toBe(1);
+      expect(bands[0].kind).toBe("instanced");
+      expect(bands[0].instances).toBeGreaterThan(5);
+    }
+    expect(drawUnit0.length).toBe(120);
+    expect(drawUnit0.filter((t) => !t?.isHistory).length).toBe(0);
+  });
+
+  it("allocates nothing per frame: no typed arrays, and the same arrays go to the GPU every frame", async () => {
+    const { viz, sent } = await start("mobius-field");
+    for (let f = 0; f < 60; f++) viz.frame(audioAt(f), time(f)); // warm up
+    sent.length = 0;
+    const audio = Array.from({ length: 60 * 6 }, (_, f) => audioAt(f));
+    recordUploads = false;
+    const made = typedArraysMade(() => {
+      for (let f = 60; f < 60 * 6; f++) viz.frame(audio[f], time(f)); // beats, pushes, wraps
+    });
+    recordUploads = true;
+    expect(made).toBe(0);
+    expect(sent.length).toBe(60 * 5 * 3); // per frame: two matrices and one instance upload
+    expect(new Set(sent).size).toBe(3);
+  });
+});
+

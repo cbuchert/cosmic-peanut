@@ -46,6 +46,31 @@
         { "id": "track", "type": "select", "label": "Track", "options": ["figure-8", "loop"], "default": "loop" },
         { "id": "length", "type": "number", "label": "Length", "min": 0.2, "max": 1, "step": 0.01, "default": 1 }
       ]
+    },
+    {
+      "id": "mobius-field",
+      "name": "Möbius Field",
+      "description": "Fly through an endless field of glowing Möbius bands, each one playing the waveform.",
+      "author": "Tidalviz",
+      "entry": "src/mobius-field.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/mobius-field.jpg",
+      "params": [
+        { "id": "travel", "type": "number", "label": "Travel time", "min": 2, "max": 20, "step": 0.5, "default": 7 },
+        { "id": "amp", "type": "number", "label": "Amplitude", "min": 0, "max": 0.6, "step": 0.01, "default": 0.22 },
+        { "id": "detail", "type": "number", "label": "Detail", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
+        { "id": "pulse", "type": "number", "label": "Bass pulse", "min": 0, "max": 1, "step": 0.01, "default": 0.35 },
+        { "id": "bright", "type": "number", "label": "Brightness", "min": 0.2, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "density", "type": "select", "label": "Rings", "options": ["sparse", "medium", "dense"], "default": "medium" },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["nebula", "ember", "phosphor"], "default": "nebula" },
+        { "id": "lines", "type": "select", "label": "Lines", "options": ["soft", "fine"], "default": "soft" },
+        { "id": "antialias", "type": "boolean", "label": "Antialias soft lines", "default": true },
+        { "id": "width", "type": "number", "label": "Strip width", "min": 0.15, "max": 0.7, "step": 0.01, "default": 0.4 },
+        { "id": "beat", "type": "number", "label": "Beat", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "bands", "type": "number", "label": "Bands", "min": 12, "max": 80, "step": 1, "default": 40 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 4, "step": 0.05, "default": 1.4 },
+        { "id": "fog", "type": "number", "label": "Fog", "min": 6, "max": 24, "step": 0.5, "default": 14 }
+      ]
     }
   ]
 }

@@ -150,14 +150,23 @@ def _param_table(v: dict) -> dict:
     }
 
 
-def test_cosmic_peanut_pack_is_the_sphere_and_the_mobius_strip():
+def test_cosmic_peanut_pack_is_the_sphere_the_mobius_strip_and_the_field():
     vs = _manifest("cosmic-peanut")["visualizers"]
     assert [(v["id"], v["name"]) for v in vs] == [
         ("cosmic-peanut", "Cosmic Peanut"),
         ("mobius", "Möbius"),
+        ("mobius-field", "Möbius Field"),
     ]
-    for v in vs:  # one entry module drives both; the shape is picked by ctx.id
-        assert (v["renderer"], v["entry"]) == ("webgl2", "src/cosmic-peanut.js")
+    # One entry module drives the sphere and the strip (the shape is picked by ctx.id); the field
+    # has its own, sharing the pack's libs.
+    entries = {v["id"]: v["entry"] for v in vs}
+    assert entries == {
+        "cosmic-peanut": "src/cosmic-peanut.js",
+        "mobius": "src/cosmic-peanut.js",
+        "mobius-field": "src/mobius-field.js",
+    }
+    for v in vs:
+        assert v["renderer"] == "webgl2"
         assert "libs" not in v
         assert v["thumbnail"] == f"thumbs/{v['id']}.jpg"
 
@@ -200,6 +209,26 @@ def test_mobius_has_cosmic_peanuts_params_plus_width_beat_track_and_length():
     # Defaults give back the original closed band; figure-8 and the snake are options.
     assert length["max"] == 1 and 0 < length["min"] <= 0.25 and length["default"] == 1
     assert {"beat", "track", "length"}.isdisjoint(p["id"] for p in sphere["params"])
+
+
+def test_mobius_field_has_the_strips_params_less_orbit_track_and_length_plus_its_own():
+    vs = {v["id"]: v for v in _manifest("cosmic-peanut")["visualizers"]}
+    mobius, field = vs["mobius"], vs["mobius-field"]
+    # The camera flies instead of orbiting, and every band is the closed loop at full length.
+    dropped = {"orbit", "track", "length"}
+    shared = [p for p in mobius["params"] if p["id"] not in dropped]
+    assert field["params"][: len(shared)] == shared
+    bands, speed, fog = field["params"][len(shared) :]
+    assert (bands["id"], bands["type"], bands["label"]) == ("bands", "number", "Bands")
+    assert (bands["min"], bands["max"], bands["step"]) == (12, 80, 1)
+    assert 12 <= bands["default"] <= 80
+    assert (speed["id"], speed["type"], speed["label"]) == ("speed", "number", "Speed")
+    assert speed["min"] == 0 and speed["max"] >= 3
+    # lib/fly.js NOMINAL_SPEED: the path's curves run at their nominal pace at the default, and
+    # Reduce motion slows the flight (motion.js GENTLE.speed) only while Speed sits here.
+    assert speed["default"] == 1.4
+    assert (fog["id"], fog["type"], fog["label"]) == ("fog", "number", "Fog")
+    assert 0 < fog["min"] < fog["default"] < fog["max"]
 
 
 def test_stargate_manifest():
