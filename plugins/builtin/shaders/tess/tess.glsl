@@ -264,3 +264,199 @@ vec4 tessShade(vec2 p, mat2 S) {
 }
 
 vec4 tessShade(vec2 p, float px) { return tessShade(p, mat2(px)); }
+
+#ifdef TESS_RELIEF
+// ---- Relief: the carved block the print is pulled from (opt-in) ---------------------------
+// A surface that wants 3D defines TESS_RELIEF before the include (surfaces that don't compile
+// exactly as before). The tiles become raised blocks over a groove floor at height 0: a
+// bevel-to-dome profile from each tile's interior distance, lifted per ring of tiles by the music
+// (u_tLift: beat waves and spectrum heave, lib/tess-music.js), single tiles popped on onsets
+// (u_tPop), and, while the figure/ground front passes, each tile turning over like a card about
+// an axis across TESS_FLIP_DIR(c) (default: radial from u_tRing.xy) to show its back in the next
+// colour. Heights are plane units; mirrors lib/tess.js reliefHeight (tested there), whose
+// reliefBound is u_tRelief.z.
+//   vec3 tessRelief(vec2 p, mat2 S)                       height, dh/dp: displace geometry or march
+//   vec4 tessShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail)
+//                                                         the print on the block at p, plus its
+//                                                         plate (h, dh/dp, face, pit) and the
+//                                                         fine carving's height (gouges cut,
+//                                                         features raised) for the surface's normals
+#define TESS_LIFT_BINS 32
+#define TESS_POP_SLOTS 3
+#define RELIEF_BLOCK 0.07
+#define RELIEF_BEVEL 0.05
+#define RELIEF_DOME 0.25
+#define CARD_HALF 0.36
+#define LIFT_VARY 0.3
+#define POP_BAND 0.08
+#define POP_DENSITY 0.3
+#define GOUGE_DEPTH 0.012
+#define FEATURE_RAISE 0.014
+
+uniform vec4 u_tRelief;               // depth 0–1, profile (0 bevel … 1 dome), height bound, card hop
+uniform float u_tLift[TESS_LIFT_BINS]; // lift per ring bin, plane units at depth 1
+uniform vec4 u_tPop[TESS_POP_SLOTS];  // per pop: height, ring, seed, 0
+
+vec2 tessFlipDir(vec2 c) {
+  vec2 d = c - u_tRing.xy;
+  float l = length(d);
+  return l > 1e-4 ? d / l : vec2(1.0, 0.0);
+}
+#ifndef TESS_FLIP_DIR
+#define TESS_FLIP_DIR(c) tessFlipDir(c)
+#endif
+
+float tessRamp(float x, float w, out float slope) {
+  float u = clamp(x / w, 0.0, 1.0);
+  slope = (x > 0.0 && x < w) ? (2.0 / w) * (1.0 - u) : 0.0;
+  return u * (2.0 - u);
+}
+
+// Block profile 0 (groove) … 1 (top) from the tile distance; slope = d/dd.
+float tessProfile(float d, out float slope) {
+  float sb;
+  float sd;
+  float b = tessRamp(d, RELIEF_BEVEL, sb);
+  float dm = tessRamp(d, RELIEF_DOME, sd);
+  slope = mix(sb, sd, u_tRelief.y);
+  return mix(b, dm, u_tRelief.y);
+}
+
+float tessLiftAt(float ring) {
+  float x = clamp(ring, 0.0, 1.0) * float(TESS_LIFT_BINS - 1);
+  int i = int(min(floor(x), float(TESS_LIFT_BINS - 2)));
+  return mix(u_tLift[i], u_tLift[i + 1], x - float(i));
+}
+
+float tessPopAt(vec2 cell, float ring) {
+  float h = 0.0;
+  for (int k = 0; k < TESS_POP_SLOTS; k++) {
+    vec4 pp = u_tPop[k];
+    if (pp.x > 0.0 && abs(ring - pp.y) < POP_BAND && tessHash12(cell * 1.7 + pp.z) < POP_DENSITY) h += pp.x;
+  }
+  return h;
+}
+
+struct TessPlate {
+  Tile t;       // the tile at the surface point (on a turning card: at the card's own point)
+  mat2 J;       // d(tile point)/dp
+  float m;      // blend at p
+  float h;      // height (plane units)
+  vec2 grad;    // dh/dp
+  float prof;   // block profile 0 (groove) … 1 (top)
+  float face;   // 0 front (u_tCls), 1 back (u_tClsNext)
+  float pit;    // 1 where a card has turned up off its bed and the bed shows
+};
+
+// The block at p. A card's footprint is its tile squeezed by |cos θ| across the axis in the
+// warped plane (q), so the tile under p maps to the card's point q + b (x/|cos θ| − x); outside
+// the squeezed tile is the bare bed. The back is drawn unmirrored, so at θ = π the card is the
+// tile itself in its new colour and the shift lands without a jump.
+TessPlate tessPlate(vec2 p) {
+  TessPlate r;
+  mat2 J0;
+  vec2 q = tessWarp(p, J0, r.m);
+  r.t = tessTile(q);
+  r.J = J0;
+  float ring = TESS_RING(r.t.centre);
+  float fade = smoothstep(0.0, 1.0, clamp((u_tInvert.x - ring) / u_tInvert.y + 0.5, 0.0, 1.0));
+  float th = 3.14159265 * fade;
+  float sn = sin(th);
+  float cs = cos(th);
+  float lift = u_tRelief.x * (tessLiftAt(ring) * (1.0 - LIFT_VARY + 2.0 * LIFT_VARY * tessHash12(r.t.cell * 0.731 + 3.7)) + tessPopAt(r.t.cell, ring));
+  r.face = cs < 0.0 ? 1.0 : 0.0;
+  r.pit = 0.0;
+  float ac = 1.0;
+  float h = lift;
+  vec2 gq = vec2(0.0);   // dh/dq of the card's tilt
+  mat2 C = mat2(1.0);    // d(card point)/dq
+  if (sn > 1e-3) {
+    vec2 b = TESS_FLIP_DIR(r.t.centre);
+    ac = max(abs(cs), 0.02);
+    float x = dot(q - r.t.centre, b);
+    float xc = x / ac;
+    Tile t2 = tessTile(q + b * (xc - x));
+    if (t2.cell != r.t.cell) {
+      r.pit = 1.0;
+      r.h = 0.0;
+      r.grad = vec2(0.0);
+      r.prof = 0.0;
+      return r;
+    }
+    r.t = t2;
+    float sg = cs >= 0.0 ? 1.0 : -1.0;
+    h += sn * (CARD_HALF + u_tRelief.w) + clamp(xc, -CARD_HALF, CARD_HALF) * sn * sg;
+    gq = abs(xc) < CARD_HALF ? (sn * sg / ac) * b : vec2(0.0);
+    C = mat2(1.0) + outerProduct(b, b) * (1.0 / ac - 1.0);
+    r.J = C * J0;
+  }
+  float slope;
+  r.prof = tessProfile(r.t.dist, slope);
+  float blk = u_tRelief.x * RELIEF_BLOCK * ac;
+  h += blk * r.prof;
+  r.grad = transpose(J0) * (gq + (blk * slope) * (C * r.t.n));
+  if (h <= 0.0) r.grad = vec2(0.0);
+  r.h = clamp(h, 0.0, u_tRelief.z);
+  return r;
+}
+
+// Tiles too small to carve settle flat (as the print fades them to their mean).
+float tessReliefFade(mat2 J, mat2 S) {
+  float pxq = sqrt(abs(determinant(J * S)));
+  return smoothstep(3.0, 10.0, 0.5 / max(pxq, 1e-9) * u_tPxScale);
+}
+
+vec3 tessRelief(vec2 p, mat2 S) {
+  TessPlate r = tessPlate(p);
+  float k = tessReliefFade(r.J, S);
+  return vec3(r.h * k, r.grad * k);
+}
+
+vec4 tessShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail) {
+  r = tessPlate(p);
+  detail = 0.0;
+  mat2 M = r.J * S;
+  float pxq = sqrt(abs(determinant(M)));
+  float fpx = 1.0 / u_tPxScale;
+  float k = tessReliefFade(r.J, S);
+  r.h *= k;
+  r.grad *= k;
+  if (r.pit > 0.5) return vec4(mix(u_tInk, u_tPaper, 0.22), 1.0);
+  Tile t = r.t;
+  float dpx = t.dist / max(length(transpose(M) * t.n), 1e-9);
+
+  // No registration offset or cross-fade on the block: the card's face picks the colour.
+  int fc = TESS_CLASS(t.cls, t.centre);
+  vec3 fill = r.face > 0.5 ? u_tClsNext[fc] : u_tCls[fc];
+  bool dark = dot(fill, vec3(0.2126, 0.7152, 0.0722)) < 0.18;
+  vec3 cut = dark ? u_tPaper : u_tInk;
+  float bandv = u_tBands[int(clamp(TESS_RING(t.centre) * 16.0, 0.0, 15.0))];
+  float tileSize = 0.5 / pxq;
+  vec3 col = fill;
+
+  if (u_tHatch > 0.0) {
+    float spacing = 0.03 * (1.0 - 0.18 * bandv);
+    float x = t.dist / spacing;
+    float idx = floor(x);
+    float lineW = (dark ? 0.26 : 0.16) * (0.75 + 0.5 * tessNoise(t.uv * 5.0 + vec2(float(t.orient) * 3.1, float(t.cls) * 7.3))) * (0.7 + 0.6 * bandv);
+    float reach = mix(1.0, 6.0, u_tHatch);
+    float taper = 1.0 - smoothstep(reach - 1.0, reach + 0.5, idx);
+    float fx = (fract(x) - 0.5) * spacing / pxq;
+    float g = tessBand(fx, lineW * taper * spacing / pxq * 0.5) * step(0.5, idx);
+    g *= smoothstep(1.8, 4.0, spacing / pxq);
+    col = mix(col, cut, g * min(1.0, u_tHatch * 1.6));
+    detail -= GOUGE_DEPTH * g;                       // gouges are cut into the block
+  }
+
+  vec4 feat = mix(u_tFeatA, u_tFeatB, r.m);
+  float f = tessFeatures(t.uv, feat, 2.0 * pxq, fpx) * smoothstep(6.0 * fpx, 16.0 * fpx, tileSize);
+  col = mix(col, cut, f);
+  detail += FEATURE_RAISE * f;                       // eyes, spines and stars stand proud
+
+  float spread = 1.0 + 0.22 * (tessNoise(t.uv * 9.0) - 0.5) + 0.12 * (tessNoise(gl_FragCoord.xy * 0.35) - 0.5);
+  col = mix(col, u_tInk, tessBand(dpx, u_tInkW * spread * fpx));
+  col = mix(u_tAvg, col, smoothstep(3.0 * fpx, 10.0 * fpx, tileSize));
+  detail *= u_tRelief.x * k;
+  return vec4(col, 1.0);
+}
+#endif

@@ -1,6 +1,7 @@
 // @ts-check
 // The music that drives the carved relief (lib/tess-music.js): beat waves of lifting tiles,
 // the spectrum's heave by ring, onset pops and the card-flip wave.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   BEAT_ACCENT,
@@ -11,6 +12,7 @@ import {
   createTessState,
   LIGHT_DEFAULT,
   LIGHT_ELEVATION,
+  LIFT_VARY,
   lightDir,
   RELIEF_DEFAULT,
   reliefParam,
@@ -34,7 +36,7 @@ import {
   WAVE_SETTLE,
   wavePulse,
 } from "./tess-music.js";
-import { CARD_HALF, RELIEF_BLOCK } from "./tess.js";
+import { CARD_HALF, RELIEF_BEVEL, RELIEF_BLOCK, RELIEF_DOME } from "./tess.js";
 
 const DT = 1 / 60;
 
@@ -424,5 +426,26 @@ describe("tess state with relief", () => {
     for (let i = 0; i < 180; i++) s = st.step({ ...drums(i), silent: true }, DT, opts({ relief: 0.6 }));
     expect(Math.max(...s.lift)).toBeLessThan(1e-3);
     for (let k = 0; k < POP_SLOTS; k++) expect(s.pops[k * 4]).toBe(0); // heights (the rest are ring, seed)
+  });
+});
+
+describe("tess.glsl relief section", () => {
+  const glsl = readFileSync(new URL("../../shaders/tess/tess.glsl", import.meta.url), "utf8");
+
+  it("uses the JS mirror's constants", () => {
+    const def = (/** @type {string} */ name) => Number((glsl.match(new RegExp(`#define ${name} (\\S+)`)) ?? [])[1]);
+    expect(def("RELIEF_BLOCK")).toBe(RELIEF_BLOCK);
+    expect(def("RELIEF_BEVEL")).toBe(RELIEF_BEVEL);
+    expect(def("RELIEF_DOME")).toBe(RELIEF_DOME);
+    expect(def("CARD_HALF")).toBe(CARD_HALF);
+    expect(def("LIFT_VARY")).toBe(LIFT_VARY);
+    expect(def("TESS_LIFT_BINS")).toBe(LIFT_BINS);
+    expect(def("TESS_POP_SLOTS")).toBe(POP_SLOTS);
+  });
+
+  it("is opt-in: everything after #ifdef TESS_RELIEF, so surfaces that don't define it compile as before", () => {
+    const at = glsl.indexOf("#ifdef TESS_RELIEF");
+    expect(at).toBeGreaterThan(glsl.lastIndexOf("vec4 tessShade(vec2 p, float px)"));
+    for (const name of ["tessRelief(", "tessShadeRelief(", "u_tLift", "u_tPop", "u_tRelief"]) expect(glsl.indexOf(name)).toBeGreaterThan(at);
   });
 });
