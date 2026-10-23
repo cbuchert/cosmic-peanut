@@ -3,6 +3,80 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tessellations: the engine and Metamorphosis (2026-10-22)
+
+**Metamorphosis** (`metamorphosis`, webgl2) is the first of a series of interlocking-tiling
+visualizers: a p4 or p3 tiling whose tiles turn into hooked, lobed, finned and star-like
+creatures, printed like a multi-block woodcut (bold key-block outlines, gouges echoing each
+contour, colour blocks slightly out of register, paper fibre and tooth). Motifs, palettes and
+names are original; the palettes only follow the ink colours of 1930s–60s woodcuts.
+
+- **Tiling engine** (`src/lib/tess.js`, `shaders/tess/tess.glsl`): a displacement field
+  `d(p) = Σ A cos(2π k·p + φ)` symmetrized over the group's rotations (k on the dual lattice, so
+  it's lattice-periodic), applied as 4 composed steps `p + d(p)`. Each step's Lipschitz bound
+  (Σ |A| 2π|k|, plus |∇m|·(D_A + D_B) for the spatial blend m between two coefficient sets) is
+  fitted to 0.85, so every step, and so the warp, is a homeomorphism: the tiles always tile.
+  One step alone only moves points ~0.03 units (the bound is conservative); four give real hooks.
+  Tiles: p4 half-unit squares in a checkerboard (2 classes), p3 the three rhombi of each hexagon
+  (3 classes; same-class tiles are translates ≥ 1 apart, edges are 1/√3, so never adjacent).
+  Colour slot = (class + shift) mod n with n ≥ 3 distinct tile colours, so any figure/ground
+  shift is still a valid colouring. Tile-local uv (0–1) turns with the tile for the features.
+- **Music** (`src/lib/tess-music.js`): morph targets step once a bar (4 tempo beats; strong
+  onsets ≥ 0.75, ≥ 2 s apart, without a tempo), easing over 1.5 beats (≥ 0.6 s); the smoothed
+  centroid (0.05–0.3 of Nyquist) picks lobed → finned → star → hooked; Morph sets how far each
+  step travels. Bass and an eased beat surge (80 ms smoothstep rise, gone by 0.9 beat, then a
+  0.12 s lag) set the drift. Phrase changes (32 beats) or onsets ≥ 0.92 sweep a figure/ground
+  front across the rings of tiles over 3.2 s, ≥ 8 s apart; Reduce flashing: 19.2 s, ≥ 24 s
+  apart, a narrower front. Reduce motion: glide × 0.25, steps every 2 bars, eases × 4.
+  Reactivity (0–2) scales every audio effect; 0 also stops inversions.
+- **Cost**: WebKit harness, 2560×1440, Quality high, `sync=1` (GPU included): p50 6–8 ms,
+  p99 7–11 ms, 58.8 fps; rendering 3 frames per vsync drops to 55.6 fps, so the GPU part is
+  ~5.5 ms. CPU (no sync) p50 < 0.1 ms. Flash check under a 10 Hz strobe: 0 flashes/s at a 5 %
+  threshold, reduceFlashing on and off. Untested on the M1 reference machine; Quality medium /
+  low (0.75 / 0.5 render scale) are there for it.
+
+**The seam for new surfaces** (floor, Droste, hyperbolic, sphere, torus …): a surface is a
+fragment shader that maps its pixel to the tiling plane and calls the engine.
+
+```glsl
+#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 o;
+// optional: float myRing(vec2 c) { … }  #define TESS_RING(c) myRing(c)   (before the include)
+// #include tess
+uniform vec2 u_res;                 // set by the pipeline: print-target size
+void main() {
+  vec2 p = …;                       // plane point (lattice units) for this pixel
+  mat2 S = …;                       // dp/dpixel (target px); e.g. mat2(dFdx(p), dFdy(p))
+  o = tessShade(p, S);              // linear RGB, a = 1; or tessShade(p, float px) if isotropic
+  // apply the surface's own fog/sky to o.rgb here
+}
+```
+
+`S` keeps outlines, gouges and features a constant print weight in pixels however the map
+stretches the plane (use an analytic S where p has a seam, e.g. log-polar's angle wrap).
+`TESS_RING(c)` gives a tile (by its plane centre c) its ring, 0 near/centre … 1 far/edge, for the
+figure/ground front and the spectrum rings; the default is `|c − u_tRing.xy| / u_tRing.z`.
+On the JS side:
+
+```js
+import { createTessPipeline } from "./lib/tess-gl.js";
+import { createTessState, renderScale } from "./lib/tess-music.js";
+const tess = await createTessPipeline(ctx, "shaders/tess/<surface>.frag");
+const state = createTessState();
+tess.resize(renderScale(ctx.params.quality));          // and tess.resize() on ctx resize
+// frame(audio, time):
+const s = state.step(audio, time.dt, { symmetry, palette, reactivity, speed, morph, ink,
+  hatching, height: ctx.size.height, reduceMotion: ctx.reduceMotion, reduceFlashing: ctx.reduceFlashing });
+tess.render(s, (gl, u, w, h) => { /* the surface's uniforms, incl. u_tRing unless TESS_RING */ });
+```
+
+`s.speed` / `s.travel` (glide), `s.env` (beat envelope), `s.stepped`, `s.family`, `s.shift` are
+there for the surface's own motion. Plane offsets can wrap every `BLEND_PERIOD` (6) lattice
+steps (the tiling and the blend wave both repeat there). Shared GLSL is spliced in with
+`// #include tess`, like Laminar's `// #include common`.
+
 ## Beat tracking: Ballroom harness and a new tracker (2026-10-22)
 
 `uv run python -m tools.beat_eval` streams all 698 Ballroom clips hop by hop through the real
