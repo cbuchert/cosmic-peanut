@@ -805,9 +805,10 @@ def test_poincare_disk_manifest():
     # Option order is lib/tess-disk.js TILINGS, lib/tess.js PALETTES, tess-music QUALITIES.
     assert params["tiling"]["options"] == ["{7,3}", "{5,4}", "{4,5}", "{6,4}"]
     assert params["tiling"]["default"] == "{7,3}"
-    # lib/disk3d.js SCENES and CAMERAS; flat stays the default until the sphere scene is done.
+    # lib/disk3d.js SCENES and CAMERAS; the sphere scene is the default, flat the print alone.
     assert params["scene"]["options"] == ["flat", "sphere"]
-    assert params["scene"]["default"] == "flat"
+    assert params["scene"]["default"] == "sphere"
+    assert params["camera"]["default"] == "auto"
     assert params["camera"]["options"] == ["auto", "still"]
     sp = params["spin"]
     assert (sp["min"], sp["max"], sp["default"]) == (0, 2, 1)
