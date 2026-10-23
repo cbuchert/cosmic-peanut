@@ -17,6 +17,9 @@
 import { createProgram, createTarget } from "./gl.js";
 
 const DIR = "shaders/tess/";
+/** Texture units of the atlas motif's field and art textures (lib/atlas-gl.js binds them). */
+export const ATLAS_FIELD_UNIT = 1;
+export const ATLAS_ART_UNIT = 2;
 /** Paper texture strength in the composite. */
 const GRAIN = 1;
 
@@ -34,9 +37,18 @@ export async function createTessPipeline(ctx, surface) {
   const [vs, engine, paperFs, surfFs] = await Promise.all(
     [DIR + "fullscreen.vert", DIR + "tess.glsl", DIR + "paper.frag", surface].map((f) => ctx.assets.text(f)),
   );
-  const prog = createProgram(gl, vs, surfFs.replace("// #include tess", engine), surface);
+  // A surface that defines TESS_ATLAS also gets the bestiary motif (shaders/tess/atlas.glsl).
+  const atlas = surfFs.includes("#define TESS_ATLAS") ? await ctx.assets.text(DIR + "atlas.glsl") : "";
+  const prog = createProgram(gl, vs, surfFs.replace("// #include tess", engine + atlas), surface);
   const paper = createProgram(gl, vs, paperFs, DIR + "paper.frag");
   const u = prog.u;
+  if (atlas) {
+    // The atlas samplers live on units 1 and 2 (lib/atlas-gl.js binds them there); left on
+    // unit 0 they would alias the print target's texture and WebGL refuses the draw.
+    gl.useProgram(prog.program);
+    gl.uniform1i(u.u_aField, ATLAS_FIELD_UNIT);
+    gl.uniform1i(u.u_aArt, ATLAS_ART_UNIT);
+  }
   const vao = gl.createVertexArray();
   const target = createTarget(gl);
   let scale = 1;

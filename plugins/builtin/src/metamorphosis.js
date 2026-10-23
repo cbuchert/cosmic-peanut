@@ -15,7 +15,15 @@
  * This surface is the flat one: the plane fills the screen and drifts. lib/tess-gl.js renders
  * the print at the Quality scale and presses it into paper at full resolution. frame()
  * allocates nothing.
+ *
+ * Creatures: "abstract" (default) is the warp above; a group ("fish", "birds", "reptiles",
+ * "mammals") or "all" prints the bestiary's animal tiles instead (plugins/builtin/tiles, through
+ * the atlas motif: lib/atlas.js, lib/atlas-gl.js), morphing between compatible species on the
+ * music's steps; "<group>/<name>" (e.g. p.creatures=fish/koi in the harness) shows one species.
  */
+import { createAtlas } from "./lib/atlas-gl.js";
+import { createCreatures, creatureList } from "./lib/atlas.js";
+import { blendShapes, createShape, loadBestiary } from "./lib/bestiary.js";
 import { createTessPipeline } from "./lib/tess-gl.js";
 import { BLEND_PERIOD, createTessState, renderScale, symmetryName } from "./lib/tess-music.js";
 
@@ -28,6 +36,10 @@ const HEADING_RATE = 0.031;
 const TURN = 0.006;
 /** Ring scale: the screen's corners are ring 1 (half-diagonal of 16:9 in half-short-side units). */
 const RING_SPAN = 2.05;
+/** Atlas mode: plane units per half the short side (animals larger than the abstract tiles). */
+const ATLAS_ZOOM = 1.8;
+/** Atlas mode: the offset wraps every WRAP cells of the tile's lattice (class colourings repeat). */
+const WRAP = 6;
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
@@ -54,19 +66,73 @@ export default async function create(ctx) {
 
   tess.resize(renderScale(ctx.params.quality));
 
+  // The bestiary, loaded the first time Creatures leaves "abstract".
+  const creatures = createCreatures();
+  const shape = createShape();
+  const morphIn = { stepped: false, morph: 0.7, reduceMotion: false };
+  /** @type {Awaited<ReturnType<typeof createAtlas>> | null} */
+  let atlas = null;
+  /** @type {import('./lib/bestiary.js').Species[]} */
+  let bestiary = [];
+  let loading = false;
+  let selected = "";
+  let atlasOn = false;
+  let zoom = ZOOM;
+  const basis = new Float64Array(4);
+  let tileState = /** @type {ReturnType<typeof createTessState> | null} */ (null);
+
+  async function select(/** @type {string} */ value) {
+    selected = value;
+    if (value === "abstract") return;
+    if (!atlas && !loading) {
+      loading = true;
+      try {
+        bestiary = await loadBestiary(ctx.assets, ctx.log);
+        const a = await createAtlas(ctx);
+        a.setLibrary(bestiary); // plain tiles have no art: their sets are empty
+        atlas = a;
+      } catch (e) {
+        ctx.log(`bestiary: ${e instanceof Error ? e.message : e}`);
+      }
+      loading = false;
+    }
+    const ids = creatureList(selected, bestiary.map((sp) => sp.id));
+    creatures.setSpecies(bestiary.filter((sp) => ids.includes(sp.id)));
+  }
+  await select(String(ctx.params.creatures ?? "abstract"));
+
   /** @type {import('./lib/tess-gl.js').SetSurface} */
   const surface = (gl, u) => {
     gl.uniform2f(u.u_O, ox, oy);
     gl.uniform2f(u.u_rot, cr, sr);
-    gl.uniform1f(u.u_zoom, ZOOM);
-    gl.uniform3f(u.u_tRing, ox, oy, ZOOM * RING_SPAN);
+    gl.uniform1f(u.u_zoom, zoom);
+    gl.uniform3f(u.u_tRing, ox, oy, zoom * RING_SPAN);
+    if (atlasOn && atlas && tileState) atlas.bind(gl, u, tileState, opts.palette, creatures.dip);
+    else if (atlas) atlas.unbind(gl, u);
   };
+
+  /** Wrap (ox, oy) into `period` cells of the lattice (a.x, a.y, b.x, b.y) × scale. */
+  function wrapBy(/** @type {ArrayLike<number>} */ L, /** @type {number} */ sc, /** @type {number} */ period) {
+    const ax = L[0] * sc;
+    const ay = L[1] * sc;
+    const bx = L[2] * sc;
+    const by = L[3] * sc;
+    const det = ax * by - bx * ay;
+    let la = (ox * by - oy * bx) / det;
+    let lb = (oy * ax - ox * ay) / det;
+    la -= period * Math.floor(la / period);
+    lb -= period * Math.floor(lb / period);
+    ox = la * ax + lb * bx;
+    oy = la * ay + lb * by;
+  }
 
   return {
     frame(audio, time) {
       const dt = time.dt;
       const p = ctx.params;
-      opts.symmetry = symmetryName(p.symmetry);
+      atlasOn = selected !== "abstract" && atlas !== null && creatures.active;
+      // The atlas's tile types have 2 or 3 colour classes: the p3 state gives all three colours.
+      opts.symmetry = atlasOn ? "p3" : symmetryName(p.symmetry);
       opts.palette = String(p.palette);
       opts.reactivity = Number(p.reactivity);
       opts.speed = Number(p.speed);
@@ -77,6 +143,18 @@ export default async function create(ctx) {
       opts.reduceMotion = ctx.reduceMotion;
       opts.reduceFlashing = ctx.reduceFlashing;
       const s = state.step(audio, dt, opts);
+      tileState = s;
+      zoom = atlasOn ? ATLAS_ZOOM : ZOOM;
+      if (atlasOn && atlas) {
+        morphIn.stepped = s.stepped;
+        morphIn.morph = opts.morph;
+        morphIn.reduceMotion = ctx.reduceMotion;
+        const c = creatures.step(dt, morphIn);
+        if (c.changed) {
+          blendShapes(c.a, c.b, c.w, shape);
+          atlas.bake(shape, c.a.id, c.b.id, c.erodeA, c.erodeB, c.a.dome + (c.b.dome - c.a.dome) * c.w, c.moving);
+        }
+      }
 
       // Drift along a slowly turning heading; the view turns a little as it travels.
       const step = s.travel - lastTravel;
@@ -86,15 +164,17 @@ export default async function create(ctx) {
       ox += Math.cos(heading) * DRIFT * step;
       oy += Math.sin(heading) * DRIFT * step;
       // Keep the offset small: the tiling and the metamorphosis wave both repeat every
-      // BLEND_PERIOD lattice steps, so wrap there (in lattice coordinates).
-      const b = s.group.basis;
-      const det = b[0][0] * b[1][1] - b[1][0] * b[0][1];
-      let la = (ox * b[1][1] - oy * b[1][0]) / det;
-      let lb = (oy * b[0][0] - ox * b[0][1]) / det;
-      la -= BLEND_PERIOD * Math.floor(la / BLEND_PERIOD);
-      lb -= BLEND_PERIOD * Math.floor(lb / BLEND_PERIOD);
-      ox = la * b[0][0] + lb * b[1][0];
-      oy = la * b[0][1] + lb * b[1][1];
+      // BLEND_PERIOD lattice steps, so wrap there (in lattice coordinates). The atlas wraps by
+      // WRAP cells of its own lattice (plane units), where its colouring repeats too.
+      if (atlasOn && atlas) wrapBy(atlas.uniforms.L, atlas.uniforms.scale, WRAP);
+      else {
+        const b = s.group.basis;
+        basis[0] = b[0][0];
+        basis[1] = b[0][1];
+        basis[2] = b[1][0];
+        basis[3] = b[1][1];
+        wrapBy(basis, 1, BLEND_PERIOD);
+      }
       const turn = TURN * s.travel;
       cr = Math.cos(turn);
       sr = Math.sin(turn);
@@ -108,10 +188,12 @@ export default async function create(ctx) {
 
     params(changed) {
       if ("quality" in changed) tess.resize(renderScale(ctx.params.quality));
+      if ("creatures" in changed) select(String(ctx.params.creatures));
     },
 
     dispose() {
       tess.dispose();
+      atlas?.dispose();
     },
   };
 }

@@ -7,6 +7,7 @@ import {
   defaultCorners,
   FLAT,
   frameOf,
+  loadBestiary,
   locate,
   parseSpecies,
   plainOf,
@@ -30,6 +31,7 @@ const TYPE_NAMES = /** @type {(keyof typeof TYPES)[]} */ (Object.keys(TYPES));
 /**
  * A species file with gently wavy free edges (small enough to stay simple), random per seed.
  * @param {keyof typeof TYPES} type @param {number} seed @param {number} [amp]
+ * @returns {any}
  */
 function wavy(type, seed, amp = 0.12) {
   const r = rng(seed);
@@ -84,9 +86,9 @@ function relations(type, V) {
   switch (type) {
     case "TTTTTT":
       return [
-        [3, 0, shift(...sub(3, 1)), true],
-        [4, 1, shift(...sub(4, 2)), true],
-        [5, 2, shift(...sub(5, 3)), true],
+        [3, 0, shift(sub(3, 1)[0], sub(3, 1)[1]), true],
+        [4, 1, shift(sub(4, 2)[0], sub(4, 2)[1]), true],
+        [5, 2, shift(sub(5, 3)[0], sub(5, 3)[1]), true],
       ];
     case "TGTG": {
       const c = (V[2] + V[6]) / 2; // glide axis x = (w + s) / 2
@@ -341,8 +343,12 @@ describe("parseSpecies", () => {
   });
 });
 
-describe("the seeds against the tool (tests/fixtures/tiles_golden.json)", async () => {
-  const { readFileSync } = await import("node:fs");
+// Node built-ins are loaded untyped so node's globals don't leak into the DOM-typed program.
+/** @type {(specifier: string) => Promise<any>} */
+const nodeImport = (specifier) => import(specifier);
+const { readFileSync } = await nodeImport("node:fs");
+
+describe("the seeds against the tool (tests/fixtures/tiles_golden.json)", () => {
   const root = new URL("../../../../", import.meta.url);
   const golden = JSON.parse(readFileSync(new URL("tests/fixtures/tiles_golden.json", root), "utf8"));
   const load = (/** @type {string} */ id) =>
@@ -368,5 +374,29 @@ describe("the seeds against the tool (tests/fixtures/tiles_golden.json)", async 
       const s = blendShapes(load(b.a), load(b.b), b.w, createShape());
       near(s.outline.subarray(0, s.n * 2), b.outline);
     }
+  });
+});
+
+describe("loadBestiary", () => {
+  it("reads every group's index, skips missing groups and bad files (logging them), sorted by id", async () => {
+    /** @type {Record<string, any>} */
+    const files = {
+      "tiles/fish/index.json": { species: ["koi", "bad"] },
+      "tiles/fish/koi.json": { ...wavy("TGTG", 1), name: "Koi" },
+      "tiles/fish/bad.json": { ...wavy("TGTG", 1), type: "nope" },
+      "tiles/birds/index.json": { species: ["tern"] },
+      "tiles/birds/tern.json": { ...wavy("TTTTTT", 1), group: "birds" },
+    };
+    /** @type {string[]} */
+    const logs = [];
+    const assets = {
+      json: async (/** @type {string} */ p) => {
+        if (!(p in files)) throw new Error(`404 ${p}`);
+        return files[p];
+      },
+    };
+    const sp = await loadBestiary(assets, (/** @type {string} */ m) => logs.push(m));
+    expect(sp.map((s) => s.id)).toEqual(["birds/tern", "fish/koi"]);
+    expect(logs.some((m) => m.includes("fish/bad"))).toBe(true);
   });
 });

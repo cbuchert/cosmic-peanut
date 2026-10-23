@@ -6,6 +6,7 @@ precision highp float;
 in vec2 v_uv;
 out vec4 o;
 
+#define TESS_ATLAS
 // #include tess
 
 uniform vec2 u_res;     // target size (px)

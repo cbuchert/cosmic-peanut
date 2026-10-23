@@ -11,7 +11,8 @@
 // by the figure/ground front and the spectrum rings); the default is the distance of the tile's
 // centre c from u_tRing.xy over u_tRing.z. Optional hook: define TESS_CLASS(cls, c) to recolour a
 // tile from its regular class and centre (0–2, an index into u_tCls; e.g. a surface whose charts
-// meet with a turn that swaps the classes); the default keeps cls.
+// meet with a turn that swaps the classes); the default keeps cls. Optional: define TESS_ATLAS to
+// get the bestiary's animal tiles as a second motif (shaders/tess/atlas.glsl, u_tMotif).
 //
 // Mirrors src/lib/tess.js (tested there): the symmetric displacement field (tessField ↔
 // fieldAt), the regular tile test (tessTile ↔ tileAt). Plane units: the lattice (p4: unit
@@ -213,6 +214,14 @@ float tessFeatures(vec2 uv, vec4 feat, float uvPx, float fpx) {
   return max(max(e, spine), max(fins, star));
 }
 
+#ifdef TESS_ATLAS
+// The atlas motif (shaders/tess/atlas.glsl, spliced in after this file when a surface defines
+// TESS_ATLAS): bestiary tiles instead of the warp's creatures while u_tMotif is 1.
+uniform int u_tMotif;
+vec3 tessArt(vec3 col, vec3 fill, vec3 cut, float fade, float tileSize, float fpx);
+vec4 tessAtlasShade(vec2 p, mat2 S);
+#endif
+
 // The print look for one pixel of a tile, for any surface (tessShade below is the flat
 // engine's): t = the tile under the pixel (uv, dist, orient, cls, centre), tf = the tile the
 // colour block shows there (the pixel offset by the registration u_tReg); pxq = plane units per
@@ -252,6 +261,9 @@ vec4 tessPrint(Tile t, Tile tf, float pxq, float tileSize, float dpx, float m, v
   vec4 feat = mix(u_tFeatA, u_tFeatB, m);
   float f = tessFeatures(t.uv, feat, 2.0 * pxq, fpx);
   col = mix(col, cut, f * smoothstep(6.0 * fpx, 16.0 * fpx, tileSize));
+#ifdef TESS_ATLAS
+  col = tessArt(col, fill, cut, fade, tileSize, fpx);
+#endif
 
   // Key block: bold outlines, a little ink spread where the paper takes more.
   float spread = 1.0 + 0.22 * (tessNoise(q * 9.0) - 0.5) + 0.12 * (tessNoise(gl_FragCoord.xy * 0.35) - 0.5);
@@ -263,6 +275,9 @@ vec4 tessPrint(Tile t, Tile tf, float pxq, float tileSize, float dpx, float m, v
 }
 
 vec4 tessShade(vec2 p, mat2 S) {
+#ifdef TESS_ATLAS
+  if (u_tMotif == 1) return tessAtlasShade(p, S);
+#endif
   mat2 J;
   float m;
   vec2 q = tessWarp(p, J, m);

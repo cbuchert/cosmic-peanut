@@ -376,6 +376,7 @@ export function parseSpecies(json, path) {
 
   /** @type {Float64Array[]} */
   const edges = [];
+  /** @type {string[]} */
   const sig = [type];
   for (let e = 0; e < info.edges; e++) {
     if (!info.free.includes(e)) {
@@ -656,4 +657,37 @@ export function classOf(s, h) {
   const f = s.frame;
   const c = f.copyCls[h.k] + h.i * f.ca + h.j * f.cb;
   return ((c % f.nc) + f.nc) % f.nc;
+}
+
+/**
+ * Every species in the bestiary: each group's tiles/<group>/index.json (written by
+ * `uv run python -m tools.tiles index`, one file per group so designers never share one), then
+ * its species files. A missing group is empty; a file that fails to parse is logged and skipped.
+ * @param {{ json: (path: string) => Promise<any> }} assets @param {(msg: string) => void} log
+ * @returns {Promise<Species[]>}
+ */
+export async function loadBestiary(assets, log) {
+  /** @type {Species[]} */
+  const out = [];
+  await Promise.all(
+    GROUPS.map(async (g) => {
+      /** @type {string[]} */
+      let names = [];
+      try {
+        names = (await assets.json(`tiles/${g}/index.json`)).species ?? [];
+      } catch {
+        return;
+      }
+      await Promise.all(
+        names.map(async (n) => {
+          try {
+            out.push(parseSpecies(await assets.json(`tiles/${g}/${n}.json`), `tiles/${g}/${n}.json`));
+          } catch (e) {
+            log(`bestiary: skipped ${g}/${n}: ${e instanceof Error ? e.message : e}`);
+          }
+        }),
+      );
+    }),
+  );
+  return out.sort((a, b) => (a.id < b.id ? -1 : 1));
 }
