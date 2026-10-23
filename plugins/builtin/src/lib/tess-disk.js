@@ -664,6 +664,7 @@ export function createDiskView(name) {
     folder.fold(c[0], c[1], v.e0, E, pt, g);
     v.e0.set(E);
     mobiusCompose(m, g, m);
+    mobiusApply(g, v.tracked[0], v.tracked[1], v.tracked);
     // Re-project onto translate(T(0)) ∘ rotate(arg T′(0)).
     mobiusApply(m, 0, 0, c);
     const k = Math.hypot(c[0], c[1]);
@@ -688,12 +689,27 @@ export function createDiskView(name) {
     e0: new Int32Array([1, 0, 0, 1]),
     /** T(0), the tiling point at the screen's centre. */
     centre: new Float64Array(2),
+    /** A tiling point carried through the rebases (the beat's impact), so it stays on its tile. */
+    tracked: new Float64Array(2),
     /** Direction the picture flows on screen (rad, y up). */
     flow: 0,
     /** @param {unknown} n Tiling option */
     setTiling(n) {
       folder = createFolder(n);
       v.e0.set([1, 0, 0, 1]);
+      rebase();
+    },
+    /**
+     * Move the picture by hyperbolic distance `dist` along the screen direction (dx, dy) (a beat
+     * kick): T ← T ∘ E with E the translation taking that point to the centre, then rebase.
+     * @param {number} dist @param {number} dx @param {number} dy
+     */
+    nudge(dist, dx, dy) {
+      const l = Math.hypot(dx, dy);
+      if (!(dist > 0) || l === 0) return;
+      const r = Math.tanh(dist / 2) / l;
+      mobiusTranslate(e, -r * dx, -r * dy);
+      mobiusCompose(m, m, e);
       rebase();
     },
     /** @param {{ kind: string, dx: number, dy: number }} ev CSS px (y down) */

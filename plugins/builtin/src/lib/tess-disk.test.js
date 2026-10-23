@@ -557,6 +557,34 @@ describe("the view: drift through the plane, drag to steer", () => {
     for (let i = 0; i < 8; i++) expect(view.m[i]).toBeCloseTo(before.m[i], 9);
   });
 
+  it("a beat kick nudges the plane by an exact isometry, and a tracked point stays on its tile", () => {
+    const view = createDiskView("{7,3}");
+    view.step(2.7, DT, 300, false);
+    // Track the tiling point under screen (0.3, −0.2).
+    mobiusApply(view.m, 0.3, -0.2, z);
+    view.tracked[0] = z[0];
+    view.tracked[1] = z[1];
+    tiler.tileAt(z[0], z[1], null, a, view.e0);
+    for (let i = 0; i < 400; i++) {
+      view.nudge(0.02, Math.cos(i), Math.sin(i));
+      view.step(0.03, DT, 300, false);
+      expect(view.m[8]).toBe(0);
+    }
+    tiler.tileAt(view.tracked[0], view.tracked[1], null, b, view.e0);
+    expect(b.kite).toBe(a.kite);
+    expect(b.u).toBeCloseTo(a.u, 4);
+    expect(b.v).toBeCloseTo(a.v, 4);
+    // A nudge moves the content at the centre by exactly that hyperbolic distance.
+    const before = snap(view);
+    view.nudge(0.4, 1, 0);
+    seen(before, 0, 0, a);
+    const r = Math.tanh(0.2);
+    seen(view, r, 0, b);
+    expect(b.kite).toBe(a.kite);
+    expect(b.u).toBeCloseTo(a.u, 6);
+    expect(b.v).toBeCloseTo(a.v, 6);
+  });
+
   it("switches tiling in place", () => {
     const view = createDiskView("{7,3}");
     const m = view.m;
