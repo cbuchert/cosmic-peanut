@@ -123,6 +123,68 @@ on a {7,3}, {5,4}, {4,5} or {6,4} tiling (`src/lib/tess-disk.js`, `shaders/tess/
   < 0.1 ms. The GPU was shared with other agents (Metamorphosis measured p50 9–22 ms in the same
   runs, against 6–8 ms in its own notes), so these numbers are noisy.
 
+**The 3D scene (Scene = sphere, the default since 2026-10-23).** A lacquered coin carrying the
+print floats in a large sphere tiled inside (Tiled Sphere's cube-sphere), turning the other way.
+Flat is the print alone and still renders byte-identically to b1700b2 (`run.py --shots --prefix
+_base/` against a `git archive` of b1700b2: default and {5,4}/watercolour/drums, black and light).
+- *Pieces:* `lib/disk3d.js` (tested): waveform rim (trigger, seam), coin spin (mids) and
+  spinning-plate tilt (bass, beat surge), counter-spin, beat kicks, `rippleLift`, `specLift`, the
+  music drive and the camera director (orbit, swoop, skim, pull-back; clearance, phrase moves,
+  drag, still). `tess-disk.js` view `nudge()` (exact kick) and `tracked` (impact point carried
+  through rebases). `shaders/tess/disk3d.frag`: ray-marched coin (waveform rim, brushed metal),
+  face = `diskShade` + lacquer (GGX, Fresnel, a cheap one-warp-step wall reflection), parallax
+  ripple/heave and lift shading, treble glints on gouges, AO, the wall (fogged paper), an ink
+  silhouette. Shared includes `disk.glsl`, `sphere.glsl`; `tess-gl.js` splices `// #include`.
+- *The music drive* (`createDrive`) paces the camera's path, the coin's spin (and so the
+  counter-spin) and the tiling's drift: 0.25 in silence (eased over 1.5 s), 0.6 with music at
+  average bass, + 1.2 × the passage's bass (lag 0.8 s: energy, not the beat) + 3 × an eased beat
+  surge (the beat envelope through two 35 ms lags). Times the Speed param for the drift and the
+  camera. The camera director takes `intensity` (surge + the passage's bass) and widens each
+  move's swing by it (lag 0.12 s): orbit and pull-back bob and lean in, the swoop rises higher and
+  closer, the skim dips. Kicks 2.4 hyperbolic units/s at the envelope's peak (was 0.9); ripple
+  0.1 world units high (was 0.05), reach 1.1 (was 0.7); heave 0.06 (0.035); bass tilt 0.35 rad
+  per unit (0.22), beat tilt 0.14 (0.06), tilt spring 9/s (6); mids spin gain 2 (1.2).
+- *Why the drive:* the old pace was the tess glide (1 at rest, ~1.3 loud), so silence moved
+  nearly as much as music, and bass read through `bassAtt` arrives late (the att lag), so a
+  bass-driven swing put motion just *before* the next beat. Ablations (motion profile folded on
+  the beat) showed the camera's pace carries most of the beat shape at the probe's scale; the
+  kicks and ripples are local and read in stills, not in the 96 × 54 probe.
+- *Motion* (`motion_hook.py poincare-disk --query "p.scene=sphere&p.camera=…&reduce=0"`):
+  auto camera loud/silence 0.98 → 5.52, beat ratio 1.06 → 1.22; still camera 1.20 → 5.37,
+  1.11 → 1.18. loud/quiet stays ~1.0: the synth's quiet passage only scales levels, and every
+  drive input is normalized (att, the beat).
+- *AO* (a few samples): on the face, a horizon test against the carved outline as a tile-scaled
+  V groove (half-width 0.045 tile units, depth 0.6 of that; faded out under ~12–40 px tiles) at
+  0.5, 1 and 2 half-widths either side, and against the relief (ripple and heave) in four
+  directions at 0.04 and 0.1 world units; on the rim, three samples of the coin's SDF along the
+  normal. Replaces the old closeness-gated darkening (`u_near` is gone).
+- *Bumps, cleanly:* the bigger ripple folded the parallax-mapped print on its far slope
+  (dw′/dw = I + pc ∇hᵀ goes negative): the shift is scaled to keep pc·∇h ≥ −0.6 and the print's
+  Jacobian includes it. The wall's reflection was minified to a speckle on the bump: it fades to
+  0.9 × the wall's mean colour as the slope rises (0.02–0.12). Glints fade under ~4 px gouges.
+- *Framing:* the skim comes in low over the rim (r 0.95, y 0.42) looking across the face to its
+  far side, so the face fills the lower frame (it used to look along a tangent, mostly at the
+  wall); the swoop's look-at stays within 0.2 of the centre. `director.force(move)` jumps
+  straight to a move (tests; stills via a temporary `?move=` hook, not committed).
+- *Cost:* WebKit harness, 2560×1440, Quality high (the default; flat needs it to stay
+  byte-identical), `sync=1`, one render per vsync: 58.8 fps, p50 9–12 ms, p99 10–22 ms in most
+  runs; one run under heavy contention 17 / 31 ms at 55.6 fps (Metamorphosis 12 ms in the same
+  minute, against 6–8 in its notes). Two renders per vsync: ~7.5 ms each at high (55.6 fps),
+  ~4.5 ms at medium (58.8 fps); Metamorphosis ~6–6.5 ms each. So high is about 1.2× Metamorphosis
+  and holds 60 fps here; medium is the fallback for the M1 reference machine (not measured
+  there). Flash check (`--flash`): 1 flash/s at 2 %, 0 at 5 % with reduce flashing off; 0 and 0
+  with it on.
+- *Invariants:* the view rebases by rotations only, re-projects T each frame, and records `e0`
+  (colours stay put across rebases; the shader's fold starts at u_gE0). The 3D state runs
+  symmetry p4 (the wall needs it) with u_tCls overridden by `threeClassColors`; flat runs p3.
+  The face colour comes from `tessPrint` via `diskShade`; lighting and AO apply after it.
+- *Gotchas:* take all dFdx before branches (face chart = analytic plane hit, wall direction
+  computed for every pixel); a face-plane hit inside the printed disk skips the march (nothing
+  rises above the face). `DISK_IMPACT` must be defined before `// #include disk`. The ripple's
+  constants (speed 3, reach 1.1) are duplicated in disk3d.frag `rippleLift`.
+- *Open:* the thumbnail is still the flat print; the wall's colouring is Tiled Sphere's (two
+  classes plus seam tiles); not measured on the M1 reference machine.
+
 ## Tiled Torus: the tiling on a torus, outside and inside (2026-10-22)
 
 **Tiled Torus** (`tiled-torus`, webgl2) wraps the tessellation engine's tiling around a torus

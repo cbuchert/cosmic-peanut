@@ -36,16 +36,34 @@ export const withDefines = (src, names) => src.replace(/^(#version[^\n]*\n)/, (v
  * @typedef {(gl: WebGL2RenderingContext, u: Record<string, WebGLUniformLocation | null>, width: number, height: number) => void} SetSurface
  */
 
+const INCLUDE = /^\/\/ #include ([\w-]+)$/gm;
+
+/**
+ * The names of a shader's include lines (`// #include <name>` alone on a line), in order, once
+ * each. `tess` is the engine; any other name is shaders/tess/<name>.glsl.
+ * @param {string} src @returns {string[]}
+ */
+export const includesOf = (src) => [...new Set(Array.from(src.matchAll(INCLUDE), (m) => m[1]))];
+
+/** Replace each include line with its file's text. @param {string} src @param {Record<string, string>} files */
+export const spliceIncludes = (src, files) => src.replace(INCLUDE, (line, name) => files[name] ?? line);
+
 /**
  * @param {import('../../tidalviz').VisualizerContext} ctx
- * @param {string} surface path of the surface fragment shader (it contains `// #include tess`)
+ * @param {string} surface path of the surface fragment shader (it contains `// #include tess`, and
+ *   may include other shaders/tess/<name>.glsl files the same way)
  */
 export async function createTessPipeline(ctx, surface, { relief = false } = {}) {
   const gl = /** @type {WebGL2RenderingContext} */ (ctx.gl);
   const [vs, engine, paperFs, surfFs] = await Promise.all(
     [DIR + "fullscreen.vert", DIR + "tess.glsl", DIR + "paper.frag", surface].map((f) => ctx.assets.text(f)),
   );
-  const src = surfFs.replace("// #include tess", engine);
+  /** @type {Record<string, string>} */
+  const files = { tess: engine };
+  const extra = includesOf(surfFs).filter((n) => n !== "tess");
+  const texts = await Promise.all(extra.map((n) => ctx.assets.text(DIR + n + ".glsl")));
+  extra.forEach((n, i) => (files[n] = texts[i]));
+  const src = spliceIncludes(surfFs, files);
   const prog = createProgram(gl, vs, src, surface);
   const rel = relief
     ? {

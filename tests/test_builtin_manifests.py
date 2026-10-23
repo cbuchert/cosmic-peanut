@@ -911,6 +911,9 @@ def test_poincare_disk_manifest():
     )
     params = {p["id"]: p for p in v["params"]}
     assert list(params) == [
+        "scene",
+        "camera",
+        "spin",
         "tiling",
         "palette",
         "reactivity",
@@ -923,6 +926,13 @@ def test_poincare_disk_manifest():
     # Option order is lib/tess-disk.js TILINGS, lib/tess.js PALETTES, tess-music QUALITIES.
     assert params["tiling"]["options"] == ["{7,3}", "{5,4}", "{4,5}", "{6,4}"]
     assert params["tiling"]["default"] == "{7,3}"
+    # lib/disk3d.js SCENES and CAMERAS; the sphere scene is the default, flat the print alone.
+    assert params["scene"]["options"] == ["flat", "sphere"]
+    assert params["scene"]["default"] == "sphere"
+    assert params["camera"]["default"] == "auto"
+    assert params["camera"]["options"] == ["auto", "still"]
+    sp = params["spin"]
+    assert (sp["min"], sp["max"], sp["default"]) == (0, 2, 1)
     assert params["palette"]["options"] == ["ink", "dusk", "four-block", "ochre", "watercolour"]
     assert params["quality"]["options"] == ["low", "medium", "high"]
     r = params["reactivity"]
@@ -936,7 +946,11 @@ def test_poincare_disk_manifest():
     for name in (
         "shaders/tess/tess.glsl",
         "shaders/tess/disk.frag",
+        "shaders/tess/disk.glsl",
+        "shaders/tess/disk3d.frag",
+        "shaders/tess/sphere.glsl",
         "shaders/tess/paper.frag",
         "src/lib/tess-disk.js",
+        "src/lib/disk3d.js",
     ):
         assert (REPOS["builtin"] / name).is_file(), name

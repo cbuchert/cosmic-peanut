@@ -85,7 +85,8 @@ def shots(
         page.screenshot(path=out / f"backdrop-{bg}.png")
     for viz in vizs:
         for bg in BACKDROPS:
-            page.goto(f"{base}?repo={prefix}{VIZ[viz]}&viz={viz}&bg={bg}&still=150&{query}")
+            q = f"&{query}" if query else ""
+            page.goto(f"{base}?repo={prefix}{VIZ[viz]}&viz={viz}&bg={bg}&still=150{q}")
             page.wait_for_function(
                 "window.__still === true || window.__errors.length > 0", timeout=30000
             )
