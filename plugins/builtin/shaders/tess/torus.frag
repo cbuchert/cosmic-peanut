@@ -2,13 +2,17 @@
 // Tiled Torus surface: a torus (ring radius 1 about y, tube radius u_k) raymarched from outside
 // or from inside the tube, its surface mapped onto the tiling plane by conformal coordinates
 // (src/lib/torus.js mirrors and tests the map):
-//   p = (lx (θ/2π + fu), ly (t(φ) + fv)),  t(φ) = (1/π) atan(√((1−k)/(1+k)) tan(φ/2))
-// lx, ly are periods of the warped, coloured tiling, so it closes around both circles.
+//   p = (lx (θ/2π + fu), ly (t(φ) + fv + tw θ/2π)),  t(φ) = (1/π) atan(√((1−k)/(1+k)) tan(φ/2))
+// lx, ly are periods of the warped, coloured tiling, so it closes around both circles. The spin
+// fv rolls the tiles round the tube; the twist tw (a whole number of tile periods per lap, so it
+// still closes) streams them round the ring in a helix, the tiles leaning by its shear. The
+// spin shifts t, not φ, so the map stays conformal and the tiles stay square.
 //
 // The waveform deforms it (torus-disp.frag bakes it, src/lib/torus-wave.js mirrors it as
 // dispAt): the surface sits at tube distance k + disp(θ, φ), each ring born at the hole
 // (φ = ±π) and rolling a full lap round the tube at full height. The tiles keep the
-// undisplaced (θ, φ), so they ride the waves; S and the normal come from the displaced surface
+// undisplaced (θ, φ), so they ride the waves (which stay on the geometry: the spin and twist
+// move only the tiles); S and the normal come from the displaced surface
 // (ray differential × analytic gradients of θ and t: no seams at θ = ±π, φ = ±π or the edge).
 precision highp float;
 
@@ -33,7 +37,8 @@ uniform vec3 u_fwd;
 uniform vec3 u_up;
 uniform float u_tan;    // tan of half the vertical field of view
 uniform float u_k;      // tube radius (ring radius 1)
-uniform vec2 u_flow;    // tile flow (fu, fv), turns
+uniform vec2 u_flow;    // tile flow along the ring (fu) and spin round the tube (fv), turns
+uniform float u_twist;  // turns of t per lap round the ring (whole tile periods: closes)
 uniform float u_side;   // +1 camera outside the tube, −1 inside
 uniform float u_mix;    // 0 outside look … 1 inside look (shading, fog)
 uniform float u_fade;   // paper dissolve while the camera crosses the wall
@@ -156,7 +161,7 @@ void main() {
     float phi = atan(X.y, w);
     float a = sqrt((1.0 - u_k) / (1.0 + u_k));
     float tf = atan(a * sin(0.5 * phi), cos(0.5 * phi)) / PI;
-    vec2 p = vec2(u_lxy.x * (theta / (2.0 * PI) + u_flow.x), u_lxy.y * (tf + u_flow.y));
+    vec2 p = vec2(u_lxy.x * (theta / (2.0 * PI) + u_flow.x), u_lxy.y * (tf + u_flow.y + u_twist * theta / (2.0 * PI)));
 
     // Gradients of the parameters, the displacement and the displaced surface's normal.
     vec3 gTheta = vec3(-X.z, 0.0, X.x) / (rho * rho);
@@ -178,7 +183,8 @@ void main() {
     vec3 dXx = tau * (dDx - D * (dot(n, dDx) / nD));
     vec3 dXy = tau * (dDy - D * (dot(n, dDy) / nD));
     vec3 gx = (u_lxy.x / (2.0 * PI)) * gTheta;
-    vec3 gy = (u_lxy.y * sqrt(1.0 - u_k * u_k) / (2.0 * PI * (1.0 + u_k * cos(phi)))) * gPhi;
+    vec3 gy = (u_lxy.y * sqrt(1.0 - u_k * u_k) / (2.0 * PI * (1.0 + u_k * cos(phi)))) * gPhi
+            + (u_lxy.y * u_twist / (2.0 * PI)) * gTheta;
     mat2 S = mat2(dot(gx, dXx), dot(gy, dXx), dot(gx, dXy), dot(gy, dXy));
 
     col = tessShade(p, S).rgb;

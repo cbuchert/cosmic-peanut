@@ -649,6 +649,8 @@ def test_tiled_torus_manifest():
         "wave",
         "travel",
         "detail",
+        "spin",
+        "twist",
         "palette",
         "reactivity",
         "speed",
@@ -672,6 +674,11 @@ def test_tiled_torus_manifest():
     assert (tr["label"], tr["min"], tr["max"], tr["default"]) == ("Travel time", 1, 8, 4)
     d = params["detail"]
     assert (d["label"], d["min"], d["max"], d["default"]) == ("Detail", 0, 1, 0.15)
+    # Spin: turns a minute round the tube (signed); Twist: half-turns a lap (lib/torus.js).
+    sp = params["spin"]
+    assert (sp["label"], sp["min"], sp["max"], sp["default"]) == ("Spin", -2, 2, 1)
+    tw = params["twist"]
+    assert (tw["label"], tw["min"], tw["max"], tw["default"]) == ("Twist", 0, 2, 0)
     r = params["reactivity"]
     assert (r["min"], r["max"], r["default"]) == (0, 2, 1)
     m = params["morph"]

@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { createTessState } from "./tess-music.js";
 import { createTile, fieldAt, groupOf, tileAt } from "./tess.js";
 import { BLEND_PERIOD } from "./tess-music.js";
-import { blendPose, conformalAspect, createDrag, createPose, createTorusCamera, DIST, insideScale, FLOW_U, FLY, mapParams, ORBIT, THICKNESS, TRAVEL, createViewMix, DRAG_RATE, DRAG_RETURN, PITCH_LIMIT, DIVE_TIME, IDLE_TOGGLE, MIN_HOLD, PHRASE_STEPS, VIEWS, viewName, wallFade, insidePose, latticeCounts, minorFraction, minorRate, outsidePose, planePoint } from "./torus.js";
+// @ts-expect-error -- a Node builtin (tests run in Node); the web tsconfig has no @types/node.
+import { readFileSync } from "node:fs";
+import { blendPose, conformalAspect, createDrag, createPose, createTorusCamera, DIST, insideScale, FLOW_U, FLY, mapParams, ORBIT, REDUCED_SPIN, SPIN, THICKNESS, TRAVEL, twistTurns, createViewMix, DRAG_RATE, DRAG_RETURN, PITCH_LIMIT, DIVE_TIME, IDLE_TOGGLE, MIN_HOLD, PHRASE_STEPS, VIEWS, viewName, wallFade, insidePose, latticeCounts, minorFraction, minorRate, outsidePose, planePoint } from "./torus.js";
 
 const S3 = Math.sqrt(3);
 const THICK = [0.2, 0.28, 0.38, 0.45, 0.5];
@@ -545,3 +547,162 @@ describe("inside render scale", () => {
   });
 });
 
+describe("spin round the tube", () => {
+  const DT = 1 / 60;
+  const o = (spin = 1, over = {}) => ({ view: "outside", thickness: 0.36, stepped: false, reduceMotion: false, spin, ...over });
+  /** fv advanced (unwrapped) over `secs` at `speed` travel units a second. */
+  function spun(/** @type {number} */ spin, speed = 1, secs = 2, over = {}) {
+    const cam = createTorusCamera();
+    const g = { travel: 0 };
+    let total = 0;
+    let last = NaN;
+    for (let i = 0; i < Math.round(secs / DT); i++) {
+      g.travel += speed * DT;
+      cam.step(DT, g, o(spin, over));
+      if (!Number.isNaN(last)) total += ((cam.fv - last + 1.5) % 1) - 0.5;
+      last = cam.fv;
+    }
+    return total;
+  }
+
+  it("turns the tiles round the tube at Spin turns a minute per unit of travel, signed", () => {
+    expect(SPIN).toBeCloseTo(1 / 60, 12);
+    const travel = 2 - DT; // the first frame only sets the baseline
+    expect(spun(1)).toBeCloseTo(SPIN * travel, 6);
+    expect(spun(-2)).toBeCloseTo(-2 * SPIN * travel, 6);
+    expect(spun(0)).toBe(0);
+  });
+
+  it("is driven by the music's travel: faster with bass and the eased beat surge, still at Speed 0", () => {
+    expect(spun(1, 2.5)).toBeCloseTo(2.5 * spun(1, 1), 6);
+    expect(spun(1, 0)).toBe(0);
+  });
+
+  it("eases with the music: a beat surge never makes it jump (real tess-music travel)", () => {
+    const st = createTessState();
+    const cam = createTorusCamera();
+    const audio = { bands: new Float32Array(16).fill(0.3), bpm: 120, beatPhase: 0, onset: false, onsetStrength: 0, centroid: 0.2, bassAtt: 1, silent: false };
+    const to = { symmetry: "p4", palette: "ink", reactivity: 1, speed: 1, morph: 0.7, ink: 1, hatching: 0.6, height: 1440, reduceMotion: false, reduceFlashing: false };
+    let last = NaN;
+    let lastRate = NaN;
+    let maxJerk = 0;
+    let minRate = Infinity;
+    for (let i = 0; i < 600; i++) {
+      audio.beatPhase = (i * DT * 2) % 1;
+      audio.onset = i % 30 === 0;
+      audio.onsetStrength = audio.onset ? 1 : 0;
+      audio.bassAtt = audio.onset ? 2 : 1;
+      const s = st.step(audio, DT, to);
+      cam.step(DT, s, o(1));
+      if (!Number.isNaN(last)) {
+        const rate = (((cam.fv - last + 1.5) % 1) - 0.5) / DT;
+        minRate = Math.min(minRate, rate);
+        if (!Number.isNaN(lastRate) && i > 60) maxJerk = Math.max(maxJerk, Math.abs(rate - lastRate));
+        lastRate = rate;
+      }
+      last = cam.fv;
+    }
+    // Always turning forward (the base spin), and the rate changes by < 15 % of the base a frame.
+    expect(minRate).toBeGreaterThan(0.9 * SPIN);
+    expect(maxJerk).toBeLessThan(0.15 * SPIN);
+  });
+
+  it("slows a lot with reduce motion (on top of the glide's own slow-down)", () => {
+    expect(REDUCED_SPIN).toBeLessThanOrEqual(0.5);
+    expect(spun(1, 1, 2, { reduceMotion: true })).toBeCloseTo(REDUCED_SPIN * spun(1, 1), 6);
+  });
+});
+
+describe("twist", () => {
+  it("snaps to whole tile periods per lap, near Twist half-turns", () => {
+    const c = counts();
+    for (const g of ["p4", "p3"]) {
+      for (const k of THICK) {
+        latticeCounts(g, k, c);
+        expect(twistTurns(0, c.nv)).toBe(0);
+        for (const half of [0.5, 1, 1.3, 2]) {
+          const t = twistTurns(half, c.nv);
+          expect(Math.abs(t - half / 2)).toBeLessThanOrEqual(BLEND_PERIOD / (2 * c.nv) + 1e-12);
+          // whole BLEND_PERIOD steps of the y lattice vector per lap
+          expect(Math.abs((t * c.nv) / BLEND_PERIOD - Math.round((t * c.nv) / BLEND_PERIOD))).toBeLessThan(1e-9);
+        }
+      }
+    }
+  });
+
+  it("shifts t by twist × θ/2π in the plane map (a helix round the ring)", () => {
+    const c = latticeCounts("p4", 0.36, counts());
+    const a = [0, 0];
+    const b = [0, 0];
+    planePoint(0.9, 0.4, 0.36, c, 0.1, 0.3, a);
+    planePoint(0.9, 0.4, 0.36, c, 0.1, 0.3, b, 0.5);
+    expect(b[0]).toBe(a[0]);
+    expect(b[1] - a[1]).toBeCloseTo(c.ly * 0.5 * (0.9 / (2 * Math.PI)), 12);
+  });
+
+  it("keeps the tiling closed across the ring's seam with spin and twist (p4 and p3)", () => {
+    const d0 = [0, 0];
+    const d1 = [0, 0];
+    const a = [0, 0];
+    const b = [0, 0];
+    const t0 = createTile();
+    const t1 = createTile();
+    const c = counts();
+    for (const g of ["p4", "p3"]) {
+      const s = warpedState(g);
+      const grp = groupOf(g);
+      const blend = { kx: s.blend[0], ky: s.blend[1], phase: s.blend[2] };
+      for (const k of THICK) {
+        latticeCounts(g, k, c);
+        for (const half of [0.5, 1, 1.3, 2]) {
+          const tw = twistTurns(half, c.nv);
+          for (let i = 0; i < 30; i++) {
+            const phi = -Math.PI + 0.05 + i * 0.2;
+            const fu = 0.0131 + i * 0.0731;
+            const fv = 0.377 + i * 0.0213; // spin
+            // the same surface point, either side of θ = ±π
+            planePoint(-Math.PI, phi, k, c, fu, fv, a, tw);
+            planePoint(Math.PI, phi, k, c, fu, fv, b, tw);
+            expect(b[0] - a[0]).toBeCloseTo(c.lx, 9);
+            expect(b[1] - a[1]).toBeCloseTo(c.ly * tw, 9);
+            fieldAt(grp, s.ab, blend, a[0], a[1], d0);
+            fieldAt(grp, s.ab, blend, b[0], b[1], d1);
+            expect(d1[0]).toBeCloseTo(d0[0], 6);
+            expect(d1[1]).toBeCloseTo(d0[1], 6);
+            const q0 = tileAt(grp, a[0] + d0[0], a[1] + d0[1], t0);
+            const q1 = tileAt(grp, b[0] + d1[0], b[1] + d1[1], t1);
+            expect(q1.cls).toBe(q0.cls);
+            expect(q1.orient).toBe(q0.orient);
+          }
+        }
+      }
+    }
+  });
+});
+
+describe("spin and twist on the surface (shaders/tess/torus.frag)", () => {
+  const frag = readFileSync(new URL("../../shaders/tess/torus.frag", import.meta.url), "utf8");
+  const disp = readFileSync(new URL("../../shaders/tess/torus-disp.frag", import.meta.url), "utf8");
+
+  it("maps the tiles like planePoint: the spin and the twist shift t", () => {
+    expect(frag).toContain("uniform float u_twist;");
+    expect(frag).toContain("u_lxy.y * (tf + u_flow.y + u_twist * theta / (2.0 * PI))");
+    // S follows the twisted map: dp.y/dX gains ly · tw / 2π · ∇θ.
+    expect(frag).toContain("+ (u_lxy.y * u_twist / (2.0 * PI)) * gTheta;");
+  });
+
+  it("keeps the waves on the geometry: the displacement never sees the spin or twist", () => {
+    expect(disp).not.toMatch(/u_flow|u_twist/);
+    const body = frag.slice(frag.indexOf("float disp("), frag.indexOf("void main()"));
+    expect(body).not.toMatch(/u_flow|u_twist/);
+    for (const call of frag.match(/disp\([^;]*;/g) ?? []) expect(call).not.toMatch(/u_flow|u_twist|\bp\b/);
+  });
+});
+
+describe("spin and twist params", () => {
+  it("maps Spin (turns a minute, −2…2, default 1) and Twist (half-turns a lap, 0…2, default 0)", () => {
+    expect(mapParams({ spin: -3, twist: 5 }, {})).toMatchObject({ spin: -2, twist: 2 });
+    expect(mapParams({ spin: "x", twist: "y" }, {})).toMatchObject({ spin: 1, twist: 0 });
+    expect(mapParams({ spin: -0.5, twist: 1.5 }, {})).toMatchObject({ spin: -0.5, twist: 1.5 });
+  });
+});

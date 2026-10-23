@@ -10,7 +10,8 @@
  * of the warped, coloured tiling (lib/torus.js), so tiles are square and the tiling closes both
  * ways. The engine (lib/tess-gl.js, shaders/tess/tess.glsl) and the music (lib/tess-music.js)
  * are Metamorphosis's; this surface is shaders/tess/torus.frag. Glide travel (bass and an eased
- * beat surge) drives the orbit, the fly speed and the tiles' flow along the tube; the
+ * beat surge) drives the orbit, the fly speed, the tiles' flow along the ring and their spin
+ * round the tube (Spin, signed; Twist streams them round the ring in a helix); the
  * figure/ground front travels around the ring from the camera. The waveform deforms the surface
  * (lib/torus-wave.js): each ring born at the hole rolls a full lap round the tube, stamped by the
  * beat it was laid down on. frame() allocates nothing.
@@ -18,7 +19,7 @@
 import { createProgram } from "./lib/gl.js";
 import { createTessPipeline } from "./lib/tess-gl.js";
 import { createTessState, renderScale } from "./lib/tess-music.js";
-import { createTorusCamera, insideScale, latticeCounts, mapParams } from "./lib/torus.js";
+import { createTorusCamera, insideScale, latticeCounts, mapParams, twistTurns } from "./lib/torus.js";
 import { BIRTH, COLS, createWaveHistory, LAP_ROWS, liveDisp, ROWS, stepFactor, waveAmp } from "./lib/torus-wave.js";
 
 /** March steps per Quality (low, medium, high): the displaced shell takes short steps. */
@@ -49,11 +50,13 @@ export default async function create(ctx) {
     wave: 0.7,
     travel: 4,
     detail: 0.15,
+    spin: 1,
+    twist: 0,
     height: 1,
     reduceMotion: false,
     reduceFlashing: false,
   };
-  const camIn = { view: "auto", thickness: 0.36, stepped: false, reduceMotion: false };
+  const camIn = { view: "auto", thickness: 0.36, stepped: false, reduceMotion: false, spin: 1 };
   const gl = /** @type {WebGL2RenderingContext} */ (ctx.gl);
   const waveTex = /** @type {WebGLTexture} */ (gl.createTexture());
   const bindWave = () => {
@@ -133,6 +136,7 @@ export default async function create(ctx) {
     gl.uniform1f(u.u_tan, cam.tanHalf);
     gl.uniform1f(u.u_k, p.thickness);
     gl.uniform2f(u.u_flow, cam.fu, cam.fv);
+    gl.uniform1f(u.u_twist, twistTurns(p.twist, counts.nv));
     gl.uniform1f(u.u_side, cam.side);
     gl.uniform1f(u.u_mix, cam.mix);
     gl.uniform1f(u.u_fade, cam.fade);
@@ -158,6 +162,7 @@ export default async function create(ctx) {
       camIn.thickness = p.thickness;
       camIn.stepped = s.stepped;
       camIn.reduceMotion = ctx.reduceMotion;
+      camIn.spin = p.spin;
       cam.step(time.dt, s, camIn);
       if (cam.side !== side) {
         side = cam.side;
