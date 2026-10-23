@@ -6,7 +6,8 @@ BlackHole, no audio routing, no Xcode. The app and its Python package are called
 
 Built-in visualizers: **Cosmic Peanut** (waveform rings drifting over an invisible sphere),
 **Pulsar** (*Unknown Pleasures*-style ridge lines), **Orbit** (3D), **Undertow** (feedback
-warp), **Bars**, and a **Template** to start your own.
+warp), **Bars**, **Metamorphosis** (an interlocking woodcut tiling that changes shape with the
+music), and a **Template** to start your own.
 
 ## Requirements
 

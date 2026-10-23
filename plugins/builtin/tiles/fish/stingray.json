@@ -1,0 +1,129 @@
+{
+  "format": 1,
+  "name": "Stingray",
+  "group": "fish",
+  "type": "C3",
+  "notes": "A stingray from above, its axis the V0-V3 diagonal: snout at V0 (three rays meet nose to nose), the whip tail with its spine at V3, the wing tips out on e1 and e4. Mirror-symmetric as the C3 relations allow (e0 straight, e4 = e2 with v negated). e2 runs from the rear rim of the right wing down the tail; turned a third about V2 it is e1, so the dent where the tail leaves the disc is the bulge of the wing's front rim. v1 = (0.5, 0) pulls V3 out for a long tail.",
+  "corners": {
+    "v1": [0.4, 0.0]
+  },
+  "edges": {
+    "e0": {
+      "polyline": []
+    },
+    "e2": {
+      "smooth": [[0.121, -0.0319], [0.2817, 0.0315], [0.4102, 0.1717], [0.4992, 0.2888], [0.6349, 0.2288], [0.7811, 0.1269], [0.9002, 0.0469]]
+    },
+    "e4": {
+      "smooth": [[0.121, 0.0319], [0.2817, -0.0315], [0.4102, -0.1717], [0.4992, -0.2888], [0.6349, -0.2288], [0.7811, -0.1269], [0.9002, -0.0469]]
+    }
+  },
+  "art": [
+    {
+      "part": "body",
+      "fill": {
+        "smooth": [[0.39, 0.675], [0.589, 0.699], [0.773, 0.939], [0.854, 1.239], [0.873, 1.413], [0.787, 1.463], [0.646, 1.359], [0.427, 1.139], [0.311, 0.859]]
+      }
+    },
+    {
+      "part": "tail",
+      "stroke": {
+        "smooth": [[0.875, 1.516], [1.05, 1.819], [1.225, 2.122]]
+      },
+      "width": [0.05, 0.02]
+    },
+    {
+      "part": "spots",
+      "circle": [0.926, 0.504, 0.03]
+    },
+    {
+      "part": "spots",
+      "circle": [-0.026, 1.054, 0.03]
+    },
+    {
+      "part": "spots",
+      "circle": [0.99, 0.814, 0.03]
+    },
+    {
+      "part": "spots",
+      "circle": [0.21, 1.264, 0.03]
+    },
+    {
+      "part": "spots",
+      "circle": [0.715, 0.338, 0.03]
+    },
+    {
+      "part": "spots",
+      "circle": [-0.065, 0.788, 0.03]
+    },
+    {
+      "part": "spots",
+      "circle": [0.55, 0.953, 0.03]
+    },
+    {
+      "part": "spots",
+      "circle": [0.96, 1.062, 0.03]
+    },
+    {
+      "part": "spots",
+      "circle": [0.44, 1.362, 0.03]
+    },
+    {
+      "part": "ridge",
+      "stroke": {
+        "smooth": [[0.475, 0.823], [0.65, 1.126], [0.81, 1.403]]
+      },
+      "width": [0.012, 0.02]
+    },
+    {
+      "part": "spine",
+      "stroke": {
+        "smooth": [[1.014, 1.666], [1.07, 1.83]]
+      },
+      "width": [0.024, 0.008]
+    },
+    {
+      "part": "eye",
+      "circle": [0.44, 0.462, 0.05]
+    },
+    {
+      "part": "eye",
+      "circle": [0.18, 0.612, 0.05]
+    },
+    {
+      "part": "pupil",
+      "circle": [0.447, 0.475, 0.025]
+    },
+    {
+      "part": "pupil",
+      "circle": [0.188, 0.625, 0.025]
+    },
+    {
+      "part": "spiracle",
+      "circle": [0.534, 0.604, 0.026]
+    },
+    {
+      "part": "spiracle",
+      "circle": [0.256, 0.764, 0.026]
+    }
+  ],
+  "colours": {
+    "body": "shade",
+    "tail": "ink",
+    "spots": "light",
+    "ridge": "cut",
+    "spine": "paper",
+    "eye": "paper",
+    "pupil": "ink",
+    "spiracle": "ink"
+  },
+  "height": {
+    "dome": 0.35,
+    "parts": {
+      "body": 0.4,
+      "ridge": 0.3,
+      "spots": 0.1,
+      "eye": 0.5
+    }
+  }
+}

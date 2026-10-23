@@ -341,6 +341,139 @@
         { "id": "look", "type": "select", "label": "Look", "options": ["classic", "cinematic"], "default": "classic" },
         { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "medium" }
       ]
+    },
+    {
+      "id": "metamorphosis",
+      "name": "Metamorphosis",
+      "description": "An interlocking tiling carved like a woodblock under a raking light: the tiles turn into hooked, lobed, finned and star-like creatures, lift in waves on every beat, heave with the spectrum ring by ring and turn over like cards on phrase changes, while the brightness of the music picks the family.",
+      "author": "Tidalviz",
+      "entry": "src/metamorphosis.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/metamorphosis.jpg",
+      "params": [
+        { "id": "symmetry", "type": "select", "label": "Symmetry", "options": ["p4", "p3"], "default": "p4" },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["ink", "dusk", "four-block", "ochre", "watercolour"], "default": "four-block" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "morph", "type": "number", "label": "Morph", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
+        { "id": "ink", "type": "number", "label": "Ink", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "hatching", "type": "number", "label": "Hatching", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "relief", "type": "number", "label": "Relief", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "light", "type": "number", "label": "Light", "min": 0, "max": 360, "step": 1, "default": 135 },
+        { "id": "creatures", "type": "select", "label": "Creatures", "options": ["abstract", "all", "fish", "birds", "reptiles", "mammals"], "default": "abstract" },
+        { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "high" }
+      ]
+    },
+    {
+      "id": "tile-horizon",
+      "name": "Tile Horizon",
+      "description": "An endless woodcut tiling seen low in perspective: the view glides with the bass and the beat towards a horizon that fades into the paper, and figure/ground fronts sweep outwards across the floor.",
+      "author": "Tidalviz",
+      "entry": "src/tile-horizon.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/tile-horizon.jpg",
+      "params": [
+        { "id": "symmetry", "type": "select", "label": "Symmetry", "options": ["p4", "p3"], "default": "p4" },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["ink", "dusk", "four-block", "ochre", "watercolour"], "default": "four-block" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "morph", "type": "number", "label": "Morph", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
+        { "id": "ink", "type": "number", "label": "Ink", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "hatching", "type": "number", "label": "Hatching", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "height", "type": "number", "label": "Height", "min": 0, "max": 1, "step": 0.01, "default": 0.4 },
+        { "id": "tilt", "type": "number", "label": "Tilt", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
+        { "id": "fog", "type": "number", "label": "Fog", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
+        { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "high" }
+      ]
+    },
+    {
+      "id": "endless-zoom",
+      "name": "Endless Zoom",
+      "description": "The woodcut tiling wound into a log-polar spiral that zooms without end into a soft vanishing point: bass and the beat set the pace, the tiles keep changing shape with the music, figure/ground fronts ripple along the spiral, and a drag moves the vanishing point.",
+      "author": "Tidalviz",
+      "entry": "src/endless-zoom.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/endless-zoom.jpg",
+      "params": [
+        { "id": "symmetry", "type": "select", "label": "Symmetry", "options": ["p4", "p3"], "default": "p4" },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["ink", "dusk", "four-block", "ochre", "watercolour"], "default": "four-block" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "morph", "type": "number", "label": "Morph", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
+        { "id": "ink", "type": "number", "label": "Ink", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "hatching", "type": "number", "label": "Hatching", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "spiral", "type": "select", "label": "Spiral", "options": ["none", "gentle", "medium", "strong"], "default": "gentle" },
+        { "id": "zoom", "type": "number", "label": "Zoom speed", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "direction", "type": "select", "label": "Direction", "options": ["in", "out"], "default": "in" },
+        { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "high" }
+      ]
+    },
+    {
+      "id": "tiled-sphere",
+      "name": "Tiled Sphere",
+      "description": "The interlocking woodcut tiling wrapped round a turning sphere, seen from outside or from within, pushing through its skin on phrase changes.",
+      "author": "Tidalviz",
+      "entry": "src/tiled-sphere.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/tiled-sphere.jpg",
+      "params": [
+        { "id": "view", "type": "select", "label": "View", "options": ["outside", "inside", "auto"], "default": "auto" },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["ink", "dusk", "four-block", "ochre", "watercolour"], "default": "four-block" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "morph", "type": "number", "label": "Morph", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
+        { "id": "ink", "type": "number", "label": "Ink", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "hatching", "type": "number", "label": "Hatching", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "high" }
+      ]
+    },
+    {
+      "id": "tiled-torus",
+      "name": "Tiled Torus",
+      "description": "The interlocking woodcut tiles wrapped seamlessly around a torus, seen tumbling from outside or flown through from inside the tube: the waveform rolls out of the hole across the surface in waves, stamped larger on the beat, while the tiles spin round the tube (Twist streams them in a helix); bass carries them along the ring, phrase changes dive in and out and send a figure/ground inversion round it.",
+      "author": "Tidalviz",
+      "entry": "src/tiled-torus.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/tiled-torus.jpg",
+      "params": [
+        { "id": "view", "type": "select", "label": "View", "options": ["auto", "outside", "inside"], "default": "auto" },
+        { "id": "symmetry", "type": "select", "label": "Symmetry", "options": ["p4", "p3"], "default": "p4" },
+        { "id": "thickness", "type": "number", "label": "Thickness", "min": 0.2, "max": 0.5, "step": 0.01, "default": 0.36 },
+        { "id": "wave", "type": "number", "label": "Wave height", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
+        { "id": "travel", "type": "number", "label": "Travel time", "min": 1, "max": 8, "step": 0.1, "default": 4 },
+        { "id": "detail", "type": "number", "label": "Detail", "min": 0, "max": 1, "step": 0.01, "default": 0.15 },
+        { "id": "spin", "type": "number", "label": "Spin", "min": -2, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "twist", "type": "number", "label": "Twist", "min": 0, "max": 2, "step": 0.05, "default": 0 },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["ink", "dusk", "four-block", "ochre", "watercolour"], "default": "four-block" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "morph", "type": "number", "label": "Morph", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
+        { "id": "ink", "type": "number", "label": "Ink", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "hatching", "type": "number", "label": "Hatching", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "high" }
+      ]
+    },
+    {
+      "id": "poincare-disk",
+      "name": "Poincaré Disk",
+      "description": "Interlocking creatures tiling the hyperbolic plane, printed like a woodcut, shrinking towards the rim of the disk forever: the music reshapes them each bar, bass drifts you through the plane and phrase changes sweep a figure/ground inversion out to the rim. Drag to steer.",
+      "author": "Tidalviz",
+      "entry": "src/poincare-disk.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/poincare-disk.jpg",
+      "params": [
+        { "id": "scene", "type": "select", "label": "Scene", "options": ["flat", "sphere"], "default": "sphere" },
+        { "id": "camera", "type": "select", "label": "Camera", "options": ["auto", "still"], "default": "auto" },
+        { "id": "spin", "type": "number", "label": "Spin", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "tiling", "type": "select", "label": "Tiling", "options": ["{7,3}", "{5,4}", "{4,5}", "{6,4}"], "default": "{7,3}" },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["ink", "dusk", "four-block", "ochre", "watercolour"], "default": "four-block" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "morph", "type": "number", "label": "Morph", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
+        { "id": "ink", "type": "number", "label": "Ink", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "hatching", "type": "number", "label": "Hatching", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "high" }
+      ]
     }
   ]
 }

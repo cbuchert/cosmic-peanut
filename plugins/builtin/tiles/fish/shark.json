@@ -1,0 +1,109 @@
+{
+  "format": 1,
+  "name": "Shark",
+  "group": "fish",
+  "type": "TGTG",
+  "notes": "A shark swimming right, seen side on: pointed snout over the mouth, five gill slits, a pale belly. The falcate dorsal fin on the back (e2) is the glide image of the deep slot in the belly (points 4-6), which reads as the gap between the pectoral and pelvic fins. The negative shear puts the tail's long upper lobe (V3) behind the short lower lobe (point 0), and the snout nests in the fork. Koi structure (e0 smooth 9, e1 smooth 4): it morphs with the other TGTG fish.",
+  "corners": {
+    "w": 2.0,
+    "h": 0.55,
+    "s": -0.2
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[0.02, -0.08], [0.14, 0.02], [0.22, 0.0], [0.28, 0.04], [0.29, 0.0], [0.44, 0.1], [0.42, -0.02], [0.6, -0.12], [0.83, 0.05]]
+    },
+    "e1": {
+      "smooth": [[0.1139, -0.1869], [0.1781, -0.6102], [0.4759, -0.3912], [0.762, -0.2044]]
+    }
+  },
+  "art": [
+    {
+      "part": "belly",
+      "fill": {
+        "smooth": [[1.0, -0.112], [1.2, -0.163], [1.4, -0.03], [1.6, 0.129], [1.8, 0.16], [2.0, 0.071], [2.16, 0.171], [2.16, 0.196], [2.0, 0.142], [1.8, 0.249], [1.6, 0.23], [1.4, 0.134], [1.2, 0.056], [1.0, 0.156]]
+      }
+    },
+    {
+      "part": "slits",
+      "stroke": {
+        "smooth": [[1.62, 0.218], [1.6, 0.291], [1.62, 0.364]]
+      },
+      "width": [0.012, 0.016]
+    },
+    {
+      "part": "slits",
+      "stroke": {
+        "smooth": [[1.68, 0.214], [1.66, 0.273], [1.68, 0.332]]
+      },
+      "width": [0.012, 0.016]
+    },
+    {
+      "part": "slits",
+      "stroke": {
+        "smooth": [[1.74, 0.199], [1.72, 0.249], [1.74, 0.299]]
+      },
+      "width": [0.012, 0.016]
+    },
+    {
+      "part": "slits",
+      "stroke": {
+        "smooth": [[1.8, 0.239], [1.78, 0.317], [1.8, 0.395]]
+      },
+      "width": [0.012, 0.016]
+    },
+    {
+      "part": "slits",
+      "stroke": {
+        "smooth": [[1.86, 0.214], [1.84, 0.29], [1.86, 0.366]]
+      },
+      "width": [0.012, 0.016]
+    },
+    {
+      "part": "fin",
+      "stroke": {
+        "smooth": [[1.42, 0.045], [1.3, -0.08], [1.22, -0.2]]
+      },
+      "width": [0.016, 0.006]
+    },
+    {
+      "part": "mouth",
+      "stroke": {
+        "smooth": [[2.12, 0.165], [2.04, 0.122], [1.96, 0.124]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "lateral",
+      "stroke": {
+        "smooth": [[0.5, 0.23], [1.0, 0.308], [1.5, 0.322]]
+      },
+      "width": [0.006, 0.012]
+    },
+    {
+      "part": "eye",
+      "circle": [2.0, 0.285, 0.03]
+    },
+    {
+      "part": "pupil",
+      "circle": [2.01, 0.285, 0.015]
+    }
+  ],
+  "colours": {
+    "belly": "light",
+    "slits": "ink",
+    "fin": "cut",
+    "mouth": "ink",
+    "lateral": "cut",
+    "eye": "paper",
+    "pupil": "ink"
+  },
+  "height": {
+    "dome": 0.6,
+    "parts": {
+      "belly": -0.1,
+      "slits": -0.3,
+      "eye": 0.4
+    }
+  }
+}

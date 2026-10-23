@@ -172,6 +172,95 @@ Lattice's Structure param gains `gyroid`, `schwarz-p` and `schwarz-d`: thickened
   camera swap on a Structure change (driven by flipping the param in WebKit: no errors) and the
   look (tuned by stills).
 
+## Tessellations: the bestiary, animal tiles as data (2026-10-23)
+
+**Creatures** (Metamorphosis param: `abstract` default, `all`, `fish`, `birds`, `reptiles`,
+`mammals`; the harness also takes `p.creatures=<group>/<name>`) prints recognisable animal tiles
+instead of the warp's abstract creatures, with the same print look, palettes, rings and music.
+Species are data (`plugins/builtin/tiles/<group>/<name>.json`, authoring guide in its README),
+checked and previewed by `uv run python -m tools.tiles`.
+
+- **Tiles are Heesch types with the relations built in**: TTTTTT (p1), TGTG (pg), C4 (p4), C3
+  (p3). Only the free edges are data, in each edge's chord frame (`smooth` Catmull–Rom, `bezier`
+  or `polyline`); derived edges are isometric images, so any simple outline tiles. Editable corners:
+  TTTTTT V1–V3, TGTG w/h/shear, C3 V1, C4 none. `lib/bestiary.js` derives, blends (corners and
+  chord points linearly, no allocation) and locates; `tools/tiles/geometry.py` mirrors it, and
+  `tests/fixtures/tiles_golden.json` (the seeds, plus the koi/halibut blend) pins both to the
+  same points (vitest and pytest).
+- **A blend of valid tiles is a tile of the type, but not necessarily a simple one** (the brief
+  assumed it always was). So `check` also tests compatible pairs at 25/50/75 %, and each species
+  against its plain tile (the type-change path); a deliberately crossing pair fails in pytest.
+- **Colourings** (tested across every outline segment, wavy tiles included): TTTTTT (i + 2j) mod 3
+  over lattice steps (neighbours ±a, ±b, ±(a − b)); TGTG (copy + i) mod 2; C4 the quarter turn's
+  parity; C3 the third turn. The print state runs as p3 in atlas mode so all three class colours
+  exist; `accent` art takes the first palette slot no class uses, cycling with the shift.
+- **The atlas pass** (`shaders/tess/atlas-bake.frag`, `lib/atlas-gl.js`) bakes one period cell
+  (lattice coordinates, REPEAT) into two RGBA16F textures: outline distance and inward normal,
+  height hint; art edge distance and normal; packed copy, cell offset and role. A texel finds its
+  tile by testing the copies over the lattice steps their boxes can reach (computed per shape).
+  Its outline distance is to its own tile's outline only, since inside a tiling that is the
+  nearest edge. The art composites in painter's order, keeping the distance to the nearest
+  visible role edge. It bakes only when the tile changes: 256² while a morph re-bakes every frame,
+  then 512² with mips once settled. Outline and art come from a data texture (the art library
+  packed once at load, the outline in row 0, re-uploaded per change).
+- **Print side** (`shaders/tess/atlas.glsl`): `textureGrad` with analytic lattice derivatives
+  (seamless across the cell, mip-filtered when small). Outline and art edges are antialiased from
+  distances in target px (`S`, `pxq`), so they stay crisp at any zoom; the art role across an
+  edge is fetched one step past it. Then `tessPrint` as before: gouges follow each animal's
+  contour, figure/ground classes, `TESS_RING`/`TESS_CLASS`. **Engine change (minimal):**
+  `tess.glsl` has three `#ifdef TESS_ATLAS` hooks (a declaration, the art call in `tessPrint`, the
+  `u_tMotif` branch in `tessShade`). `tess-gl.js` splices `atlas.glsl` only for surfaces that
+  define TESS_ATLAS, and points its samplers at units 1–2: left on unit 0 they alias the print
+  target and WebGL refuses every draw (a black print). With `abstract`, all six visualizers'
+  `--shots` stills (still=150, black and light) are byte-identical to b1700b2. Other surfaces opt
+  in with the define plus `createAtlas` (see Metamorphosis).
+- **Morphing** (`lib/atlas.js` createCreatures): on tess-music's morph steps, held for
+  1 + ⌊(1 − Morph)·4⌋ steps (Morph 0 holds). Compatible species blend over 1.2 s (×4 Reduce
+  motion). The leaving species' art erodes (signed distance + w·0.12) while the arriving one's
+  grows in. About every third change switches tile type: species → plain tile → swap → plain tile
+  → species over 2.4 s, the print dipping to its mean at the swap (the lattices differ). The view
+  offset wraps every 6 cells of the atlas lattice (where all colourings repeat). Atlas zoom is
+  1.8 against 2.3, so the animals read larger.
+- **Registration is a directory scan**: one generated `index.json` per group (`tools.tiles
+  index`, checked current), with the group folders as the manifest's fixed options, so the four
+  group designers never edit a shared file.
+- **Seeds** (original outlines): koi and halibut (TGTG, a morph pair), Arctic tern (TTTTTT: a
+  translation tiling forces a notched tail, so a tern rather than a gull), sea turtle (C4) and a
+  mirror-symmetric bat (C3). The bat is the weakest silhouette: a C3 tile has 120° corners at
+  its 3-fold points, so the wingtips there can't be sharp. A slim dolphin and a hedgehog were
+  tried first and read as blobs in the regular hexagon frame.
+- **Fish** (9 more): salmon, shark, swordfish, sturgeon and moray share the koi's TGTG counts
+  (e0 s9, e1 s4), so seven fish morph; gulper (TGTG, e1 s5: its slit mouth crosses snouts when
+  blended), anglerfish and manta (TTTTTT), stingray (C3). In TGTG the back is the belly's glide
+  image, so thickness at x and at W − x sum to 2h (deep head ⇔ thin tail) and a dorsal fin is a
+  belly slot. Dropped: angelfish (both swept fins become dents that eat the body) and a C4 skate
+  (C4 can't be mirror-symmetric; the pinwheel read as a blob).
+- **Birds** (nine new, ten with the tern): mallard, puffin, kingfisher and cormorant are TGTG with the
+  koi/halibut edge structure (e0 smooth 9, e1 smooth 4), so they morph into the fish; gull and swallow
+  share the tern's (TTTTTT); chickadee, nuthatch and woodpecker are perching TGTG birds (e0 smooth 7,
+  e1 smooth 5) that morph into each other. Symmetric TTTTTT wings: V2 halfway up and e2 = e1 with v negated.
+- **Reptiles** (7 new, none in C3): crocodile, gharial and monitor (TGTG, one morph set: V0 is
+  the tail tip, so each snout rests on the tail ahead), tortoise and softshell (C4 on the sea
+  turtle's edges, morphing with it), horned lizard (C4, polyline for its spikes) and chameleon
+  (TTTTTT in profile; legs on the side edges so the back stays an arched hump). In TGTG and
+  TTTTTT, legs on the belly dent the back, so the walking gait and the corners place them. An
+  iguana (TTTTTT, chameleon's edges) read as a bat: its long tail notched the shoulder. Dropped.
+- **Mammals**: the bat is redesigned with its wingtips at V1/V5 (free corners, so they're sharp,
+  poking into a neighbour's ear notch at V3) and its wrists on the 3-fold centres. Added: elephant
+  face (C3, trunk tip at V3), lion face in its mane (C4), harbour seal from above (TTTTTT, with e2
+  = e1 mirrored and v negated so the body comes out symmetric), and dolphin, orca and humpback
+  (TGTG s9/s4 like koi/halibut, so all five morph). A running fox, leaping hare, flying squirrel
+  and hedgehog were dropped: legs became notches in the back, and C4 squares read as frogs.
+- **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`; GPU shared with other agents):
+  one species static p50 2–3 ms; `all` with morphs (bakes on the music) p50 9 ms, p99 13–14 ms,
+  58.8 fps. Three renders per vsync still hold 58.8 fps: 2–5 ms per frame, bakes included.
+  Abstract in the same session: p50 7–13 ms. Untested on the M1.
+- **With relief (integration, 2026-10-23):** the atlas hook (`tessArt`) sits in `tessPrintFill`,
+  the print tail `tessPrint` and `tessShadeRelief` share. Relief carves the abstract creatures
+  only: while the bestiary shows, Metamorphosis passes relief 0 (flat print, as before relief).
+  Texture units: print target 0, atlas field 1 and art 2 (set on every program, relief ones
+  included), relief height 3 (`HEIGHT_UNIT`, was 1, which aliased the atlas field).
+
 ## Lattice camera: smooth, with turns on the beat (2026-10-22)
 
 The user, watching Tentacle Lattice: "It's jumpy." Diagnosis came first: 60 s at 120 BPM through
@@ -359,6 +448,446 @@ tess-disk's view does. A 30,000-step test at 30/60/144 Hz and with jittered dt, 
 tilings, holds the form error below 1e-9 and |T(0)| below 0.4, with no mirroring. The early
 picture is unchanged: early harness stills (150 frames) are pixel-identical. The fold output
 matches the old code to 1e-10 over the first minute, with the same tile generations.
+
+## Tessellations: relief, the carved block, and music that moves it (2026-10-22)
+
+The engine can now carve the tiling into the block a woodcut is printed from, and the music drives
+that block in 3D. Metamorphosis is the showcase (Relief, Light params); the other surfaces adopt
+it later. Relief off is byte-identical: `run.py --shots` stills of Metamorphosis (Relief 0), Tile
+Horizon, Endless Zoom and Tiled Sphere match the pre-relief build (`cmp`).
+
+- **Block** (`tess.glsl` under `#ifdef TESS_RELIEF`, mirrored and tested in `lib/tess.js`): tiles
+  are raised blocks over a groove floor at 0, height RELIEF_BLOCK (0.07) × Relief × a profile of
+  the tile's interior distance, bevel (tops out 0.05 in) to dome (crown at the centre),
+  `u_tRelief.y` (0.35); slope ≤ 2 / 0.05, so a height-field march is safe. Gouges are cut 0.012
+  and features (eye, spine, fins, star) raised 0.014 as fine detail for the normals only.
+- **Music** (`lib/tess-music.js`, allocation-free, tested): every beat (tempo-locked when
+  confident, strong onsets otherwise) sends a front from ring 0 to 1 over 1.5 beats (≥ 0.6 s);
+  each ring's tiles lift with an 80 ms smoothstep, then settle as a spring released from rest
+  (2.2 Hz, ζ 0.6: a ~10 % dip, at rest by 0.9 s, no slope jump). A bar's first beat lifts 0.18
+  plane units at Reactivity 1 and Relief 1 (others 0.7 of it), so at the defaults a beat lifts a
+  tile by a fifth of its width. Up to 8 waves in flight; a beat with no free slot is dropped,
+  never cut short. Spectrum heave: 64 bands → 32 ring bins (bass inner, treble outer), each over
+  its own decaying peak (τ 6 s), eased (up τ 0.1 s, down 0.3 s) and blurred over neighbours,
+  0.07 peak. Onsets pop single tiles near the newest front (hashed choice, 0.06, 80 ms up,
+  0.25 s down, 3 slots). Each tile varies ± 30 %. Reduce motion: lifts × 0.4, spreading half as
+  fast. Reduce flashing: lifts and pops × 0.4 (their shadows pump the mean light less).
+- **Cards**: in relief the figure/ground cross-fade becomes each tile turning over (θ = π ×
+  the old fade, same flash limit, Reduce flashing still 19.2 s and narrower, hop 0.08 → 0.02).
+  The card is squeezed by |cos θ| across its axis (radial from the ring origin) in the warped
+  plane q, not p: the true p-space centre would need the warp's inverse per tile. It is drawn
+  unmirrored on its back, so at θ = π it is the tile itself in its new colour and the shift
+  lands without a jump. Its height is shallowed (CARD_RISE 0.3): at full height edge-on cards
+  stood as tall walls the march smeared. Outside the squeezed tile the bare bed shows.
+- **Metamorphosis**: a height pass (the surface compiled with `TESS_HEIGHT_PASS`) writes the
+  block's height at 0.35 × the print resolution over the view × 1.12. Then each pixel marches its
+  perspective ray (camera 2.2 half-short-sides above the centre, resting tops where the flat
+  print has them) down from the current bound `u_tRelief.z` (`lib/tess.js reliefBound`: lower
+  when nothing lifts), stepping every 3 height texels of lean (1–16 steps, jittered), with 5
+  bisections. Shading uses the analytic block gradient plus the fine carving's screen
+  derivatives, cut sides of taller neighbours, a soft shadow marched towards the light (≤ 8
+  steps), darker grooves and a faint sheen. A flat top in full light prints at its colour. Light
+  is 0–360° round the view at 32° elevation (default 135°, upper left).
+- **Motion** (`motion_hook.py`, synth music, Reduce flashing off, relief default vs Relief 0,
+  which is the old build): loud 0.0131 → 0.0275, loud/silence 0.90 → 1.56. With the drift
+  stopped (Speed 0), only the music moves it: loud 0.00118 → 0.0222 (19×). The beat ratio
+  (150 ms after / before a strong onset) is 1.01 → 1.04 because waves now overlap continuously.
+- **Cost**: WebKit harness, 2560×1440, Quality high, `sync=1`, measured alternately with the
+  flat print on a GPU shared with other agents. Relief p50 11–16 ms, p99 25–27 ms, 55.6–58.8 fps;
+  flat 7–14 / 8–29 ms in the same runs (one earlier relief run 20 / 28 ms at 45 fps under load).
+  Roughly 1.3–1.6× the flat print. Flash check (10 Hz strobe): Reduce flashing on 0 /s at 5 %;
+  off 1 /s at 5 % (2 at 2 %), from the lifted tiles' shadows, under the 3 /s limit.
+- **Known**: a turning card's cut sides show a fine fringe where the coarse height texture
+  steps. Detail normals use `dFdx`, so they're coarse at silhouettes.
+
+**The relief seam** (`#define TESS_RELIEF` before `// #include tess`; `createTessPipeline(ctx,
+surface, { relief: true })` also builds the `TESS_HEIGHT_PASS` variant and binds its target as
+`u_tHeight` / `u_tHeightTexel` while `state.relief > 0`):
+
+```glsl
+vec3 tessRelief(vec2 p, mat2 S);   // height (plane units, 0 … u_tRelief.z) and dh/dp
+vec4 tessShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail);
+// r: tile, J, blend, h, grad (dh/dp), prof, face (0 front, 1 back), pit; detail = fine carving
+// optional hook: #define TESS_FLIP_DIR(c) …  (unit direction across a card's axis; default radial)
+```
+
+A surface either **displaces geometry** with `tessRelief(p, S).x` along its normal (floor, torus,
+sphere: raymarch with `u_tRelief.z` as the bound), or **shades it as relief** like Metamorphosis
+(flat, zoom: height pass plus a per-pixel march). The state gains `relief`, `profile`, `lift`
+(32 bins), `pops` (3 × vec4), `flipHop`, `flipping` and `reliefMax`, and takes `relief` (0–1)
+in the options. Everything a flat surface reads is unchanged (tested frame by frame).
+
+## Tessellations: Poincaré Disk, the hyperbolic surface (2026-10-22)
+
+**Poincaré Disk** (`poincare-disk`, webgl2) prints interlocking creatures tiling the hyperbolic
+plane in the Poincaré disk. The tiles shrink towards the rim forever. It uses the engine's print look, palettes and music state
+on a {7,3}, {5,4}, {4,5} or {6,4} tiling (`src/lib/tess-disk.js`, `shaders/tess/disk.frag`).
+
+- **The tiles are kites, not p-gons.** A p-gon of {p,q} has p-fold symmetry, so it can only
+  deform into a rosette. The kite O, M, V, M′ (the fundamental triangle and its mirror across
+  O–V) is a fundamental domain of the rotation group, as the engine's p4 half-squares are for
+  (2,4,4). So an asymmetric creature (eye, spine, fins) repeats in every kite, turning with it.
+  uv: O, M, V, M′ → (0,0), (1,0), (1,1), (0,1), as the engine's p4 tile.
+- **The warp, and why it still tiles:** every point of the fundamental triangle lies in the
+  diamond round its edge midpoint M. That is four triangles, one corner of each of the four
+  kites meeting there. In a square chart of the diamond (M to 0, Klein, scaled) the kite edges are the
+  diagonals. The field `W Σ A sin(nπ(s+1)/2) sin(mπ(t+1)/2)` with n + m odd is odd under
+  the half-turn about M, which is the diamond's only rotation. So the warp commutes with the
+  whole rotation group, and every kite stays congruent. W = cos²cos² makes the field and its
+  slope vanish on the diamond's rim (the O–V lines run through the middle of the kites), so it
+  is smooth there. Each step is fitted under a Lipschitz bound of 0.85 (per-mode slope max π or
+  2π, checked on a grid), and 4 steps are composed, as in the engine. The tests check
+  congruence under random rotations of the tiling, with and without the warp.
+- **Colouring:** the fold reads its word of mirrors back to front, so a colour can't be
+  carried along. The shader tracks the word in a finite quotient of the triangle group:
+  2×2 matrices mod r (PGL(2, r): {7,3} r = 7, {5,4} and {4,5} r = 5, {6,4} r = 7), one integer
+  matrix product per fold step. It then reads one texel of an r² × r² table holding the classes
+  of the four kites round M. The table comes from a DSATUR 3-colouring of the quotient's kite
+  graph (168, 120, 120 and 336 kites), evened out. Edge neighbours differ by ρ±1 or τ±1, never
+  trivial in the quotient, so the colouring is proper in the whole plane. Tested in the group
+  and across bisected edges in the plane. 3 classes is what the engine's u_tCls holds;
+  {7,3} needs at least 3 (a vertex has 3 kites round it), and its 3 are exactly balanced (56 each).
+- **View:** drifts `DISK_DRIFT` 0.12 hyperbolic units per unit of glide travel (bass plus the
+  eased beat surge), along a slowly wandering flow. A drag carries the plane with the pointer
+  and eases the flow round to the drag's direction (τ 0.35 s). Rebased every frame, but **not
+  with `createDrift`**: its rebase can apply a mirror (which would flip the creatures), and its
+  matrix degrades until T(0) leaves the disk after about 6,000 frames at this speed. That is a
+  latent bug for Tentacube too (not fixed here). The view rebases by rotations only, re-projects
+  T to translate ∘ rotate each frame, and records the quotient element of each rebase (`e0`, the
+  fold's starting matrix) so the colours on screen don't change.
+- **Rings and rim:** a tile's ring is its hyperbolic distance from the screen centre (the
+  centre's image is folded alongside), reaching 1 where kites are 3 px. Fronts and spectrum
+  rings spread from the centre to the rim. A tile size from the disk metric at the pixel (smooth across a kite)
+  drives the print's fades (`tessPrint` takes it): the true per-pixel size varies 0.45–3.6×
+  across a kite. Kites under ~1 px print as ink (no fold there), then the edge is antialiased
+  into paper.
+- **Engine changes (backward-compatible):** `tessShade`'s body is now `tessPrint(t, tf, pxq,
+  tileSize, dpx, m, q)`, and `tessShade` keeps its signature (Metamorphosis stills, p4 and
+  p3/watercolour, byte-identical before and after). The tess state exposes `morphW` and `theta`.
+- **Cost:** WebKit harness, 2560×1440, Quality high, `sync=1`: one frame per vsync 62.5 fps,
+  p50 12–15 ms, p99 22–24 ms. 10 frames per vsync: 11.7 ms per frame (medium: 4.1 ms). CPU
+  < 0.1 ms. The GPU was shared with other agents (Metamorphosis measured p50 9–22 ms in the same
+  runs, against 6–8 ms in its own notes), so these numbers are noisy.
+
+**The 3D scene (Scene = sphere, the default since 2026-10-23).** A lacquered coin carrying the
+print floats in a large sphere tiled inside (Tiled Sphere's cube-sphere), turning the other way.
+Flat is the print alone and still renders byte-identically to b1700b2 (`run.py --shots --prefix
+_base/` against a `git archive` of b1700b2: default and {5,4}/watercolour/drums, black and light).
+- *Pieces:* `lib/disk3d.js` (tested): waveform rim (trigger, seam), coin spin (mids) and
+  spinning-plate tilt (bass, beat surge), counter-spin, beat kicks, `rippleLift`, `specLift`, the
+  music drive and the camera director (orbit, swoop, skim, pull-back; clearance, phrase moves,
+  drag, still). `tess-disk.js` view `nudge()` (exact kick) and `tracked` (impact point carried
+  through rebases). `shaders/tess/disk3d.frag`: ray-marched coin (waveform rim, brushed metal),
+  face = `diskShade` + lacquer (GGX, Fresnel, a cheap one-warp-step wall reflection), parallax
+  ripple/heave and lift shading, treble glints on gouges, AO, the wall (fogged paper), an ink
+  silhouette. Shared includes `disk.glsl`, `sphere.glsl`; `tess-gl.js` splices `// #include`.
+- *The music drive* (`createDrive`) paces the camera's path, the coin's spin (and so the
+  counter-spin) and the tiling's drift: 0.25 in silence (eased over 1.5 s), 0.6 with music at
+  average bass, + 1.2 × the passage's bass (lag 0.8 s: energy, not the beat) + 3 × an eased beat
+  surge (the beat envelope through two 35 ms lags). Times the Speed param for the drift and the
+  camera. The camera director takes `intensity` (surge + the passage's bass) and widens each
+  move's swing by it (lag 0.12 s): orbit and pull-back bob and lean in, the swoop rises higher and
+  closer, the skim dips. Kicks 2.4 hyperbolic units/s at the envelope's peak (was 0.9); ripple
+  0.1 world units high (was 0.05), reach 1.1 (was 0.7); heave 0.06 (0.035); bass tilt 0.35 rad
+  per unit (0.22), beat tilt 0.14 (0.06), tilt spring 9/s (6); mids spin gain 2 (1.2).
+- *Why the drive:* the old pace was the tess glide (1 at rest, ~1.3 loud), so silence moved
+  nearly as much as music, and bass read through `bassAtt` arrives late (the att lag), so a
+  bass-driven swing put motion just *before* the next beat. Ablations (motion profile folded on
+  the beat) showed the camera's pace carries most of the beat shape at the probe's scale; the
+  kicks and ripples are local and read in stills, not in the 96 × 54 probe.
+- *Motion* (`motion_hook.py poincare-disk --query "p.scene=sphere&p.camera=…&reduce=0"`):
+  auto camera loud/silence 0.98 → 5.52, beat ratio 1.06 → 1.22; still camera 1.20 → 5.37,
+  1.11 → 1.18. loud/quiet stays ~1.0: the synth's quiet passage only scales levels, and every
+  drive input is normalized (att, the beat).
+- *AO* (a few samples): on the face, a horizon test against the carved outline as a tile-scaled
+  V groove (half-width 0.045 tile units, depth 0.6 of that; faded out under ~12–40 px tiles) at
+  0.5, 1 and 2 half-widths either side, and against the relief (ripple and heave) in four
+  directions at 0.04 and 0.1 world units; on the rim, three samples of the coin's SDF along the
+  normal. Replaces the old closeness-gated darkening (`u_near` is gone).
+- *Bumps, cleanly:* the bigger ripple folded the parallax-mapped print on its far slope
+  (dw′/dw = I + pc ∇hᵀ goes negative): the shift is scaled to keep pc·∇h ≥ −0.6 and the print's
+  Jacobian includes it. The wall's reflection was minified to a speckle on the bump: it fades to
+  0.9 × the wall's mean colour as the slope rises (0.02–0.12). Glints fade under ~4 px gouges.
+- *Framing:* the skim comes in low over the rim (r 0.95, y 0.42) looking across the face to its
+  far side, so the face fills the lower frame (it used to look along a tangent, mostly at the
+  wall); the swoop's look-at stays within 0.2 of the centre. `director.force(move)` jumps
+  straight to a move (tests; stills via a temporary `?move=` hook, not committed).
+- *Cost:* WebKit harness, 2560×1440, Quality high (the default; flat needs it to stay
+  byte-identical), `sync=1`, one render per vsync: 58.8 fps, p50 9–12 ms, p99 10–22 ms in most
+  runs; one run under heavy contention 17 / 31 ms at 55.6 fps (Metamorphosis 12 ms in the same
+  minute, against 6–8 in its notes). Two renders per vsync: ~7.5 ms each at high (55.6 fps),
+  ~4.5 ms at medium (58.8 fps); Metamorphosis ~6–6.5 ms each. So high is about 1.2× Metamorphosis
+  and holds 60 fps here; medium is the fallback for the M1 reference machine (not measured
+  there). Flash check (`--flash`): 1 flash/s at 2 %, 0 at 5 % with reduce flashing off; 0 and 0
+  with it on.
+- *Invariants:* the view rebases by rotations only, re-projects T each frame, and records `e0`
+  (colours stay put across rebases; the shader's fold starts at u_gE0). The 3D state runs
+  symmetry p4 (the wall needs it) with u_tCls overridden by `threeClassColors`; flat runs p3.
+  The face colour comes from `tessPrint` via `diskShade`; lighting and AO apply after it.
+- *Gotchas:* take all dFdx before branches (face chart = analytic plane hit, wall direction
+  computed for every pixel); a face-plane hit inside the printed disk skips the march (nothing
+  rises above the face). `DISK_IMPACT` must be defined before `// #include disk`. The ripple's
+  constants (speed 3, reach 1.1) are duplicated in disk3d.frag `rippleLift`.
+- *Open:* the thumbnail is still the flat print; the wall's colouring is Tiled Sphere's (two
+  classes plus seam tiles); not measured on the M1 reference machine.
+
+## Tiled Torus: the tiling on a torus, outside and inside (2026-10-22)
+
+**Tiled Torus** (`tiled-torus`, webgl2) wraps the tessellation engine's tiling around a torus
+(ring radius 1, tube radius = Thickness), seen tumbling over paper (`outside`), flown through
+along the tube's centre circle (`inside`, fog down the tube), or both (`auto`). It is a surface
+on the seam above (`shaders/tess/torus.frag`, `src/lib/torus.js`); the engine is unchanged.
+
+- **Mapping:** conformal coordinates, x = lx (θ/2π + fu), y = ly (t(φ) + fv) with
+  t(φ) = (1/π) atan(√((1−k)/(1+k)) tan(φ/2)) (atan2 form, continuous on (−π, π]). Tiles are
+  squares everywhere (bigger on the outer equator, (1+k)/(1−k) times the inner ones), not just
+  near-square. lx = nu, ly = nv (p4) or nv √3 (p3, the rectangular sublattice (1, 0), (0, √3)):
+  nu, nv multiples of BLEND_PERIOD, chosen so ly / lx is within 15 % of the conformal ratio
+  k / √(1 − k²) with nu near 30. The tests check the warp field and tile classes repeat after lx
+  and ly for both groups, so both symmetries are supported.
+- **S is analytic:** the ray differential on the hit's tangent plane times the analytic
+  gradients of θ and t, so outlines don't break at θ = ±π, φ = ±π (WebKit seam close-up checked)
+  or the silhouette; screen derivatives would need wrapping at both seams and fail at the edge.
+- **Render:** sphere tracing the exact torus SDF (64/80/96 steps by Quality), from the bounding
+  sphere outside; inside, a ray that grazes the curving wall and runs out of steps takes where
+  it got to (falling back to the fog colour drew a bright crescent). Outside, the silhouette is
+  inked from the closest miss in px.
+- **Camera:** one azimuth shared by the orbit and the fly path, so a dive goes straight in where
+  the camera is and comes out where it has flown to. The dive lerps the position over 6 s
+  (smoothstep; reduce motion 12 s) and turns the heading down the tube only after 40 % of it, so
+  the torus stays in view while the camera closes in; crossing the wall dissolves through paper
+  (fade 1 on the wall, 0 at 0.6 tube radii). Auto dives on phrase changes (every 8 bar steps of
+  tess-music, ≥ 20 s since the last change), or after 60 s without one. Drag orbits outside and
+  turns the look inside; it eases back over 1.6 s (smoothstep) after release.
+- **Music:** all motion is the state's glide travel (bass + the eased beat surge): orbit 0.04
+  rad, fly 0.2 rad, tile flow 0.004 turns along the ring per unit of travel (the spin round the
+  tube: see Spin and twist below).
+  TESS_RING runs along the ring, 0 at the camera's azimuth to 1 half a turn away both ways, so
+  figure/ground fronts and the spectrum rings travel around the torus from the viewer.
+- **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`, GPU shared with other agents:
+  Metamorphosis measured 8 / 13 ms p50 / p99 at the same time, against 6–8 / 7–11 above):
+  outside p50 5 ms, p99 9–10 ms (p3 the same); inside p50 12 ms, p99 17 ms (full-screen tiles
+  plus the march), 58.8 fps for both. Two renders per vsync inside still hold 58.8 fps (7.5 ms
+  each); three drop to 18.5 fps. CPU < 0.1 ms. Flash check: 0 flashes/s at 2 % and 5 %, reduce
+  flashing on and off. Untested on the M1 reference machine; Quality medium brings an
+  inside render to about 5 ms (from 7.5).
+
+**Waves (2026-10-23).** The waveform deforms the torus: each ring is born at the hole and rolls a
+full lap round the tube (hole → top → outer equator → underneath → hole) at full height; just
+past the hole the finishing waves cross-fade into the newborn ones over BIRTH (0.2 lap), so the
+lap closes with no step and no dip. Rings close round θ by cross-fading the window's tail into
+its start (no taper). The beat stamp (1 + envelope; 80 ms rise, gone by 0.9 beat) and the bass are
+baked into the row being pushed: nothing on the surface changes size on a beat. Cost (WebKit,
+2560×1440, `sync=1`, interleaved with Metamorphosis under the same shared-GPU load): outside
+4 ms p50 / 5–6 ms p99, inside 6–7 / 7–8 ms, Metamorphosis 6–7 / 7–9; 58.8 fps everywhere.
+
+**Spin and twist (2026-10-23).** The tiles roll round the tube: the spin shifts the conformal t
+(not φ), so tiles stay square, growing over the outer equator and shrinking into the hole. Rate =
+`SPIN` (1/60) × Spin param × glide travel: Spin is turns a minute at rest (travel 1/s at Speed 1),
+signed, −2…2, default 1; bass and the eased beat surge speed it up (tested: never reverses, the
+per-frame rate change stays < 15 % of the base under kicks). Reduce motion: × 0.4 on top of the
+glide's × 0.25. Twist (0–2 half-turns a lap, default 0) adds tw · θ/2π to t, so the tiles stream
+round the ring in a helix; `twistTurns` snaps tw so ly · tw is a whole number of BLEND_PERIOD y
+periods (tested closed across θ = ±π for p4 and p3, with spin), and S gains its shear term. The
+waves stay on the geometry: `disp()` and torus-disp.frag never see `u_flow` / `u_twist` (a source
+test guards it), so the tiles slide over waves that keep rolling hole → top → outer equator.
+Inside, the whole wall turns round the camera. Cost unchanged (WebKit, 2560×1440, `sync=1`,
+interleaved, shared GPU): outside 4–5 / 5–6 ms p50 / p99, inside 6–6.5 / 7, Metamorphosis 6–6.5 / 7;
+58.8 fps; Twist 2 the same. Stills: scratchpad `shots/torus-spin-*.png` (outside, inside, spin 0
+vs 1 at the same frame, twist, p3 twist 2).
+
+**Handoff for the next agent (Tiled Torus):**
+- Wave history: `src/lib/torus-wave.js` `createWaveHistory` (trigger, auto-gain, `resampleLoop`
+  seamless θ, `smoothRing`, `SHAPE_BLEND`, `ROW_SLEW`, stamp/bass in `rowGain`); one R16F row per
+  push (COLS 128 × ROWS 72, LAP_ROWS 56 a lap). `dispAt` is the tested definition of the surface.
+- Displacement: `shaders/tess/torus-disp.frag` bakes it each frame into a 512×256 R16F map over
+  (θ/2π, age), REPEAT both ways; `torus.frag` `disp()` is one bilinear tap × `u_amp`. Needs
+  `EXT_color_buffer_float`; without it `amp` = 0 (smooth torus).
+- March: `torus.frag` main loop, exact shell skip (|sdTorus| − `u_dmax`) then over-relaxed
+  (ω 1.5) steps of f × `u_stepK`; `stepFactor` (JS, per frame) bounds |∇disp| from the history and
+  is tested against the real gradient; `liveDisp` sets the shell. Rays that run out of steps in the
+  shell are projected onto the surface.
+- Clearance: `maxDisp` ≤ 0.45 k (tested), so the inside camera (on the centre circle) is ≥ 0.55 k
+  from any wall. Uniforms: `u_dispMap`, `u_amp`, `u_dmax`, `u_stepK`, `u_flow` (fu, fv), `u_twist`, `u_side`.
+- Gotchas: the march cost is grazing walls inside the tube (hence `insideScale`, switched under
+  the paper fade, and the fog-scaled tolerance); row-to-row cliffs (beat stamps) shrink the step
+  factor 2–3×, hence the slew limit; zsh doesn't word-split `$var` in loops; the shared scratchpad
+  gets overwritten by other agents, keep scripts in your own folder.
+- Spin / twist: `SPIN`, `REDUCED_SPIN`, `twistTurns`, `planePoint(…, tw)` in `src/lib/torus.js`;
+  camera `fv` is the spin; uniform `u_twist`. Tiles only: keep the displacement free of them.
+- Left: adopting the relief engine once it's merged.
+
+## Tessellations: Tiled Sphere (2026-10-22)
+
+**Tiled Sphere** (`tiled-sphere`, webgl2) wraps the woodcut tiling round a sphere, seen from
+outside (it floats and turns on the paper, a soft limb shade and shadow) or from inside (a tiled
+dome all round); in `auto` the camera pushes through the skin on a phrase change and back out on
+a later one. Surface: `shaders/tess/sphere.frag`; JS: `lib/cube-sphere.js`, `lib/sphere-view.js`.
+
+- **Cube-sphere, p4 only**: six equal-angle faces of 3 × 3 lattice cells (`faceCells`: a divisor
+  or multiple of BLEND_PERIOD), 24 tiles round the equator. Across each edge the two face planes
+  differ by a quarter turn plus whole-face translation (`transitions`, exact along the edge), a
+  symmetry of the p4 warp, so the tiles carry on with no gap or kink. p3 would need an icosahedral
+  net whose corners turn 60°, which p3 can't absorb, so there is no Symmetry param.
+- **Colours across edges**: a quarter turn swaps the checkerboard's classes and every corner turns
+  an odd number of quarters, so no 2-colouring closes up. Each tile takes the class of the face
+  whose warped square holds its centre; per-face flips (searched, 64 cases) leave 4 seam edges,
+  one per corner, where every other tile along the seam takes the palette's third colour. On the
+  regular cells no two neighbours share a colour, corners included (tested); the warp still
+  distorts the tiles right at the 8 corners. Engine change: an optional `TESS_CLASS(cls, c)` hook
+  in tess.glsl (default `cls`), like TESS_RING.
+- **The spatial blend is off on the sphere** (`u_tBlend.xy = 0`): the wave runs along one lattice
+  direction, which a quarter-turn edge breaks, so the two motif sets blend in time only.
+- **S** = the face chart's analytic Jacobian × screen derivatives of the hit point, which are
+  smooth across faces (misses use the closest point, so the limb is continuous too); outlines keep
+  their weight over the edges. `TESS_RING` = angle from a pole (upper left) / π, so fronts and
+  spectrum rings sweep the sphere like a terminator.
+- **Motion**: turn = 0.07 rad per unit of glide travel (bass and the eased beat surge), axis tilt
+  swaying slowly. Push-through: smoothstep over 6 s (Reduce motion 12 s), on every 8th morph step
+  (a phrase with a tempo) ≥ 12 s after the last, or after 60 s anyway; within 0.15 of the surface
+  the print fades to paper, so crossing the skin is soft. Drag orbits outside, looks round
+  inside, and eases back with a critically damped spring (no jolt, no overshoot; slower under
+  Reduce motion).
+- **Cost**: WebKit harness, 2560×1440, Quality high, `sync=1`: outside p50 4 ms / p99 9 ms, auto
+  6 / 10, inside 14 / 25, 58.8 fps for each. Measured while other agents shared the GPU:
+  Metamorphosis measured 15 / 20 in the same session (6–8 / 7–11 above), so the inside numbers
+  are inflated by about the same factor.
+
+## Tessellations: Endless Zoom (2026-10-22)
+
+**Endless Zoom** (`endless-zoom`, webgl2) is a tessellation surface: Metamorphosis's
+woodcut tiling seen through a log-polar map, p = α log z + O (z relative to the vanishing point,
+in half-short-side units), so it spirals self-similarly into the centre and zooms without end.
+
+- **Closure** (`src/lib/tess-zoom.js`, on `tess.js` `drosteAlpha`/`drosteAt`): one turn moves p by
+  V = α·2πi = a e1 + b e2. The tiles close for any integer a, b, but the metamorphosis blend wave
+  must also repeat over V or the shapes jump at the seam: both groups' waves have
+  k·e1 = 1/BLEND_PERIOD, k·e2 = 0, so a = BLEND_PERIOD (6) and b is the twist. Spiral: none /
+  gentle / medium / strong = b 0 / 1 / 3 / 6 (b = 3 still reads as a mild twist; 6 gives real
+  arms). Tested across the seam for every option and group (field, tile class and uv agree).
+  Colour classes survive any lattice translation (p4 parity, p3 sector).
+- **S** is the analytic Jacobian, α / z / hs as a complex multiply; `dFdx` would see the atan
+  wrap. The engine's ink-spread noise (`tessNoise(q · 9)`) is not lattice-periodic, so outline
+  width can step by a few percent where an outline crosses the seam; not visible in stills.
+- **Zoom**: O moves by −α · ZOOM_RATE (0.2 log-scale per unit of glide travel) × Zoom speed ×
+  the eased direction, so bass and the eased beat surge set the pace through `s.travel`. O wraps
+  by whole BLEND_PERIOD lattice steps (tiles and wave both repeat there): seamless, small floats.
+  Direction changes ease the sign through 0 (τ 0.6 s), never a reverse jolt.
+- **Rings** (`TESS_RING`) by log radius Re((c − O)/α), constant round a turn so it agrees across
+  the seam: from the vanishing point's soft edge to the farthest corner. Fronts ripple outward
+  zooming in, inward zooming out; the order only flips while no front is under way.
+- **Centre**: the engine fades sub-10 px tiles to their mean; then a soft point (radius 0.015–0.11)
+  of ink zooming in, paper zooming out (eased with the direction).
+- **Drag** moves the vanishing point (≤ 0.75 units); on release it eases home over 1.4 s with a
+  smoothstep (zero speed at both ends). The ring span follows it.
+- **Cost**: WebKit harness, 2560×1440, Quality high, `sync=1`: p50 6 ms, p99 11 ms, 58.8 fps
+  (Metamorphosis in the same run: 7 / 9 ms); 3 frames per vsync: 50 fps, so ~6.7 ms GPU (shared
+  GPU with other agents' runs, so noisy). CPU (no sync) p50 < 0.1 ms. Flash check, 10 Hz strobe:
+  0 flashes/s at a 5 % threshold, reduceFlashing on and off.
+
+## Tessellations: Tile Horizon, the floor surface (2026-10-22)
+
+**Tile Horizon** (`tile-horizon`, webgl2) casts the engine's woodcut tiling onto an endless floor
+seen low in perspective, receding to a horizon that fades into the paper. Same motifs, palettes,
+music and params as Metamorphosis, plus Height, Tilt and Fog. No engine change: it is one
+surface shader (`shaders/tess/tile-horizon.frag`) plus a camera (`src/lib/tess-floor.js`).
+
+- **Surface**: per-pixel ray–plane hit (focal 1.6 half-short-sides, ~32° half field of view),
+  `S = mat2(dFdx(p), dFdy(p))`, computed for every pixel (sky too) so the derivatives stay
+  defined across the horizon. The floor fades to paper by distance (`1 − exp(−3 (d/fog)²)`) and by
+  footprint: a half-unit tile under 16 → 5 px along its most foreshortened axis. The engine's own
+  small-tile fade uses √|det M|, the geometric mean, which stays moderate at grazing angles where
+  the depth axis already aliases, so the surface needs the worst-axis test. Fully fogged pixels
+  skip `tessShade`, so the sky costs nothing.
+- **Rings**: `TESS_RING` is the distance from the camera's ground point over 0.6 × the fog
+  distance, so figure/ground fronts and the spectrum rings sweep outwards across the floor.
+- **Camera**: ground speed = travel × 0.6 × height (the floor's apparent speed doesn't depend on
+  Height); the heading drifts as two slow sines (≤ 0.05 rad/s); the position wraps every
+  `BLEND_PERIOD` lattice steps. Drag grabs the world (0.004 rad/px pan, ≤ 1.2 rad; 0.003 rad/px
+  tilt, pitch kept within 0.03–1.3 rad); on release a critically damped spring (ω 2.2/s, solved
+  exactly per step) eases it back from rest with no overshoot. Reduce motion: heading drift
+  × 0.25, ease-back ω × 0.5 (the glide is already × 0.25 in the state). Height 0–1 → 0.25–1.5
+  units, Tilt → 0.06–0.6 rad below the horizon, Fog → 40–8 camera heights.
+- **Cost**: WebKit harness, 2560×1440, Quality high, `sync=1`: p50 7 ms, p99 10–11 ms, 58.8 fps
+  (p4 default and p3 at Tilt 1), the same as Metamorphosis; CPU p50 < 0.1 ms. The GPU was shared
+  with other agents' harnesses while measuring. Flash check: 0 flashes/s at 5 %, Reduce flashing
+  on and off.
+
+## Tessellations: the engine and Metamorphosis (2026-10-22)
+
+**Metamorphosis** (`metamorphosis`, webgl2) is the first of a series of interlocking-tiling
+visualizers: a p4 or p3 tiling whose tiles turn into hooked, lobed, finned and star-like
+creatures, printed like a multi-block woodcut (bold key-block outlines, gouges echoing each
+contour, colour blocks slightly out of register, paper fibre and tooth). Motifs, palettes and
+names are original; the palettes only follow the ink colours of 1930s–60s woodcuts.
+
+- **Tiling engine** (`src/lib/tess.js`, `shaders/tess/tess.glsl`): a displacement field
+  `d(p) = Σ A cos(2π k·p + φ)` symmetrized over the group's rotations (k on the dual lattice, so
+  it's lattice-periodic), applied as 4 composed steps `p + d(p)`. Each step's Lipschitz bound
+  (Σ |A| 2π|k|, plus |∇m|·(D_A + D_B) for the spatial blend m between two coefficient sets) is
+  fitted to 0.85, so every step, and so the warp, is a homeomorphism: the tiles always tile.
+  One step alone only moves points ~0.03 units (the bound is conservative); four give real hooks.
+  Tiles: p4 half-unit squares in a checkerboard (2 classes), p3 the three rhombi of each hexagon
+  (3 classes; same-class tiles are translates ≥ 1 apart, edges are 1/√3, so never adjacent).
+  Colour slot = (class + shift) mod n with n ≥ 3 distinct tile colours, so any figure/ground
+  shift is still a valid colouring. Tile-local uv (0–1) turns with the tile for the features.
+- **Music** (`src/lib/tess-music.js`): morph targets step once a bar (4 tempo beats; strong
+  onsets ≥ 0.75, ≥ 2 s apart, without a tempo), easing over 1.5 beats (≥ 0.6 s); the smoothed
+  centroid (0.05–0.3 of Nyquist) picks lobed → finned → star → hooked; Morph sets how far each
+  step travels. Bass and an eased beat surge (80 ms smoothstep rise, gone by 0.9 beat, then a
+  0.12 s lag) set the drift. Phrase changes (32 beats) or onsets ≥ 0.92 sweep a figure/ground
+  front across the rings of tiles over 3.2 s, ≥ 8 s apart; Reduce flashing: 19.2 s, ≥ 24 s
+  apart, a narrower front. Reduce motion: glide × 0.25, steps every 2 bars, eases × 4.
+  Reactivity (0–2) scales every audio effect; 0 also stops inversions.
+- **Cost**: WebKit harness, 2560×1440, Quality high, `sync=1` (GPU included): p50 6–8 ms,
+  p99 7–11 ms, 58.8 fps; rendering 3 frames per vsync drops to 55.6 fps, so the GPU part is
+  ~5.5 ms. CPU (no sync) p50 < 0.1 ms. Flash check under a 10 Hz strobe: 0 flashes/s at a 5 %
+  threshold, reduceFlashing on and off. Untested on the M1 reference machine; Quality medium /
+  low (0.75 / 0.5 render scale) are there for it.
+
+**The seam for new surfaces** (floor, Droste, hyperbolic, sphere, torus …): a surface is a
+fragment shader that maps its pixel to the tiling plane and calls the engine.
+
+```glsl
+#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 o;
+// optional: float myRing(vec2 c) { … }  #define TESS_RING(c) myRing(c)   (before the include)
+// #include tess
+uniform vec2 u_res;                 // set by the pipeline: print-target size
+void main() {
+  vec2 p = …;                       // plane point (lattice units) for this pixel
+  mat2 S = …;                       // dp/dpixel (target px); e.g. mat2(dFdx(p), dFdy(p))
+  o = tessShade(p, S);              // linear RGB, a = 1; or tessShade(p, float px) if isotropic
+  // apply the surface's own fog/sky to o.rgb here
+}
+```
+
+`S` keeps outlines, gouges and features a constant print weight in pixels however the map
+stretches the plane (use an analytic S where p has a seam, e.g. log-polar's angle wrap).
+`TESS_RING(c)` gives a tile (by its plane centre c) its ring, 0 near/centre … 1 far/edge, for the
+figure/ground front and the spectrum rings; the default is `|c − u_tRing.xy| / u_tRing.z`.
+`TESS_CLASS(cls, c)` (optional) recolours a tile from its regular class and centre (0–2, into
+`u_tCls`; Tiled Sphere uses it where its face charts meet with a class-swapping turn).
+On the JS side:
+
+```js
+import { createTessPipeline } from "./lib/tess-gl.js";
+import { createTessState, renderScale } from "./lib/tess-music.js";
+const tess = await createTessPipeline(ctx, "shaders/tess/<surface>.frag");
+const state = createTessState();
+tess.resize(renderScale(ctx.params.quality));          // and tess.resize() on ctx resize
+// frame(audio, time):
+const s = state.step(audio, time.dt, { symmetry, palette, reactivity, speed, morph, ink,
+  hatching, height: ctx.size.height, reduceMotion: ctx.reduceMotion, reduceFlashing: ctx.reduceFlashing });
+tess.render(s, (gl, u, w, h) => { /* the surface's uniforms, incl. u_tRing unless TESS_RING */ });
+```
+
+`s.speed` / `s.travel` (glide), `s.env` (beat envelope), `s.stepped`, `s.family`, `s.shift` are
+there for the surface's own motion. Plane offsets can wrap every `BLEND_PERIOD` (6) lattice
+steps (the tiling and the blend wave both repeat there). Shared GLSL is spliced in with
+`// #include tess`, like Laminar's `// #include common`.
 
 ## Beat tracking: Ballroom harness and a new tracker (2026-10-22)
 
