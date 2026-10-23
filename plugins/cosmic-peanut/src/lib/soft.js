@@ -52,6 +52,18 @@ export function createSoftTarget(gl, ctx, blitVs, blitFs) {
       gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, msaaRb);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     },
+    /**
+     * Free the buffers while the cinematic look draws instead (it has its own target): 1×1
+     * placeholders until the next `resize`. Allocates; Look changes only.
+     */
+    release() {
+      softW = 0;
+      softH = 0;
+      gl.bindTexture(gl.TEXTURE_2D, softTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindRenderbuffer(gl.RENDERBUFFER, msaaRb);
+      gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, gl.RGBA8, 1, 1);
+    },
     /** Bind where this frame's lines go and clear it to transparent. @param {"canvas" | "msaa" | "soft"} path */
     begin(path) {
       if (path === "canvas") {

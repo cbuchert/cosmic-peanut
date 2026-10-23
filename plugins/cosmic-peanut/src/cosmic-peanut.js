@@ -11,15 +11,23 @@
  * texture used as a circular buffer, so a frame is a few uniforms, at most a few one-row uploads,
  * and one drawElements call (plus a blit in Soft lines mode). The logic lives in ./lib (pure,
  * tested); this file is the GL glue. frame() allocates nothing.
+ *
+ * Look (./lib/look.js): classic is all of the above, call for call. Cinematic draws the same rings
+ * as prefiltered line quads (./lib/quads.js, shaders/quad-*.vert) into a float scene, with depth of
+ * field on Möbius (./lib/dof.js), then blooms, tone maps and composites it (./lib/cinema.js). Its
+ * GL objects exist only while it is the Look.
  */
 import { cameraDistance, createCamera, fitTrack } from "./lib/camera.js";
 import { breath, createBeat, createGlow, stamp, wring } from "./lib/beat.js";
 import { buildGrid } from "./lib/geometry.js";
 import { createProgram } from "./lib/gl.js";
+import { CINEMA_ASSETS, createCinema, includeQuad } from "./lib/cinema.js";
 import { createHistory } from "./lib/history.js";
+import { CINEMA, lookMode } from "./lib/look.js";
 import { GENTLE, gentle } from "./lib/motion.js";
 import { densityRings, paletteIndex, paramDefault, renderPath, ringGain } from "./lib/params.js";
 import { createPulse, swell } from "./lib/pulse.js";
+import { buildQuadGrid } from "./lib/quads.js";
 import { shapeFor } from "./lib/shapes.js";
 import { createSoftTarget } from "./lib/soft.js";
 import { createSnake, headSpeed } from "./lib/snake.js";
@@ -32,12 +40,18 @@ const M = 512;
 export default async function create(ctx) {
   const gl = /** @type {WebGL2RenderingContext} */ (ctx.gl);
   const shape = shapeFor(ctx.id);
-  const [ringVs, ringFs, blitVs, blitFs, manifest] = await Promise.all([
+  const [ringVs, ringFs, blitVs, blitFs, manifest, quadVs, quadFs, quadLib, down, up, composite] = await Promise.all([
     ctx.assets.text(shape.vert),
     ctx.assets.text("shaders/rings.frag"),
     ctx.assets.text("shaders/blit.vert"),
     ctx.assets.text("shaders/blit.frag"),
     ctx.assets.json("tidalviz.json"),
+    ctx.assets.text(shape.quadVert),
+    ctx.assets.text("shaders/quad-rings.frag"),
+    ctx.assets.text(CINEMA_ASSETS.quad),
+    ctx.assets.text(CINEMA_ASSETS.down),
+    ctx.assets.text(CINEMA_ASSETS.up),
+    ctx.assets.text(CINEMA_ASSETS.composite),
   ]);
   // Manifest defaults decide whether the user has touched Orbit speed / Bass pulse (reduced motion).
   const m = /** @type {import('../tidalviz').Manifest} */ (manifest);
@@ -125,6 +139,59 @@ export default async function create(ctx) {
 
   const soft = createSoftTarget(gl, ctx, blitVs, blitFs);
 
+  /**
+   * The cinematic look's GL objects: its target and post chain, line program and quad grid. Made
+   * when Look turns cinematic and deleted when it turns classic (params changes only).
+   * @type {{ target: ReturnType<typeof createCinema>, prog: ReturnType<typeof createProgram>, vao: WebGLVertexArrayObject, vbo: WebGLBuffer | null, ibo: WebGLBuffer | null, count: number } | null}
+   */
+  let cine = null;
+
+  /** The quad grid for the current density (M + 1 points per ring, both sides). */
+  function allocateQuads() {
+    if (!cine) return;
+    const { verts, indices } = buildQuadGrid(history.N, M + 1);
+    cine.count = indices.length;
+    gl.bindVertexArray(cine.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, cine.vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.UNSIGNED_SHORT, false, 0, 0); // read as float (2j + side, i)
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cine.ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+  }
+
+  /** Make or delete the cinematic look's objects to match the Look param. */
+  function setLook() {
+    const want = lookMode(ctx.params.look) === "cinematic";
+    if (want && !cine) {
+      cine = {
+        target: createCinema(gl, ctx, { blitVs, down, up, composite }),
+        prog: createProgram(gl, includeQuad(quadVs, quadLib), quadFs, "shaders/quad-rings"),
+        vao: /** @type {WebGLVertexArrayObject} */ (gl.createVertexArray()),
+        vbo: gl.createBuffer(),
+        ibo: gl.createBuffer(),
+        count: 0,
+      };
+      allocateQuads();
+      soft.release();
+    } else if (!want && cine) {
+      disposeCine();
+      soft.resize();
+    }
+  }
+
+  function disposeCine() {
+    if (!cine) return;
+    cine.target.dispose();
+    gl.deleteProgram(cine.prog.program);
+    gl.deleteVertexArray(cine.vao);
+    gl.deleteBuffer(cine.vbo);
+    gl.deleteBuffer(cine.ibo);
+    cine = null;
+  }
+  setLook();
+
   return {
     frame(audio, time) {
       const p = ctx.params;
@@ -184,11 +251,16 @@ export default async function create(ctx) {
       }
       camera.writeMatrices(aspect, dist);
 
-      soft.begin(path);
+      // Classic: the rings program, straight or through the soft-lines target. Cinematic: the quad
+      // program into the float scene; same uniforms, plus the look's.
+      const P = cine ? cine.prog : rings;
+      const U = P.u;
+      if (cine) cine.target.begin();
+      else soft.begin(path);
       gl.disable(gl.DEPTH_TEST);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE); // additive: overlapping rings glow
-      gl.useProgram(rings.program);
+      gl.useProgram(P.program);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, hist);
       gl.uniform1i(U.uHist, 0);
@@ -216,21 +288,37 @@ export default async function create(ctx) {
       }
       gl.uniformMatrix4fv(U.uProj, false, camera.proj);
       gl.uniformMatrix4fv(U.uView, false, camera.view);
-      gl.bindVertexArray(vao);
-      gl.drawElements(gl.LINE_STRIP, indexCount, gl.UNSIGNED_INT, 0);
-      gl.disable(gl.BLEND);
+      if (cine) {
+        // Möbius focuses on the strip's centre (the camera never moves along its axis, so nothing
+        // pulls focus); the sphere has no depth of field.
+        const aperture = shape.track ? CINEMA.mobiusAperture : 0;
+        cine.target.lineUniforms(U, fine, CINEMA.width, dist, aperture, CINEMA.mobiusCocMax);
+        gl.bindVertexArray(cine.vao);
+        gl.drawElements(gl.TRIANGLE_STRIP, cine.count, gl.UNSIGNED_INT, 0);
+        gl.disable(gl.BLEND);
+        cine.target.end(time.now, ctx.reduceFlashing || ctx.reduceMotion, CINEMA.bloom);
+      } else {
+        gl.bindVertexArray(vao);
+        gl.drawElements(gl.LINE_STRIP, indexCount, gl.UNSIGNED_INT, 0);
+        gl.disable(gl.BLEND);
 
-      soft.end(path);
+        soft.end(path);
+      }
       gl.bindVertexArray(null);
     },
 
     resize() {
-      soft.resize();
+      if (cine) cine.target.resize();
+      else soft.resize();
     },
 
     params(changed) {
-      if ("antialias" in changed || "lines" in changed) soft.resize();
-      if ("density" in changed && history.setDensity(densityRings(changed.density))) allocate();
+      if ("look" in changed) setLook();
+      if (("antialias" in changed || "lines" in changed) && !cine) soft.resize();
+      if ("density" in changed && history.setDensity(densityRings(changed.density))) {
+        allocate();
+        allocateQuads();
+      }
       if ("track" in changed && shape.track) loadTrack();
     },
 
@@ -247,6 +335,7 @@ export default async function create(ctx) {
       gl.deleteVertexArray(vao);
       gl.deleteProgram(rings.program);
       soft.dispose();
+      disposeCine();
     },
   };
 }
