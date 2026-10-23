@@ -105,8 +105,9 @@ export const STRUCTURES = {
     pulseSource: pathPoint,
     clearance: spongeClearance,
     // Lengths are local cells (the shader rescales with the zoom); `far` stays well inside the
-    // rendered cube (≤ 14 × 2 frame cells from the camera).
-    scale: 1,
+    // rendered cube (≤ 14 × 2 frame cells from the camera). Up to 13 carving levels a step: a
+    // slightly smaller render.
+    scale: 0.9,
     steps: 1,
     fog: 1.3,
     far: 14,
@@ -118,8 +119,8 @@ export const STRUCTURES = {
     camera: createKaleidoCamera,
     pulseSource: pathPoint,
     clearance: kaleidoClearance,
-    // Several times cubic's cost per step: a little smaller render, a little more budget.
-    scale: 0.85,
+    // Several times cubic's cost per step: a smaller render, a little more budget.
+    scale: 0.8,
     steps: 1.2,
     fog: 0.8,
     far: 24,
