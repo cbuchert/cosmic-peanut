@@ -235,7 +235,10 @@ async function main() {
   const mg = /** @type {CanvasRenderingContext2D} */ (mprobe.getContext("2d", { willReadFrequently: true }));
   const time = { now: 0, dt: 0, frame: 0 };
   let running = true;
-  let last = performance.now();
+  // Under `still` the clock starts at 0, so every frame's dt is the same bits on every run (from
+  // performance.now() the subtraction rounds differently with the start time, which flipped beat
+  // decisions and so the camera's path between runs).
+  let last = still ? 0 : performance.now();
   const start = last;
   let frames = 0;
 
