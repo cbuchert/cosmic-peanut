@@ -1,0 +1,130 @@
+{
+  "format": 1,
+  "name": "Bat",
+  "group": "mammals",
+  "type": "C3",
+  "notes": "A bat seen from below: wingtips at V2 and V4 (three bats meet tip to tip there), feet at V1 and V5, tail at V0, head and ears at V3. Each wing's trailing edge is its leading edge turned a third about the wingtip, so the thumb and finger joints on e2 become the scallops of e1. The C3 relations allow an exactly mirror-symmetric bat: e4 is e2 with v negated, and e0 is straight.",
+  "edges": {
+    "e0": {
+      "polyline": []
+    },
+    "e2": {
+      "smooth": [[0.06, -0.05], [0.14, -0.15], [0.2, -0.08], [0.3, -0.25], [0.37, -0.16], [0.47, -0.34], [0.52, -0.42], [0.57, -0.3], [0.7, -0.18], [0.8, 0.02], [0.87, -0.12], [0.92, -0.22], [0.96, -0.06]]
+    },
+    "e4": {
+      "smooth": [[0.06, 0.05], [0.14, 0.15], [0.2, 0.08], [0.3, 0.25], [0.37, 0.16], [0.47, 0.34], [0.52, 0.42], [0.57, 0.3], [0.7, 0.18], [0.8, -0.02], [0.87, 0.12], [0.92, 0.22], [0.96, 0.06]]
+    }
+  },
+  "art": [
+    {
+      "part": "body",
+      "fill": {
+        "smooth": [[0.81, 1.394], [0.816, 1.248], [0.695, 0.975], [0.519, 0.734], [0.39, 0.666], [0.384, 0.812], [0.505, 1.085], [0.681, 1.326]]
+      }
+    },
+    {
+      "part": "head",
+      "circle": [0.86, 1.5, 0.11]
+    },
+    {
+      "part": "bones",
+      "stroke": {
+        "polyline": [[0.78, 1.25], [1.44, 1.4]]
+      },
+      "width": [0.03, 0.022]
+    },
+    {
+      "part": "bones",
+      "stroke": {
+        "polyline": [[1.44, 1.4], [1.423, 0.946]]
+      },
+      "width": [0.02, 0.008]
+    },
+    {
+      "part": "bones",
+      "stroke": {
+        "polyline": [[1.44, 1.4], [1.322, 0.862]]
+      },
+      "width": [0.02, 0.008]
+    },
+    {
+      "part": "bones",
+      "stroke": {
+        "polyline": [[1.44, 1.4], [1.205, 0.778]]
+      },
+      "width": [0.02, 0.008]
+    },
+    {
+      "part": "legs",
+      "stroke": {
+        "polyline": [[0.48, 0.7], [0.74, 0.28]]
+      },
+      "width": [0.028, 0.012]
+    },
+    {
+      "part": "bones",
+      "stroke": {
+        "polyline": [[0.693, 1.3], [0.492, 1.947]]
+      },
+      "width": [0.03, 0.022]
+    },
+    {
+      "part": "bones",
+      "stroke": {
+        "polyline": [[0.492, 1.947], [0.108, 1.705]]
+      },
+      "width": [0.02, 0.008]
+    },
+    {
+      "part": "bones",
+      "stroke": {
+        "polyline": [[0.492, 1.947], [0.085, 1.576]]
+      },
+      "width": [0.02, 0.008]
+    },
+    {
+      "part": "bones",
+      "stroke": {
+        "polyline": [[0.492, 1.947], [0.071, 1.433]]
+      },
+      "width": [0.02, 0.008]
+    },
+    {
+      "part": "legs",
+      "stroke": {
+        "polyline": [[0.366, 0.766], [-0.128, 0.781]]
+      },
+      "width": [0.028, 0.012]
+    },
+    {
+      "part": "legs",
+      "stroke": {
+        "polyline": [[0.4, 0.66], [0.14, 0.22]]
+      },
+      "width": [0.022, 0.008]
+    },
+    {
+      "part": "eye",
+      "circle": [0.92, 1.52, 0.024]
+    },
+    {
+      "part": "eye",
+      "circle": [0.856, 1.557, 0.024]
+    }
+  ],
+  "colours": {
+    "body": "shade",
+    "head": "shade",
+    "bones": "cut",
+    "legs": "cut",
+    "eye": "paper"
+  },
+  "height": {
+    "dome": 0.4,
+    "parts": {
+      "body": 0.5,
+      "head": 0.5,
+      "bones": 0.2
+    }
+  }
+}

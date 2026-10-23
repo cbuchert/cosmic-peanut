@@ -108,22 +108,19 @@ def sheet(sp: Species, species: list[Species], out: Path, fast: bool = False) ->
     issues = check.check_species(sp)
     errs = [i for i in issues if i.level == "error"]
     shape = g.shape_of(sp)
-    tile = _tile_panel(sp, big, ss) if not errs else np.ones((big, big, 3))
+    # Draw whenever the outline itself is valid (art errors are what a designer needs to see).
+    drawable = not check.check_outline(shape, sp.id)
     half = (big - pad) // 2
-    p1 = (
-        _patch(shape, [(sp.prims, 0.0)], "four-block", half, ss)
-        if not errs
-        else np.ones((half, half, 3))
-    )
-    p2 = _patch(shape, [(sp.prims, 0.0)], "ink", half, ss) if not errs else np.ones((half, half, 3))
+    blank = np.ones((half, half, 3))
+    tile = _tile_panel(sp, big, ss) if drawable else np.ones((big, big, 3))
+    p1 = _patch(shape, [(sp.prims, 0.0)], "four-block", half, ss) if drawable else blank
+    p2 = _patch(shape, [(sp.prims, 0.0)], "ink", half, ss) if drawable else blank
     partners = [o for o in species if o.sig == sp.sig and o.id != sp.id][:3]
-    strips = [(o.id, _strip(sp, o, small, ss)) for o in partners] if not errs else []
-    if not errs and not partners:
+    strips = [(o.id, _strip(sp, o, small, ss)) for o in partners] if drawable else []
+    if drawable and not partners:
         strips = [("plain tile (type change path)", _strip(sp, g.plain_of(sp), small, ss))]
 
-    width = max(
-        big + pad + max(half, 2 * half + pad) + 2 * pad, *(s.shape[1] + 2 * pad for _, s in strips)
-    )
+    width = max([big + 2 * half + 4 * pad + 200, *(s.shape[1] + 2 * pad for _, s in strips)])
     head = 70
     height = head + big + pad + sum(s.shape[0] + 34 for _, s in strips) + pad
     img = np.full((height, width, 3), 0.97)
@@ -140,13 +137,12 @@ def sheet(sp: Species, species: list[Species], out: Path, fast: bool = False) ->
     img[y + half + pad : y + 2 * half + pad, x2 : x2 + half] = p2
     draw_text(img, x2 + half + 10, y + 4, "FOUR-BLOCK", 2, INK)
     draw_text(img, x2 + half + 10, y + half + pad + 4, "INK", 2, INK)
-    ty = y + 2 * half + 2 * pad + 30
-    for i in (errs + warns)[:12]:
-        lines = _wrap(i.msg.split(": ", 1)[-1], 60)
-        for ln in lines:
-            draw_text(img, x2, ty, ln, 1, RED if i.level == "error" else ORANGE)
+    tx, ty = x2 + half + 10, y + half + pad + 40
+    for i in (errs + warns)[:24]:
+        for ln in _wrap(i.msg.split(": ", 1)[-1], 34):
+            draw_text(img, tx, ty, ln, 1, RED if i.level == "error" else ORANGE)
             ty += 11
-        ty += 4
+        ty += 5
     y += big + pad
     for label, s in strips:
         draw_text(img, pad, y + 8, f"MORPH TO {label}:  0  25  50  75  100 %", 2, INK)

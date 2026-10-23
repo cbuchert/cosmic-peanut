@@ -3,25 +3,27 @@
 uv run python -m tools.tiles check [ID ...]      validate species (all by default); exit 1 on errors
 uv run python -m tools.tiles preview [ID ...]    PNG sheets into --out (default /tmp/tiles-preview)
 uv run python -m tools.tiles index               rewrite each group's index.json from its folder
+uv run python -m tools.tiles fmt [ID ...]        rewrite species files in the house style
 uv run python -m tools.tiles golden              rewrite tests/fixtures/tiles_golden.json
 
 IDs are <group>/<name> (e.g. fish/koi), the file plugins/builtin/tiles/<group>/<name>.json.
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
-from . import check, geometry, golden, preview
+from . import check, fmt, geometry, golden, preview
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="python -m tools.tiles", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("check", "preview", "index", "golden"):
+    for name in ("check", "preview", "index", "golden", "fmt"):
         p = sub.add_parser(name)
         p.add_argument("--root", type=Path, default=geometry.TILES, help="tiles folder")
-        if name in ("check", "preview"):
+        if name in ("check", "preview", "fmt"):
             p.add_argument("ids", nargs="*", help="species ids (<group>/<name>); default all")
         if name == "preview":
             p.add_argument("--out", type=Path, default=Path("/tmp/tiles-preview"))
@@ -31,6 +33,15 @@ def main() -> int:
     if a.cmd == "index":
         for f in check.write_indexes(a.root):
             print("wrote", f)
+        return 0
+    if a.cmd == "fmt":
+        for p in geometry.species_files(a.root):
+            if a.ids and f"{p.parent.name}/{p.stem}" not in a.ids:
+                continue
+            text = fmt.dumps(json.loads(p.read_text()))
+            if p.read_text() != text:
+                p.write_text(text)
+                print("formatted", p)
         return 0
     if a.cmd == "golden":
         print("wrote", golden.write(a.root))

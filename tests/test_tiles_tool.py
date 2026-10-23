@@ -265,3 +265,30 @@ def test_smooth_edges_and_paths_pass_through_their_points():
     assert np.allclose(e[geometry.FLAT - 1 :: geometry.FLAT], want)
     fill = sp.prims[1].points
     assert len(fill) == 1 + 4 * geometry.FLAT and np.allclose(fill[-1], [0.4, 0.4])
+
+
+def test_the_bestiary_passes_its_checks():
+    issues = check.check_all()
+    assert [str(i) for i in issues if i.level == "error"] == []
+    species, _ = check.load_all(geometry.TILES)
+    # The seeds cover every tile type and at least one morph pair.
+    assert {sp.type for sp in species} >= set(TYPES)
+    assert any(len(g) > 1 for g in check.compatible(species))
+
+
+def test_golden_outline_fixture_is_current():
+    from tools.tiles import golden
+
+    have = json.loads(golden.FIXTURE.read_text())
+    assert have == golden.build(), "run `uv run python -m tools.tiles golden`"
+    assert have["species"] and have["blends"]
+
+
+def test_fmt_keeps_points_on_one_line_and_round_trips(tmp_path: Path):
+    from tools.tiles.fmt import dumps
+
+    data = spec("C4")
+    text = dumps(data)
+    assert json.loads(text) == data
+    assert '"bezier": [[0.3, 0.08], [0.7, -0.08]]' in text
+    assert text.endswith("\n") and dumps(json.loads(text)) == text

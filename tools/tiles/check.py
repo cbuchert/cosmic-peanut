@@ -241,7 +241,7 @@ def check_art(sp: Species, shape: Shape) -> list[Issue]:
         if np.any(bad):
             k = int(np.argmax(bad))
             out.append(Issue("error", sp.id, f"{name} leaves the outline near {_at(q[k])}"))
-        elif pr.kind == 1 and min(pr.w0, pr.w1) * TYPES[sp.type].scale * PX_PER_UNIT < 1:
+        elif pr.kind == 1 and max(pr.w0, pr.w1) * TYPES[sp.type].scale * PX_PER_UNIT < 1:
             out.append(
                 Issue("warning", sp.id, f"{name}: a stroke this thin is under 1 px on screen")
             )

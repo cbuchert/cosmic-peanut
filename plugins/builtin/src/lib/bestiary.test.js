@@ -340,3 +340,33 @@ describe("parseSpecies", () => {
     expect(() => parseSpecies({ ...wavy("C4", 1), ...patch }, "tiles/fish/x.json")).toThrow(msg);
   });
 });
+
+describe("the seeds against the tool (tests/fixtures/tiles_golden.json)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const root = new URL("../../../../", import.meta.url);
+  const golden = JSON.parse(readFileSync(new URL("tests/fixtures/tiles_golden.json", root), "utf8"));
+  const load = (/** @type {string} */ id) =>
+    parseSpecies(JSON.parse(readFileSync(new URL(`plugins/builtin/tiles/${id}.json`, root), "utf8")), `${id}.json`);
+  const near = (/** @type {ArrayLike<number>} */ a, /** @type {number[]} */ b) => {
+    expect(a.length).toBe(b.length);
+    for (let i = 0; i < b.length; i++) expect(Math.abs(a[i] - b[i])).toBeLessThan(2e-6);
+  };
+
+  it.each(Object.keys(golden.species))("%s: the JS derives the tool's outline", (id) => {
+    const g = golden.species[id];
+    const sp = load(id);
+    expect(sp.sig).toBe(g.sig);
+    const s = shapeOf(sp, createShape());
+    near(s.outline.subarray(0, s.n * 2), g.outline);
+    near(s.frame.L, g.L);
+    near(s.frame.V.subarray(0, g.V.length), g.V);
+  });
+
+  it("blends the morph pairs as the tool does", () => {
+    expect(golden.blends.length).toBeGreaterThan(0);
+    for (const b of golden.blends) {
+      const s = blendShapes(load(b.a), load(b.b), b.w, createShape());
+      near(s.outline.subarray(0, s.n * 2), b.outline);
+    }
+  });
+});
