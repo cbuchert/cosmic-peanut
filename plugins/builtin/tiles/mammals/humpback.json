@@ -1,0 +1,112 @@
+{
+  "format": 1,
+  "name": "Humpback whale",
+  "group": "mammals",
+  "type": "TGTG",
+  "notes": "Swims right. The long flipper lies back along the belly (its glide image is the shallow dip in the back before the dorsal hump), and the small dorsal hump is the nick in the throat. The blunt, knobbly head (e1) sets the fluke notch. The white flipper is painted on the flank, with throat pleats and head knobs. Same counts as koi and halibut (s9, s4): morphs with the fish, the dolphin and the orca.",
+  "corners": {
+    "w": 2.2,
+    "h": 0.6,
+    "s": 0
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[0.0455, -0.0091], [0.2045, 0.0545], [0.3636, 0.0091], [0.4636, -0.0227], [0.5091, -0.0909], [0.6364, -0.0455], [0.7364, -0.0182], [0.7818, 0.0364], [0.8864, 0.0]]
+    },
+    "e1": {
+      "smooth": [[0.1333, -0.1667], [0.4, -0.2667], [0.7, -0.1667], [0.9333, 0.0]]
+    }
+  },
+  "art": [
+    {
+      "part": "pleat",
+      "stroke": {
+        "smooth": [[2.22, 0.1], [2.05, 0.09000000000000001], [1.88, 0.11]]
+      },
+      "width": [0.012, 0.006]
+    },
+    {
+      "part": "pleat",
+      "stroke": {
+        "smooth": [[2.22, 0.14], [2.05, 0.13], [1.88, 0.15000000000000002]]
+      },
+      "width": [0.012, 0.006]
+    },
+    {
+      "part": "flipper",
+      "fill": {
+        "smooth": [[1.78, 0.2], [1.6, 0.12], [1.35, 0.0], [1.16, -0.13], [1.2, -0.06], [1.42, 0.08], [1.66, 0.22]]
+      }
+    },
+    {
+      "part": "mouth",
+      "stroke": {
+        "smooth": [[2.33, 0.19], [2.15, 0.17], [2.0, 0.19], [1.93, 0.24]]
+      },
+      "width": [0.016, 0.012]
+    },
+    {
+      "part": "knob",
+      "circle": [2.24, 0.44, 0.016]
+    },
+    {
+      "part": "knob",
+      "circle": [2.16, 0.5, 0.016]
+    },
+    {
+      "part": "knob",
+      "circle": [2.08, 0.54, 0.016]
+    },
+    {
+      "part": "knob",
+      "circle": [2.28, 0.34, 0.016]
+    },
+    {
+      "part": "blow",
+      "stroke": {
+        "smooth": [[1.86, 0.62], [1.82, 0.6], [1.78, 0.62]]
+      },
+      "width": 0.012
+    },
+    {
+      "part": "fluke",
+      "stroke": {
+        "smooth": [[0.42, 0.42], [0.2, 0.5], [0.06, 0.58]]
+      },
+      "width": [0.014, 0.005]
+    },
+    {
+      "part": "fluke",
+      "stroke": {
+        "smooth": [[0.42, 0.2], [0.2, 0.1], [0.06, 0.01]]
+      },
+      "width": [0.014, 0.005]
+    },
+    {
+      "part": "eye",
+      "circle": [1.98, 0.3, 0.03]
+    },
+    {
+      "part": "pupil",
+      "circle": [1.985, 0.3, 0.016]
+    }
+  ],
+  "colours": {
+    "pleat": "cut",
+    "flipper": "paper",
+    "mouth": "ink",
+    "knob": "shade",
+    "blow": "ink",
+    "fluke": "cut",
+    "eye": "paper",
+    "pupil": "ink"
+  },
+  "height": {
+    "dome": 0.75,
+    "parts": {
+      "flipper": 0.3,
+      "pleat": -0.2,
+      "knob": 0.4
+    }
+  }
+}

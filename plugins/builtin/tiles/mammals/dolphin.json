@@ -1,0 +1,94 @@
+{
+  "format": 1,
+  "name": "Dolphin",
+  "group": "mammals",
+  "type": "TGTG",
+  "notes": "Swims right (+x); the glide row above swims left. The beak (e1) nests in the tail notch of the dolphin ahead, so the flukes fork around it. Belly e0 and back e2 are glide images: the swept dorsal fin is a hooked dent in the belly behind the flipper, and the flipper is the dip in the tail stock. Same edge counts as koi and halibut (e0 smooth 9, e1 smooth 4), so it morphs with them and with the orca and humpback.",
+  "corners": {
+    "w": 2.0,
+    "h": 0.55,
+    "s": 0
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[0.05, -0.005], [0.24, 0.06], [0.34, 0.025], [0.44, 0.0], [0.51, 0.015], [0.64, 0.1], [0.62, 0.015], [0.71, -0.095], [0.82, -0.005]]
+    },
+    "e1": {
+      "smooth": [[0.2182, -0.1273], [0.3818, -0.5455], [0.5273, -0.1818], [0.8182, -0.2364]]
+    }
+  },
+  "art": [
+    {
+      "part": "belly",
+      "fill": {
+        "smooth": [[1.3, 0.12], [1.6, 0.06], [2.05, 0.15], [1.85, 0.22], [1.5, 0.22]]
+      }
+    },
+    {
+      "part": "belly",
+      "fill": {
+        "smooth": [[0.62, 0.15], [0.8, 0.07], [0.98, 0.09], [0.9, 0.16], [0.72, 0.19]]
+      }
+    },
+    {
+      "part": "mouth",
+      "stroke": {
+        "smooth": [[2.24, 0.21], [2.1, 0.22], [2.0, 0.25], [1.96, 0.28]]
+      },
+      "width": [0.012, 0.018]
+    },
+    {
+      "part": "eye",
+      "circle": [1.86, 0.35, 0.034]
+    },
+    {
+      "part": "pupil",
+      "circle": [1.87, 0.35, 0.017]
+    },
+    {
+      "part": "blow",
+      "stroke": {
+        "smooth": [[1.78, 0.53], [1.74, 0.5], [1.7, 0.52]]
+      },
+      "width": 0.012
+    },
+    {
+      "part": "flipper",
+      "stroke": {
+        "smooth": [[1.62, 0.07], [1.5, 0.0], [1.42, -0.1]]
+      },
+      "width": [0.016, 0.006]
+    },
+    {
+      "part": "fin",
+      "stroke": {
+        "smooth": [[0.95, 0.56], [0.8, 0.62], [0.74, 0.7]]
+      },
+      "width": [0.014, 0.006]
+    },
+    {
+      "part": "stock",
+      "stroke": {
+        "smooth": [[0.6, 0.3], [0.4, 0.27], [0.25, 0.25]]
+      },
+      "width": [0.012, 0.006]
+    }
+  ],
+  "colours": {
+    "belly": "light",
+    "mouth": "ink",
+    "eye": "paper",
+    "pupil": "ink",
+    "blow": "ink",
+    "flipper": "cut",
+    "fin": "cut",
+    "stock": "cut"
+  },
+  "height": {
+    "dome": 0.7,
+    "parts": {
+      "belly": -0.1,
+      "eye": 0.4
+    }
+  }
+}

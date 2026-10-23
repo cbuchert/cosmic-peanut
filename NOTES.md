@@ -60,6 +60,12 @@ checked and previewed by `uv run python -m tools.tiles`.
   mirror-symmetric bat (C3). The bat is the weakest silhouette: a C3 tile has 120° corners at
   its 3-fold points, so the wingtips there can't be sharp. A slim dolphin and a hedgehog were
   tried first and read as blobs in the regular hexagon frame.
+- **Mammals**: the bat is redesigned with its wingtips at V1/V5 (free corners, so they're sharp,
+  poking into a neighbour's ear notch at V3) and its wrists on the 3-fold centres. Added: elephant
+  face (C3, trunk tip at V3), lion face in its mane (C4), harbour seal from above (TTTTTT, with e2
+  = e1 mirrored and v negated so the body comes out symmetric), and dolphin, orca and humpback
+  (TGTG s9/s4 like koi/halibut, so all five morph). A running fox, leaping hare, flying squirrel
+  and hedgehog were dropped: legs became notches in the back, and C4 squares read as frogs.
 - **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`; GPU shared with other agents):
   one species static p50 2–3 ms; `all` with morphs (bakes on the music) p50 9 ms, p99 13–14 ms,
   58.8 fps. Three renders per vsync still hold 58.8 fps: 2–5 ms per frame, bakes included.
