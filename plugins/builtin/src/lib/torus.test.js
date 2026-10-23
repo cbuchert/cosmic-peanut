@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createTessState } from "./tess-music.js";
 import { createTile, fieldAt, groupOf, tileAt } from "./tess.js";
 import { BLEND_PERIOD } from "./tess-music.js";
-import { blendPose, conformalAspect, createDrag, createPose, createTorusCamera, DIST, FLOW_U, FLY, mapParams, ORBIT, THICKNESS, createViewMix, DRAG_RATE, DRAG_RETURN, PITCH_LIMIT, DIVE_TIME, IDLE_TOGGLE, MIN_HOLD, PHRASE_STEPS, VIEWS, viewName, wallFade, insidePose, latticeCounts, minorFraction, minorRate, outsidePose, planePoint } from "./torus.js";
+import { blendPose, conformalAspect, createDrag, createPose, createTorusCamera, DIST, FLOW_U, FLY, mapParams, ORBIT, THICKNESS, TRAVEL, createViewMix, DRAG_RATE, DRAG_RETURN, PITCH_LIMIT, DIVE_TIME, IDLE_TOGGLE, MIN_HOLD, PHRASE_STEPS, VIEWS, viewName, wallFade, insidePose, latticeCounts, minorFraction, minorRate, outsidePose, planePoint } from "./torus.js";
 
 const S3 = Math.sqrt(3);
 const THICK = [0.2, 0.28, 0.38, 0.45, 0.5];
@@ -505,5 +505,14 @@ describe("params", () => {
     const d = mapParams({ view: "?", symmetry: "p6", thickness: "x", reactivity: "y" }, {});
     expect(d).toMatchObject({ view: "auto", symmetry: "p4", thickness: THICKNESS.default, reactivity: 1 });
     expect(mapParams({ thickness: 0 }, { thickness: 1 }).thickness).toBe(THICKNESS.min);
+  });
+
+  it("maps the wave params: Wave height 0–1, Travel time (s), Detail 0–1", () => {
+    const o = mapParams({ wave: 1.4, travel: 20, detail: -1 }, {});
+    expect(o).toMatchObject({ wave: 1, travel: TRAVEL.max, detail: 0 });
+    const d = mapParams({ wave: "x", travel: "y", detail: "z" }, {});
+    expect(d).toMatchObject({ wave: 0.7, travel: TRAVEL.default, detail: 0.15 });
+    expect(mapParams({ travel: 0 }, { travel: 3 }).travel).toBe(TRAVEL.min);
+    expect(TRAVEL.min).toBeGreaterThan(0);
   });
 });

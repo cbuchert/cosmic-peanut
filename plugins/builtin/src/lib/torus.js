@@ -382,6 +382,8 @@ export function createTorusCamera() {
 
 /** Thickness param: tube radius over ring radius. */
 export const THICKNESS = { min: 0.2, max: 0.5, default: 0.36 };
+/** Travel time param: seconds for a wave to roll a full lap round the tube. */
+export const TRAVEL = { min: 1, max: 8, default: 4 };
 const SYMS = ["p4", "p3"];
 /** @param {unknown} x @param {number} lo @param {number} hi @param {number} dflt */
 const num = (x, lo, hi, dflt) => {
@@ -406,5 +408,8 @@ export function mapParams(p, out) {
   o.morph = num(p.morph, 0, 1, 0.7);
   o.ink = num(p.ink, 0, 2, 1);
   o.hatching = num(p.hatching, 0, 1, 0.6);
+  o.wave = num(p.wave, 0, 1, 0.7);
+  o.travel = num(p.travel, TRAVEL.min, TRAVEL.max, TRAVEL.default);
+  o.detail = num(p.detail, 0, 1, 0.15);
   return out;
 }

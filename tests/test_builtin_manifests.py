@@ -646,6 +646,9 @@ def test_tiled_torus_manifest():
         "view",
         "symmetry",
         "thickness",
+        "wave",
+        "travel",
+        "detail",
         "palette",
         "reactivity",
         "speed",
@@ -662,6 +665,13 @@ def test_tiled_torus_manifest():
     assert params["quality"]["options"] == ["low", "medium", "high"]
     t = params["thickness"]
     assert (t["min"], t["max"], t["default"]) == (0.2, 0.5, 0.36)
+    # lib/torus.js mapParams: Wave height 0–1, Travel time TRAVEL (s a lap round the tube), Detail 0–1.
+    w = params["wave"]
+    assert (w["label"], w["min"], w["max"], w["default"]) == ("Wave height", 0, 1, 0.7)
+    tr = params["travel"]
+    assert (tr["label"], tr["min"], tr["max"], tr["default"]) == ("Travel time", 1, 8, 4)
+    d = params["detail"]
+    assert (d["label"], d["min"], d["max"], d["default"]) == ("Detail", 0, 1, 0.15)
     r = params["reactivity"]
     assert (r["min"], r["max"], r["default"]) == (0, 2, 1)
     m = params["morph"]
@@ -670,5 +680,10 @@ def test_tiled_torus_manifest():
     assert (h["min"], h["max"]) == (0, 1)
     text = json.dumps(v).lower()
     assert "escher" not in text
-    for name in ("shaders/tess/tess.glsl", "shaders/tess/torus.frag", "shaders/tess/paper.frag"):
+    for name in (
+        "shaders/tess/tess.glsl",
+        "shaders/tess/torus.frag",
+        "shaders/tess/torus-disp.frag",
+        "shaders/tess/paper.frag",
+    ):
         assert (REPOS["builtin"] / name).is_file(), name
