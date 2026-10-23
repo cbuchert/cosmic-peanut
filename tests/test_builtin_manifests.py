@@ -49,6 +49,8 @@ def test_builtin_renderers():
         "marbling": ("webgl2", []),
         "laminar": ("webgl2", []),
         "tetraballs": ("webgl2", []),
+        "lattice": ("webgl2", []),
+        "tentacle-lattice": ("webgl2", []),
     }
 
 
@@ -679,3 +681,111 @@ def test_tetraballs_manifest():
     assert params["bounce"]["default"] == 1
     for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
+
+
+def test_lattice_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "lattice"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Lattice",
+        "src/lattice.js",
+        "webgl2",
+        "thumbs/lattice.jpg",
+    )
+    # One line, and original wording: no artist's name or print titles in the UI.
+    assert v["description"] and "\n" not in v["description"]
+    assert "escher" not in json.dumps(v).lower()
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "speed",
+        "reactivity",
+        "thickness",
+        "fog",
+        "palette",
+        "background",
+        "quality",
+        "structure",
+    ]
+    # lib/structures.js STRUCTURE_OPTIONS: one entry per structure file (the seam for new ones).
+    assert params["structure"]["type"] == "select"
+    assert params["structure"]["options"] == ["cubic"]
+    assert params["structure"]["default"] == "cubic"
+    # lib/lattice.js DEFAULT_SPEED: Reduce motion slows the flight only while Speed sits here.
+    speed = params["speed"]
+    assert (speed["type"], speed["min"], speed["default"]) == ("number", 0, 1)
+    assert speed["max"] >= 3
+    r = params["reactivity"]
+    assert (r["type"], r["min"], r["max"], r["default"]) == ("number", 0, 2, 1)
+    # lib/lattice.js THICKNESS (rod radius, cells).
+    t = params["thickness"]
+    assert (t["label"], t["min"], t["max"], t["default"]) == ("Rod thickness", 0.03, 0.12, 0.06)
+    fog = params["fog"]
+    assert (fog["min"], fog["max"], fog["default"]) == (0, 1, 0.5)
+    # lib/lattice.js PALETTES / QUALITIES.
+    assert params["palette"]["options"] == ["steel", "brass", "ink"]
+    assert params["palette"]["default"] == "steel"
+    assert params["background"]["options"] == ["fog", "none"]
+    assert params["background"]["default"] == "fog"
+    assert params["quality"]["options"] == ["low", "medium", "high"]
+    assert params["quality"]["default"] == "medium"
+    for f in (
+        "fullscreen.vert",
+        "lattice.frag",
+        "common.glsl",
+        "march.glsl",
+        "shade.glsl",
+        "post.frag",
+        "structure-cubic.glsl",
+        "structure-tentacle.glsl",
+    ):
+        assert (REPOS["builtin"] / "shaders/lattice" / f).is_file(), f
+
+
+def test_tentacle_lattice_manifest():
+    vs = {v["id"]: v for v in _manifest("builtin")["visualizers"]}
+    v, lattice = vs["tentacle-lattice"], vs["lattice"]
+    # Lattice's entry module and shaders; the variant is picked by ctx.id (lib/tentacle-lattice.js).
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Tentacle Lattice",
+        "src/lattice.js",
+        "webgl2",
+        "thumbs/tentacle-lattice.jpg",
+    )
+    assert v["description"] and "\n" not in v["description"]
+    assert "escher" not in json.dumps(v).lower()
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "speed",
+        "reactivity",
+        "length",
+        "sway",
+        "twitch",
+        "material",
+        "fog",
+        "palette",
+        "background",
+        "quality",
+    ]
+    # Lattice's params, less Rod thickness and Structure (it's fixed to "tentacle"), unchanged.
+    shared = {p["id"]: p for p in lattice["params"] if p["id"] not in ("thickness", "structure")}
+    for pid, spec in shared.items():
+        assert params[pid] == spec, pid
+    # lib/tentacle-lattice.js LENGTH, and Sway / Twitch 0–2 (Reduce motion calms Twitch at 1).
+    length = params["length"]
+    assert (length["label"], length["min"], length["max"], length["default"]) == (
+        "Tentacle length",
+        0.3,
+        0.48,
+        0.42,
+    )
+    for pid, label in (("sway", "Sway"), ("twitch", "Twitch")):
+        p = params[pid]
+        assert (p["label"], p["type"], p["min"], p["max"], p["default"]) == (
+            label,
+            "number",
+            0,
+            2,
+            1,
+        )
+    # lib/tentacle-lattice.js MATERIALS (Tentacube's presets after "auto").
+    assert params["material"]["options"] == ["auto", "chrome", "iridescent", "emissive", "obsidian"]
+    assert params["material"]["default"] == "auto"

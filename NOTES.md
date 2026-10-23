@@ -3,6 +3,136 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Lattice camera: smooth, with turns on the beat (2026-10-22)
+
+The user, watching Tentacle Lattice: "It's jumpy." Diagnosis came first: 60 s at 120 BPM through
+the real chain (beat envelope → `flySpeed` → `update`), at 60 Hz and with 33–50 ms hitches.
+
+| | Before | After |
+| --- | --- | --- |
+| Acceleration along the path (cells/s²) | 10.4 (12.3 with hitches), 50 ms after each beat | 0.32 |
+| Jerk (cells/s³) | 327 (655 with hitches), 83 ms after each beat | 17.8 |
+| View angular velocity (rad/s) | 1.97 | 1.45 |
+| View angular acceleration (rad/s²) | 13.0 | 3.1 |
+
+- **Root cause: the beat speed surge.** Each beat added +50 % speed through the beat envelope's
+  80 ms smoothstep, so acceleration reached about 10 cells/s². A smoothstep's second derivative
+  jumps, so jerk spiked at both ends of the rise. That is a lurch at 2 Hz. The view was locked to
+  the path's look-ahead chord, so its turn rate scaled with speed and every surge on a curve
+  whipped it. The path itself was smooth (jerk 9 at constant speed). Hitches doubled the spikes
+  because each frame took the surge's step whole. The B-spline's local support already kept new
+  control points from moving the curve near the camera; turns were seeded, not on the beat.
+- **Fix (`lib/lattice-camera.js`):**
+  - The speed goes through two critically damped stages.
+  - The view turns through a critically damped angular spring toward the look-ahead point, and
+    banks up to 0.18 rad.
+  - Everything runs in substeps of 1/240 s or less.
+  - `beat()` decides the next turn, placed at the next control point appended, about four cells
+    ahead, so it never touches the visible path. In silence it turns every 8 cells.
+  - The remaining sideways acceleration (≤ 4.2) is the channel corners' centripetal floor.
+- **Tests** (`lattice-camera.test.js`): the 60 s beat run's bounds; frame-rate independence
+  (hitched versus 60 Hz: exact for steady input, ≤ 0.02 cell and 0.03 rad with beats, which the
+  hitch can delay by two frames); beat-decided turns, with idle turns only in silence. Channel
+  clearance (rods, and Tentacle Lattice's worst-case tentacle envelope) still holds per structure.
+  Stills of both visualizers change, as expected.
+
+## Lattice structure seam (2026-10-22)
+
+The Lattice family is split so structures and shading can change independently:
+`shaders/lattice/README.md` is the contract (file map, structure-file and camera-provider
+interfaces, pulse topology, the identity-still procedure, known quirks). One GLSL file, one JS
+module and one `STRUCTURES` entry add a structure; Lattice's new **Structure** param picks it
+(today: `cubic`; Tentacle Lattice is fixed to `tentacle`).
+
+- **Byte-identical:** 11 stills (Lattice default, brass, ink over light, high + thick + fog 0.8;
+  Tentacle Lattice default, each material, ink over light, high + extreme params; all at
+  `still=372`) match the pre-refactor build byte for byte.
+- **Two traps found on the way.** First, Pillow's `getbbox()` on an RGBA difference only looks at
+  alpha, so the comparison script used before called *any* two opaque stills identical. The earlier
+  Lattice/Tentacle identity sets were re-checked with an exact byte compare and do hold. Second,
+  computing the node face's values up front and carrying them in a struct changed the GPU's rounding
+  (1–17 pixels off by one 8-bit step). Bisected to the face mask; `shade.glsl` now asks the structure
+  inside each branch (`structNodeFace` / `structStrut`), which is exact.
+
+## Tentacle Lattice (2026-10-22)
+
+A second builtin on Lattice's entry module and shader: `ctx.id` "tentacle-lattice" prepends
+`#define TENTACLE`, and every node becomes a Tentacube-style creature (rounded cube, six tapered
+tentacles reaching 30–48 % toward the neighbours). Lattice is untouched: its code path is the same
+text with the define absent, and before/after stills (default, each palette, background none,
+high quality + thick rods + fog 0.8, all on a beat frame) are byte-identical.
+
+- **Tentacles are procedural** (infinitely many; no verlet): a travelling sine sway perpendicular
+  to the strut, `amp × s^1.5` (0 at the root), phase and direction hashed per tentacle from its
+  absolute node (uint hash, so the origin rebasing never pops them), faster and wider with the
+  mids/highs (`createSway`). Taper: linear, ×1.35 flare as `(1 − s)^12` ≈ Tentacube's `e^(−12 s)`
+  (cheaper than `pow`/`exp`). Worst-case envelope 0.16 cell: the camera keeps ≥ 0.15 clear of it
+  and of a fully swollen cube (tested over 3 seeds × 60 s).
+- **The SDF:** per axis, the nearest node's tentacle on the point's side, the neighbour's reaching
+  back, and a lower bound for the node's other one; other lines of struts are bounded by
+  `1 − max|w| − envelopeMax`. Wrapped in an exact proxy (rods of radius `envelopeMax` + a bounding
+  sphere per cube): the bent tubes are evaluated only within 0.03 of it. An earlier along-axis bound
+  (`min(u, 1 − u)`) went to 0 on the node planes and drew thin fake discs on the cubes. Step × 0.8
+  near surfaces. Against a 0.5-step, 3× budget reference, 0.045 % of pixels differ (silhouette
+  specks), no holes.
+- **Beat (local):** the pulse's front makes each strut it reaches hand-shake — both tentacles reach
+  until their tips touch and straighten (`handshake`: smoothstep in over 0.45 cell of the front's
+  travel, ~70 ms at 120 BPM, hold, ease out over 0.85 cell), times the pulse's own eased amplitude.
+  The pulse's node twists a quarter turn (`createTwists`: target eased over 80 ms, Tentacube's
+  1.5 Hz spring, ζ 0.32 at Twitch 1); only the cube body turns. A settled quarter turn is
+  invisible because the faces' spectrogram is drawn as rings, the same on all six faces and
+  quarter-turn symmetric, so the slot is freed without a pop (the cube faces keep the history for
+  that reason). The bass swell goes only to the nodes nearest the camera (`swellWeight`).
+- **Materials:** Tentacube's `createMorph` at its "slow" pace (16 bars or a sustained energy shift,
+  1.5 s smoothstep crossfade): chrome reflects a procedural sky/panel environment, iridescent is a
+  thin-film cosine by view angle, emissive glows the axis colours, obsidian is near-black with sharp
+  highlights. The axis band light runs root → tip as an accent.
+- **Reduce motion:** sway ×0.3 (and its pace), Twitch 1 → 0.3 (Tentacube's effectiveMotion), the
+  twist turns slowly and critically damped, handshakes ×0.3, swell ×0.3, plus Lattice's.
+- **Cost:** 74–91 ms/frame at medium at first (handshake loops over all 8 pulse slots per strut, and
+  the exact field everywhere). Fixed by packing the live pulses (`live` / `liveCount`), the
+  proxy, the tight `envelopeMax` (0.24 → 0.16), one handshake per axis, and for this variant only:
+  render scale × 0.85, steps × 1.1, fog × 1.5 with the march stopping at 16 cells (fading out before
+  it), 3 AO samples. Harness (WebKit, 2560 × 1440, `sync=1`, `rep=4`; noisy, another app was using
+  the GPU at times): low p50 6.5–7.75 / p99 10 ms; **medium (default) p50 6–11 / p99 7–12.75 ms**;
+  high p50 16.5–17 / p99 20–23.5 ms (high misses 60 fps). Lattice in the same runs: 1.5–3 ms.
+- The dark cross on the screen's centre lines is real: the mid-planes between node layers are
+  empty (no tentacle reaches them), so rays in the planes through the camera see the fog.
+
+## Lattice (2026-10-22)
+
+A new builtin `webgl2` visualizer: an endless cubic lattice (a rounded cube at every node, rods
+along the three axes) that the camera flies through. Params: Speed, Reactivity, Rod thickness,
+Fog, Palette (steel, brass, ink), Background (fog, none), Quality (low, medium, high).
+
+- **Render:** one full-screen raymarch by domain repetition (`p - round(p)`: exact distances, so
+  rays run quickly down the empty channels) at Quality's render scale (0.5 / 0.67 / 0.85, 56 / 80 /
+  110 steps), then a full-resolution composite. Headlight + key light, 5-sample AO. The fog mixes
+  in display space: mixed in linear light, the cream ink fog washed the lattice out within a cell
+  (and every fog looked thinner than its density on dark backgrounds).
+- **Motion** (`lib/lattice-camera.js`): a seeded walk cell centre → adjacent cell centre (runs of
+  2–5 cells, then a perpendicular turn), smoothed by a uniform cubic B-spline (C2) and flown by
+  arc length. The spline stays ≥ 0.47 cell from every rod axis and ≥ 0.6 from every node (tested
+  over 2 minutes × 3 seeds), so the cube size is capped to fit (`geometry`). The view looks 1.2
+  cells ahead along the path (turns start early and turn about half as fast); `up` is parallel
+  transported. Drag look-around eases back with Möbius Field's critically damped spring.
+- **Music:** the beat envelope (`lib/lattice-beat.js`, tempo-locked / strong onsets, 80 ms
+  smoothstep rise, back to 0 by 0.9 beat) drives only the fly-speed surge (+50 % × Reactivity) and
+  the pulses. Each beat launches one pulse from the node nearest the path 1.6 cells ahead; its front
+  runs 3 cells out along the rods (on the rod graph that's L1 distance, so the shader needs no
+  graph walk), easing in over 80 ms and out by 0.9 beat. Nothing pumps the whole scene. Rods take
+  their axis's band energy (x bass, y mids, z treble) against a 4 s auto-gain, eased and
+  flash-limited; cube faces scroll a 64 × 256 RGBA8 history (spectrogram, waveform on y faces), one
+  row per frame, older on cubes farther from the camera. Reduce flashing: pulses × 0.3 and ≥ 1/3 s
+  apart, axis light × 0.35. Reduce motion: Speed 1 → 0.25, no surge, running light and pulse
+  travel × 0.3.
+- **Frame time** (harness, WebKit, 2560 × 1440, `sync=1`, `rep=4`; WebKit clamps the clock to
+  1 ms, so these are coarse): low p50 2 / p99 3 ms; medium p50 1.5–2.5 / p99 2–2.75 ms; high p50
+  2.5–4.5 / p99 5.75–6.25 ms; 58.8 fps throughout. Flash check under the 10 Hz strobe: ≤ 3 rises/s
+  at 2 % with Reduce flashing on (lum range 0.34–0.46).
+- **Not test-first:** the GLSL (no JS copy of it, by design), the entry module's GL wiring (driven by
+  the harness: resize, every param flipped, dispose, no errors) and the look (tuned by stills).
+
 ## Cosmic Peanut pack: a cinematic Look (2026-10-22)
 
 A Look param (classic | cinematic) on the sphere, Möbius and Möbius Field. Details and sources are
