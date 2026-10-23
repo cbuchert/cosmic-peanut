@@ -28,7 +28,7 @@ import {
   mobiusTranslate,
   tiling,
 } from "./hyperbolic.js";
-import { WARP_LIMIT } from "./tess.js";
+import { PALETTES, WARP_LIMIT } from "./tess.js";
 
 export const TILINGS = ["{7,3}", "{5,4}", "{4,5}", "{6,4}"];
 
@@ -739,4 +739,48 @@ export function createDiskView(name) {
   };
   rebase();
   return v;
+}
+
+// ---- Params ------------------------------------------------------------------------------
+
+/** Defaults of the number params (the manifest's). */
+const DEFAULTS = { reactivity: 1, speed: 1, morph: 0.7, ink: 1, hatching: 0.6 };
+const num = (/** @type {unknown} */ v, /** @type {number} */ d) => (Number.isFinite(Number(v)) && v !== undefined && v !== null && v !== "" ? Number(v) : d);
+
+/** The tess state's options plus the Tiling, filled in place by readDiskParams. */
+export const createDiskOptions = () => ({
+  tiling: TILINGS[0],
+  symmetry: "p3",
+  palette: "four-block",
+  reactivity: 1,
+  speed: 1,
+  morph: 0.7,
+  ink: 1,
+  hatching: 0.6,
+  height: 1,
+  reduceMotion: false,
+  reduceFlashing: false,
+});
+
+/**
+ * ctx.params and flags → the tess state's options (lib/tess-music.js createTessState) and the
+ * Tiling. The symmetry is always the engine's "p3": three colour classes (its flat warp, which
+ * that also selects, isn't drawn here). Unknown values fall back to the defaults.
+ * @param {Record<string, unknown>} params
+ * @param {{ size: { height: number }, reduceMotion: boolean, reduceFlashing: boolean }} ctx
+ * @param {ReturnType<typeof createDiskOptions>} out
+ */
+export function readDiskParams(params, ctx, out) {
+  out.tiling = TILINGS.includes(String(params.tiling)) ? String(params.tiling) : TILINGS[0];
+  out.symmetry = "p3";
+  out.palette = PALETTES.includes(String(params.palette)) ? String(params.palette) : "four-block";
+  out.reactivity = num(params.reactivity, DEFAULTS.reactivity);
+  out.speed = num(params.speed, DEFAULTS.speed);
+  out.morph = num(params.morph, DEFAULTS.morph);
+  out.ink = num(params.ink, DEFAULTS.ink);
+  out.hatching = num(params.hatching, DEFAULTS.hatching);
+  out.height = ctx.size.height;
+  out.reduceMotion = ctx.reduceMotion;
+  out.reduceFlashing = ctx.reduceFlashing;
+  return out;
 }

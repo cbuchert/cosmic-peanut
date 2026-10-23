@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { mobiusApply, mobiusCompose } from "./hyperbolic.js";
 import { WARP_LIMIT } from "./tess.js";
 import {
+  createDiskOptions,
   createDiskTiler,
   createDiskView,
   createDiskWarp,
@@ -17,6 +18,7 @@ import {
   diskWarp,
   matIndex,
   matMul,
+  readDiskParams,
   TILINGS,
   tilingPQ,
 } from "./tess-disk.js";
@@ -42,6 +44,35 @@ function mirrors(t) {
     mobiusCompose(new Float64Array(9), Float64Array.from([1, 0, 0, 0, 0, 0, 1, 0, 0]), Float64Array.from([t.cx, 0, t.r * t.r - t.cx * t.cx, 0, 1, 0, -t.cx, 0, 1])), // c: inversion in C
   ];
 }
+
+describe("params", () => {
+  const ctx = { size: { height: 1440 }, reduceMotion: true, reduceFlashing: false };
+  it("reads the visualizer's params into the tess state's options, in place", () => {
+    const o = createDiskOptions();
+    const p = { tiling: "{4,5}", palette: "ochre", reactivity: 1.5, speed: 0.5, morph: 0.3, ink: 1.2, hatching: 0.4, quality: "low" };
+    expect(readDiskParams(p, ctx, o)).toBe(o);
+    expect(o).toEqual({
+      tiling: "{4,5}",
+      // Three colour classes: the engine's "p3" (the flat warp it also selects isn't drawn here).
+      symmetry: "p3",
+      palette: "ochre",
+      reactivity: 1.5,
+      speed: 0.5,
+      morph: 0.3,
+      ink: 1.2,
+      hatching: 0.4,
+      height: 1440,
+      reduceMotion: true,
+      reduceFlashing: false,
+    });
+  });
+  it("falls back to the defaults for unknown or missing values", () => {
+    const o = readDiskParams({ tiling: "{9,9}" }, ctx, createDiskOptions());
+    expect(o.tiling).toBe("{7,3}");
+    expect([o.reactivity, o.speed, o.morph, o.ink, o.hatching]).toEqual([1, 1, 0.7, 1, 0.6]);
+    expect(o.palette).toBe("four-block");
+  });
+});
 
 describe("tiling param", () => {
   it("maps the Tiling options to {p,q}; unknown → {7,3}", () => {
