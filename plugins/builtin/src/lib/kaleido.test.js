@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { BEND, HALF, LOOKS, NAVE, createKaleidoMusic, kaleidoClearance, kaleidoDE, naveDistance, rotation } from "./kaleido.js";
+import { BEND, HALF, LOOKS, NAVE, PERIOD, createKaleidoMusic, kaleidoClearance, kaleidoDE, naveDistance, rotation } from "./kaleido.js";
 
 /** A look (bent by `bend` × BEND, −1…1, on every angle and offset) as KIFS parameters. */
 function kifsOf(/** @type {number} */ i, /** @type {number} */ bend = 0) {
@@ -164,5 +164,31 @@ describe("createKaleidoMusic", () => {
       prev = now;
     }
     expect(worst).toBeLessThan(0.15); // per second
+  });
+});
+
+describe("createKaleidoCamera", () => {
+  it("flies the cubic camera's path scaled up to the naves, at SPEED cells per second", async () => {
+    const { createKaleidoCamera } = await import("./structure-kaleidoscope.js");
+    const { createCamera } = await import("./lattice-camera.js");
+    const cam = createKaleidoCamera(5);
+    const ref = createCamera(5);
+    const out = new Float64Array(3);
+    const refOut = new Float64Array(3);
+    for (let f = 0; f < 240 * 20; f++) {
+      if (f % 240 === 0) {
+        cam.beat();
+        ref.beat();
+      }
+      cam.update(1 / 240, 1);
+      ref.update(1 / 240, 1.6 / PERIOD);
+    }
+    for (let c = 0; c < 3; c++) expect(cam.pos[c]).toBeCloseTo(ref.pos[c] * PERIOD, 9);
+    expect(Array.from(cam.view.fwd)).toEqual(Array.from(ref.view.fwd));
+    cam.ahead(2, out);
+    ref.ahead(2 / PERIOD, refOut);
+    for (let c = 0; c < 3; c++) expect(out[c]).toBeCloseTo(refOut[c] * PERIOD, 9);
+    expect(cam.beatTurns).toBe(ref.beatTurns);
+    expect(kaleidoClearance(cam.pos)).toBeGreaterThan(0.15);
   });
 });
