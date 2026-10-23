@@ -15,8 +15,26 @@ const { fileURLToPath } = await load("node:url");
 /** @param {string} p path under the pack @returns {string} */
 const pack = (p) => fileURLToPath(new URL(`../${p}`, import.meta.url));
 
-/** Whether the fake copies texture uploads (off while counting the entry's own allocations). */
+/** Whether the fake copies texture uploads and logs calls (off while counting the entry's own allocations). */
 let recordUploads = true;
+
+/** FNV-1a over bytes, for compact call logs. @param {Uint8Array} b */
+function fnv(b) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i], 0x01000193) >>> 0;
+  return h.toString(16);
+}
+
+/** One GL call argument, serialized: handles by id, arrays by content hash, floats to 7 digits. @param {any} v */
+function arg(v) {
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toPrecision(7);
+  if (typeof v === "string") return v.length > 40 ? `src#${fnv(new TextEncoder().encode(v))}` : v;
+  if (ArrayBuffer.isView(v)) {
+    return `${v.constructor.name}[${/** @type {any} */ (v).length}]#${fnv(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))}`;
+  }
+  if (v && typeof v === "object") return v.id ?? (v.name ? `@${v.name}` : "{}");
+  return String(v);
+}
 
 /** A WebGL2 stand-in that records float uniforms by name and R32F/RG32F row uploads. */
 function fakeGl() {
@@ -33,6 +51,9 @@ function fakeGl() {
   const draws = [];
   /** @type {any[]} every array handed to the GPU (uniform matrices, buffer uploads) */
   const sent = [];
+  /** @type {string[]} every GL call, serialized (classic look: must match the pre-Look snapshot) */
+  const log = [];
+  let made = 0;
   /** @type {Record<string, any>} */
   const impl = {
     createShader: () => ({ src: "" }),
@@ -81,12 +102,18 @@ function fakeGl() {
   }
   const gl = new Proxy(impl, {
     get(t, prop) {
-      if (prop in t) return t[/** @type {string} */ (prop)];
-      if (typeof prop === "string" && /^[A-Z0-9_]+$/.test(prop)) return prop;
-      return () => ({});
+      if (typeof prop === "string" && /^[A-Z0-9_]+$/.test(prop) && !(prop in t)) return prop;
+      const name = String(prop);
+      const fn = prop in t ? t[name] : () => ({});
+      return (/** @type {any[]} */ ...a) => {
+        let r = fn(...a);
+        if (name.startsWith("create") && r && typeof r === "object") r.id = `${name.slice(6)}#${made++}`;
+        if (recordUploads) log.push(`${name}(${a.map(arg).join(", ")})`);
+        return r;
+      };
     },
   });
-  return { gl, uniforms, uploads, drawUnit0, draws, sent };
+  return { gl, uniforms, uploads, drawUnit0, draws, sent, log };
 }
 
 /** @param {string} id */
@@ -132,6 +159,24 @@ function audioAt(/** @type {number} */ f) {
     onsetStrength: 0,
   });
 }
+
+describe.each([
+  ["cosmic-peanut", {}],
+  ["cosmic-peanut", { lines: "fine" }],
+  ["cosmic-peanut", { antialias: false }],
+  ["mobius", {}],
+  ["mobius", { track: "figure-8", length: 0.5 }],
+  ["mobius-field", {}],
+  ["mobius-field", { lines: "fine" }],
+])("%s %o in the classic look", (id, overrides) => {
+  it("issues exactly the GL calls it did before the Look param existed", async () => {
+    const { viz, log } = await start(id, { ...overrides, look: "classic" });
+    for (let f = 0; f < 6; f++) viz.frame(audioAt(f * 20), /** @type {any} */ ({ dt: 1 / 60, t: f / 3 }));
+    viz.resize?.(/** @type {any} */ ({ width: 1280, height: 720, cssWidth: 640, cssHeight: 360, dpr: 2 }));
+    viz.frame(audioAt(140), /** @type {any} */ ({ dt: 1 / 60, t: 7 / 3 }));
+    expect(log.join("\n")).toMatchSnapshot();
+  });
+});
 
 describe.each(["mobius", "mobius-field"])("%s on the beat", (id) => {
   it("changes nothing frame-wide about the strip's size or amplitude (only the wring rolls it)", async () => {
