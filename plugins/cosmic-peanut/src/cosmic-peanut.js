@@ -2,15 +2,17 @@
 /**
  * Cosmic Peanut — each moment's waveform becomes a ring on an invisible sphere; rings drift from
  * the north pole to the south pole while the camera slowly orbits. `webgl2` renderer. The pack's
- * Möbius visualizer is the same module with another vertex shader and extent (./lib/shapes.js),
- * plus the beat's wring, breath and glow (./lib/beat.js; zero for the sphere, which has no Beat).
+ * Möbius visualizer is the same module with another vertex shader (./lib/shapes.js): its rings
+ * snake along a track (./lib/track.js, ./lib/snake.js; two more small textures, the track table
+ * and each row's place on it), framed by the track's bounds, plus the beat's wring, breath, glow
+ * and stamp (./lib/beat.js; zero for the sphere, which has no Beat).
  *
  * All geometry is computed on the GPU from a static (j, i) vertex grid and an M × N R32F history
  * texture used as a circular buffer, so a frame is a few uniforms, at most a few one-row uploads,
  * and one drawElements call (plus a blit in Soft lines mode). The logic lives in ./lib (pure,
  * tested); this file is the GL glue. frame() allocates nothing.
  */
-import { cameraDistance, createCamera } from "./lib/camera.js";
+import { cameraDistance, createCamera, fitTrack } from "./lib/camera.js";
 import { breath, createBeat, createGlow, stamp, wring } from "./lib/beat.js";
 import { buildGrid } from "./lib/geometry.js";
 import { createProgram } from "./lib/gl.js";
@@ -19,6 +21,8 @@ import { GENTLE, gentle } from "./lib/motion.js";
 import { densityRings, paletteIndex, paramDefault, renderPath, ringGain } from "./lib/params.js";
 import { createPulse } from "./lib/pulse.js";
 import { shapeFor } from "./lib/shapes.js";
+import { createSnake, headSpeed } from "./lib/snake.js";
+import { TRACKS, TRACK_SAMPLES, buildTrack, trackIndex } from "./lib/track.js";
 
 /** Points per ring: high, so the waveform stays jagged. */
 const M = 512;
@@ -51,9 +55,37 @@ export default async function create(ctx) {
   const hist = gl.createTexture();
   let indexCount = 0;
 
-  const history = createHistory(M, densityRings(ctx.params.density), (row, ring) => {
+  // Möbius: the snake places each pushed row on the track at the head speed of this frame.
+  const snake = createSnake(densityRings(ctx.params.density));
+  let speed = 0;
+  const history = createHistory(M, densityRings(ctx.params.density), (row, ring, ago) => {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, row, M, 1, gl.RED, gl.FLOAT, ring);
+    if (shape.track) snake.place(row, ago, speed);
   });
+  const trackTex = gl.createTexture();
+  const posTex = gl.createTexture();
+  /** @type {ReturnType<typeof buildTrack> | null} */
+  let track = null;
+  // Camera fit and depth-fade radius, recomputed only when what they depend on changes.
+  let fitTrackName = "";
+  let fitW = NaN;
+  let fitAmp = NaN;
+  let fitAspect = NaN;
+  let fitDist = 0;
+  let fitReach = 0;
+
+  /** (Re)build the track table texture for the Track param. Allocates; param changes only. */
+  function loadTrack() {
+    const name = TRACKS[trackIndex(ctx.params.track)];
+    if (track?.name === name) return;
+    track = buildTrack(name);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, trackTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, TRACK_SAMPLES, 3, 0, gl.RGBA, gl.FLOAT, track.data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.activeTexture(gl.TEXTURE0);
+  }
   const camera = createCamera();
   const pulse = createPulse();
   const beat = createBeat();
@@ -76,8 +108,19 @@ export default async function create(ctx) {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, M, history.N, 0, gl.RED, gl.FLOAT, history.data);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+    if (shape.track) {
+      snake.resize(history.N);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, posTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, history.N, 1, 0, gl.RED, gl.FLOAT, snake.pos);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.activeTexture(gl.TEXTURE0);
+    }
   }
   allocate();
+  if (shape.track) loadTrack();
 
   // Soft lines: rings go to a 1× (CSS-pixel) multisampled RGBA8 buffer (the prototype's canvas had
   // antialias on; the host's doesn't), resolve into a texture, then upscale linearly to the canvas.
@@ -127,22 +170,49 @@ export default async function create(ctx) {
       // Möbius only: the sphere has no Beat param, so 0, and its uniforms do nothing.
       const beatAmt = p.beat === undefined ? 0 : Number(p.beat);
       const beatMotion = gentle(beatAmt, beatDefault, ctx.reduceMotion, GENTLE.beat);
-      const extent = shape.extent(halfWidth);
       const path = renderPath(p.lines, p.antialias);
       const fine = path === "canvas";
 
       // Push the rings that are due (fixed rate), one texSubImage2D row each; on Möbius the beat
-      // envelope scales them, so each beat rides along the strip.
+      // envelope scales them, so each beat rides along the strip, and the snake's head advances
+      // (surging gently on the beat) and places them on the track.
       beat.step(audio, dt);
+      const travel = Number(p.travel);
+      if (shape.track) {
+        speed = headSpeed(Number(p.length), travel, beat.env, beatMotion);
+        snake.step(dt, speed);
+      }
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, hist);
-      history.step(audio.waveform, dt, Number(p.travel), Number(p.detail), stamp(beat.env, beatMotion));
+      const pushed = history.step(audio.waveform, dt, travel, Number(p.detail), stamp(beat.env, beatMotion));
+      if (shape.track && pushed > 0) {
+        gl.bindTexture(gl.TEXTURE_2D, posTex);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, history.N, 1, gl.RED, gl.FLOAT, snake.pos);
+      }
       const pulseAmt = pulse.step(audio, dt) * strength;
       const glowAmt = glow.step(beat.env, beatAmt, dt, ctx.reduceFlashing);
 
       camera.update(dt, orbit);
       const { width, height } = ctx.size;
       const aspect = width / height;
-      const dist = cameraDistance(amp, aspect, extent);
+      let dist = 0;
+      let extent = 0;
+      if (track) {
+        // Refit only when Track, Strip width, Amplitude or the aspect change.
+        if (track.name !== fitTrackName || halfWidth !== fitW || amp !== fitAmp || aspect !== fitAspect) {
+          fitTrackName = track.name;
+          fitW = halfWidth;
+          fitAmp = amp;
+          fitAspect = aspect;
+          fitDist = fitTrack(track, halfWidth, amp, aspect);
+          fitReach = track.reach(halfWidth) + amp;
+        }
+        dist = fitDist;
+        extent = fitReach;
+      } else {
+        extent = shape.extent(halfWidth);
+        dist = cameraDistance(amp, aspect, extent);
+      }
       camera.writeMatrices(aspect, dist);
 
       if (fine) {
@@ -174,6 +244,15 @@ export default async function create(ctx) {
       gl.uniform1f(U.uGlow ?? null, glowAmt);
       gl.uniform1f(U.uTwist ?? null, wring(beat.swing, beatMotion));
       gl.uniform1f(U.uBreath ?? null, breath(beat.env, beatMotion));
+      if (shape.track) {
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, trackTex);
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, posTex);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.uniform1i(U.uTrack ?? null, 1);
+        gl.uniform1i(U.uPos ?? null, 2);
+      }
       gl.uniformMatrix4fv(U.uProj, false, camera.proj);
       gl.uniformMatrix4fv(U.uView, false, camera.view);
       gl.bindVertexArray(vao);
@@ -204,6 +283,7 @@ export default async function create(ctx) {
     params(changed) {
       if ("antialias" in changed || "lines" in changed) resizeSoft();
       if ("density" in changed && history.setDensity(densityRings(changed.density))) allocate();
+      if ("track" in changed && shape.track) loadTrack();
     },
 
     pointer(e) {
@@ -214,6 +294,8 @@ export default async function create(ctx) {
       gl.deleteBuffer(vbo);
       gl.deleteBuffer(ibo);
       gl.deleteTexture(hist);
+      gl.deleteTexture(trackTex);
+      gl.deleteTexture(posTex);
       gl.deleteTexture(softTex);
       gl.deleteFramebuffer(softFbo);
       gl.deleteFramebuffer(msaaFbo);

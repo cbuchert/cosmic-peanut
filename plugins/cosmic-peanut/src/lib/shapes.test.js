@@ -1,6 +1,5 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { cameraDistance } from "./camera.js";
 import { shapeFor } from "./shapes.js";
 
 describe("shapeFor", () => {
@@ -11,17 +10,11 @@ describe("shapeFor", () => {
     expect(s.extent(NaN)).toBe(1); // the sphere has no width param
   });
 
-  it("draws Möbius with its own shader; the strip reaches R + W = 1 + width from the center", () => {
+  it("draws Möbius with its own shader along a track, framed and depth-faded by the track", () => {
     const s = shapeFor("mobius");
     expect(s.vert).toBe("shaders/mobius.vert");
-    expect(s.extent(0.4)).toBeCloseTo(1.4, 12);
-    expect(s.extent(0.15)).toBeCloseTo(1.15, 12);
-  });
-
-  it("frames the Möbius strip so R + W + amp fits with the sphere's 1.32 margin", () => {
-    const fit = ((1 + 0.4 + 0.22) * 1.32) / Math.tan((19 * Math.PI) / 180);
-    expect(cameraDistance(0.22, 16 / 9, shapeFor("mobius").extent(0.4))).toBeCloseTo(fit, 9);
-    expect(cameraDistance(0.22, 9 / 16, shapeFor("mobius").extent(0.4))).toBeCloseTo(fit / (9 / 16), 9);
+    expect(s.track).toBe(true);
+    expect(shapeFor("cosmic-peanut").track).toBe(false);
   });
 
   it("rejects an id the pack doesn't define", () => {

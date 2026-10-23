@@ -25,7 +25,7 @@
     {
       "id": "mobius",
       "name": "Möbius",
-      "description": "Waveform rings ride a slowly turning Möbius strip, flipping over once per lap.",
+      "description": "A snake of waveform slices winds along a Möbius figure-8 (or loop), flipping over as it goes.",
       "author": "Tidalviz",
       "entry": "src/cosmic-peanut.js",
       "renderer": "webgl2",
@@ -42,7 +42,9 @@
         { "id": "lines", "type": "select", "label": "Lines", "options": ["soft", "fine"], "default": "soft" },
         { "id": "antialias", "type": "boolean", "label": "Antialias soft lines", "default": true },
         { "id": "width", "type": "number", "label": "Strip width", "min": 0.15, "max": 0.7, "step": 0.01, "default": 0.4 },
-        { "id": "beat", "type": "number", "label": "Beat", "min": 0, "max": 2, "step": 0.01, "default": 1 }
+        { "id": "beat", "type": "number", "label": "Beat", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "track", "type": "select", "label": "Track", "options": ["figure-8", "loop"], "default": "figure-8" },
+        { "id": "length", "type": "number", "label": "Length", "min": 0.2, "max": 1, "step": 0.01, "default": 0.5 }
       ]
     }
   ]

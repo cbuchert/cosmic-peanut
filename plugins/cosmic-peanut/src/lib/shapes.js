@@ -1,24 +1,23 @@
 // @ts-check
 /**
- * The pack's visualizers share everything but the vertex shader that places the rings and the
- * scene's extent (camera fit and depth fade radius). Picked once by `ctx.id`.
+ * The pack's visualizers share everything but the vertex shader that places the rings and how
+ * the scene is framed. Picked once by `ctx.id`. The sphere has a fixed extent; Möbius rides a
+ * track (./track.js, ./snake.js) and is framed by it (camera.js `fitTrack`).
  */
 import { RADIUS } from "./camera.js";
-
-/** Möbius strip centerline radius (R). */
-export const MOBIUS_RADIUS = 1;
 
 /**
  * @typedef {object} Shape
  * @property {string} vert vertex shader asset
- * @property {(width: number) => number} extent distance from the center to the farthest point of
- *   the undisplaced shape, given the `width` param (half width W; the sphere ignores it)
+ * @property {boolean} track whether the rings ride a Möbius track (snake, Track and Length params)
+ * @property {(width: number) => number} extent the sphere's reach from the center (camera fit
+ *   and depth fade); tracks use their own bounds instead
  */
 
 /** @type {Record<string, Shape>} */
 const SHAPES = {
-  "cosmic-peanut": { vert: "shaders/rings.vert", extent: () => RADIUS },
-  mobius: { vert: "shaders/mobius.vert", extent: (width) => MOBIUS_RADIUS + width },
+  "cosmic-peanut": { vert: "shaders/rings.vert", track: false, extent: () => RADIUS },
+  mobius: { vert: "shaders/mobius.vert", track: true, extent: () => NaN },
 };
 
 /** @param {string} id manifest visualizer id (`ctx.id`) */

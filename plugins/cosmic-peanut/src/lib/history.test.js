@@ -117,4 +117,16 @@ describe("createHistory", () => {
     expect(off).toBeGreaterThan(0);
     expect(on / off).toBeGreaterThan(1.6);
   });
+
+  it("tells each upload how long ago its push was due, so a moving head can place it", () => {
+    /** @type {number[]} */
+    const agos = [];
+    const h = createHistory(512, 120, (_, __, ago) => agos.push(ago));
+    // 120 rings over 2 s = 60 per second; one 0.1 s step pushes 6, due 1/60 s apart.
+    h.step(WAVE, 0.1 + 0.25 / 60, 2, 0.7);
+    expect(agos.length).toBe(6);
+    const frac = h.frac;
+    expect(frac).toBeCloseTo(0.25, 6);
+    for (let k = 0; k < 6; k++) expect(agos[k]).toBeCloseTo((5 - k + frac) / 60, 9);
+  });
 });

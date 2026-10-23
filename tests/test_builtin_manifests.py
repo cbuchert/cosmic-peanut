@@ -170,11 +170,11 @@ def test_cosmic_peanut_manifest_matches_prd():
     assert {p["id"]: p.get("step") for p in v["params"]}["travel"] == 0.5
 
 
-def test_mobius_has_cosmic_peanuts_params_plus_width_and_beat():
+def test_mobius_has_cosmic_peanuts_params_plus_width_beat_track_and_length():
     vs = {v["id"]: v for v in _manifest("cosmic-peanut")["visualizers"]}
     sphere, mobius = vs["cosmic-peanut"], vs["mobius"]
     assert mobius["params"][: len(sphere["params"])] == sphere["params"]
-    width, beat = mobius["params"][len(sphere["params"]) :]
+    width, beat, track, length = mobius["params"][len(sphere["params"]) :]
     assert (width["id"], width["type"], width["label"]) == ("width", "number", "Strip width")
     assert 0.35 <= width["default"] <= 0.45 and width["min"] > 0 and width["max"] < 1
     # One knob for the wring, breath and glow on the beat; the sphere has none (stays unchanged).
@@ -187,7 +187,18 @@ def test_mobius_has_cosmic_peanuts_params_plus_width_and_beat():
         "step": 0.01,
         "default": 1,
     }
-    assert "beat" not in {p["id"] for p in sphere["params"]}
+    # The snake rides a figure-8 (a Möbius strip and its mirror image) or today's loop; Length is
+    # the fraction of the track it covers (1 on the loop gives back the closed band).
+    assert track == {
+        "id": "track",
+        "type": "select",
+        "label": "Track",
+        "options": ["figure-8", "loop"],
+        "default": "figure-8",
+    }
+    assert (length["id"], length["type"], length["label"]) == ("length", "number", "Length")
+    assert length["max"] == 1 and 0 < length["min"] <= 0.25 and length["default"] == 0.5
+    assert {"beat", "track", "length"}.isdisjoint(p["id"] for p in sphere["params"])
 
 
 def test_stargate_manifest():
