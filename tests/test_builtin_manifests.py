@@ -690,7 +690,7 @@ def test_lattice_manifest():
     ]
     # lib/structures.js STRUCTURE_OPTIONS: one entry per structure file (the seam for new ones).
     assert params["structure"]["type"] == "select"
-    assert params["structure"]["options"] == ["cubic", "sponge"]
+    assert params["structure"]["options"] == ["cubic", "sponge", "kaleidoscope"]
     assert params["structure"]["default"] == "cubic"
     # lib/lattice.js DEFAULT_SPEED: Reduce motion slows the flight only while Speed sits here.
     speed = params["speed"]
@@ -720,6 +720,7 @@ def test_lattice_manifest():
         "structure-cubic.glsl",
         "structure-tentacle.glsl",
         "structure-sponge.glsl",
+        "structure-kaleidoscope.glsl",
     ):
         assert (REPOS["builtin"] / "shaders/lattice" / f).is_file(), f
 

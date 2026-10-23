@@ -25,6 +25,8 @@ import { createCamera } from "./lattice-camera.js";
 import { nearestNode } from "./lattice-pulses.js";
 import { createSpongeCamera } from "./sponge-camera.js";
 import { cubicClearance, cubicRuntime } from "./structure-cubic.js";
+import { createKaleidoCamera, kaleidoRuntime } from "./structure-kaleidoscope.js";
+import { kaleidoClearance } from "./kaleido.js";
 import { pathPoint, spongeClearance, spongeRuntime } from "./structure-sponge.js";
 import { tentacleClearance, tentacleRuntime } from "./structure-tentacle.js";
 
@@ -110,10 +112,23 @@ export const STRUCTURES = {
     far: 14,
     runtime: spongeRuntime,
   },
+  kaleidoscope: {
+    shader: "structure-kaleidoscope.glsl",
+    defines: [],
+    camera: createKaleidoCamera,
+    pulseSource: pathPoint,
+    clearance: kaleidoClearance,
+    // Several times cubic's cost per step: a little smaller render, a little more budget.
+    scale: 0.85,
+    steps: 1.2,
+    fog: 0.8,
+    far: 24,
+    runtime: kaleidoRuntime,
+  },
 };
 
 /** Lattice's Structure param options (Tentacle Lattice is its own visualizer, fixed to "tentacle"). */
-export const STRUCTURE_OPTIONS = ["cubic", "sponge"];
+export const STRUCTURE_OPTIONS = ["cubic", "sponge", "kaleidoscope"];
 
 /**
  * The structure to render: Tentacle Lattice's own, else Lattice's Structure param (unknown → cubic).

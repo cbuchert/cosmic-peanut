@@ -9,7 +9,8 @@ describe("structureFor", () => {
     expect(structureFor("lattice", "no-such")).toBe("cubic");
     expect(structureFor("lattice", undefined)).toBe("cubic");
     expect(structureFor("lattice", "sponge")).toBe("sponge");
-    expect(STRUCTURE_OPTIONS).toEqual(["cubic", "sponge"]);
+    expect(structureFor("lattice", "kaleidoscope")).toBe("kaleidoscope");
+    expect(STRUCTURE_OPTIONS).toEqual(["cubic", "sponge", "kaleidoscope"]);
     for (const name of STRUCTURE_OPTIONS) expect(STRUCTURES[name]).toBeDefined();
   });
 });
