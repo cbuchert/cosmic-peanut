@@ -40,3 +40,14 @@ export function renderPath(lines, antialias) {
   if (lines === "fine") return "canvas";
   return antialias === false ? "soft" : "msaa";
 }
+
+/**
+ * A number param's manifest default for the visualizer `vizId` (`ctx.id`); NaN when missing.
+ * @param {import('../../tidalviz').Manifest} manifest
+ * @param {string} vizId
+ * @param {string} paramId
+ */
+export function paramDefault(manifest, vizId, paramId) {
+  const viz = manifest.visualizers.find((v) => v.id === vizId);
+  return Number(viz?.params?.find((p) => p.id === paramId)?.default);
+}

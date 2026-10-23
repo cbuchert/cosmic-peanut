@@ -10,6 +10,7 @@ export const SENTINEL = 1e6;
  * @callback UploadRow
  * @param {number} row history row just written (the new head)
  * @param {Float32Array} ring M samples, reused: read it during the call
+ * @param {number} ago seconds since this push was due (pushes catch up once per frame)
  * @returns {void}
  */
 
@@ -39,13 +40,18 @@ export function createHistory(M, N, upload) {
      * @param {number} dt seconds
      * @param {number} travel seconds pole to pole
      * @param {number} detail 0–1
+     * @param {number} [gain] scales the finished rings (after auto-gain and clamp, so the
+     *   tracked peak never sees it): Möbius stamps the beat into the history this way
      * @returns {number} rings pushed
      */
-    step(wave, dt, travel, detail) {
-      const n = clock.step(dt, h.N / travel);
+    step(wave, dt, travel, detail, gain = 1) {
+      const rate = h.N / travel;
+      const n = clock.step(dt, rate);
       for (let k = 0; k < n; k++) {
         h.head = (h.head + 1) % h.N;
-        upload(h.head, builder.build(wave, detail));
+        const ring = builder.build(wave, detail);
+        if (gain !== 1) for (let j = 0; j < ring.length; j++) ring[j] *= gain;
+        upload(h.head, ring, (n - 1 - k + clock.frac) / rate);
       }
       return n;
     },

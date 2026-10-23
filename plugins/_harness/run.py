@@ -32,6 +32,8 @@ VIZ = {
     "tetraballs": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
+    "mobius": "cosmic-peanut",
+    "mobius-field": "cosmic-peanut",
 }
 BACKDROPS = ("black", "light")
 OUT = Path(__file__).resolve().parent / "out"

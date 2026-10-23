@@ -1,6 +1,7 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { cameraDistance, createCamera, FOV } from "./camera.js";
+import { cameraDistance, createCamera, FOV, fitTrack } from "./camera.js";
+import { TRACKS, TRACK_SAMPLES, buildTrack } from "./track.js";
 
 /**
  * Run the camera for `seconds` at `hz`.
@@ -138,5 +139,66 @@ describe("camera matrices", () => {
         expect(view[k]).toBeCloseTo(V[k], 5);
       }
     }
+  });
+});
+
+describe("fitTrack", () => {
+  /**
+   * Largest |ndc x| and |ndc y| of the strip's edges (± amp along the surface normal) over a fine
+   * orbit sweep (every yaw, pitch 0.12…0.72 as the sway goes), through the real camera matrices.
+   * @param {ReturnType<typeof buildTrack>} tr @param {number} W @param {number} amp
+   * @param {number} aspect @param {number} dist
+   */
+  function sweep(tr, W, amp, aspect, dist) {
+    const K = TRACK_SAMPLES;
+    const d = tr.data;
+    const cam = createCamera();
+    let mx = 0;
+    let my = 0;
+    for (let yi = 0; yi < 90; yi++) {
+      for (let pi = 0; pi <= 6; pi++) {
+        cam.yaw = (2 * Math.PI * yi) / 90;
+        cam.pitch = 0.12 + (0.6 * pi) / 6;
+        cam.writeMatrices(aspect, dist);
+        const P = cam.proj;
+        const V = cam.view;
+        for (let k = 0; k < K; k += 3) {
+          const c = [d[k * 4], d[k * 4 + 1], d[k * 4 + 2]];
+          const t = [d[(K + k) * 4], d[(K + k) * 4 + 1], d[(K + k) * 4 + 2]];
+          const w = [d[(2 * K + k) * 4], d[(2 * K + k) * 4 + 1], d[(2 * K + k) * 4 + 2]];
+          const n = [t[1] * w[2] - t[2] * w[1], t[2] * w[0] - t[0] * w[2], t[0] * w[1] - t[1] * w[0]];
+          for (const v of [-W, W]) {
+            for (const a of [-amp, amp]) {
+              const p = [0, 1, 2].map((i) => c[i] + v * w[i] + a * n[i]);
+              const e = [0, 1, 2].map((r) => V[r] * p[0] + V[4 + r] * p[1] + V[8 + r] * p[2] + V[12 + r]);
+              const cw = -e[2];
+              mx = Math.max(mx, Math.abs((P[0] * e[0]) / cw));
+              my = Math.max(my, Math.abs((P[5] * e[1]) / cw));
+            }
+          }
+        }
+      }
+    }
+    return { mx, my };
+  }
+
+  for (const name of TRACKS) {
+    it(`${name}: fills 70–80% of the shorter screen side while orbiting, never clipping the longer`, () => {
+      const tr = buildTrack(name);
+      for (const aspect of [16 / 9, 1, 9 / 16]) {
+        const dist = fitTrack(tr, 0.4, 0.22, aspect);
+        const { mx, my } = sweep(tr, 0.4, 0.22, aspect, dist);
+        const [short, long] = aspect >= 1 ? [my, mx] : [mx, my];
+        expect(short, `${name} ${aspect.toFixed(2)} short side`).toBeGreaterThan(0.7);
+        expect(short, `${name} ${aspect.toFixed(2)} short side`).toBeLessThan(0.8);
+        expect(long, `${name} ${aspect.toFixed(2)} long side`).toBeLessThan(0.92);
+      }
+    });
+  }
+
+  it("backs off for a wider strip and a bigger amplitude", () => {
+    const tr = buildTrack("figure-8");
+    expect(fitTrack(tr, 0.6, 0.22, 16 / 9)).toBeGreaterThan(fitTrack(tr, 0.4, 0.22, 16 / 9));
+    expect(fitTrack(tr, 0.4, 0.5, 16 / 9)).toBeGreaterThan(fitTrack(tr, 0.4, 0.22, 16 / 9));
   });
 });

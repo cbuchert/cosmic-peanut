@@ -1,0 +1,55 @@
+// @ts-check
+/**
+ * Möbius's snake: the ribbon covers part of a closed track and its head advances along it. Each
+ * slice is placed where the head was when it was pushed and stays there, so older slices trail
+ * behind and nothing slides. Places are fractions of the track (0–1), so they survive a Track
+ * change. Each slice also keeps the size it was laid at (the beat's breath and the bass swell),
+ * so those only ever touch the newest slices and travel with them. Nothing is allocated per step.
+ */
+
+/** Extra head speed on the beat, per unit of envelope × Beat (gentle: the envelope eases). */
+export const SURGE = 0.3;
+
+/**
+ * Head speed in track fractions per second: Length of the track per Travel time, plus the surge.
+ * The surge is capped at the room left on the track, env × (1 − Length) ÷ Length, so the snake
+ * never covers more than the whole track: at Length 1 a full band stays exactly closed.
+ * @param {number} length the Length param (fraction of the track the snake covers)
+ * @param {number} travel the Travel time param, seconds from head to tail
+ * @param {number} env createBeat's `env` @param {number} beat the Beat param (after `gentle`)
+ */
+export function headSpeed(length, travel, env, beat) {
+  const room = length > 0 ? (1 - length) / length : 0;
+  return (length / travel) * (1 + env * Math.min(SURGE * beat, room));
+}
+
+/** @param {number} x */
+const wrap = (x) => x - Math.floor(x);
+
+/** @param {number} N rings alive */
+export function createSnake(N) {
+  const s = {
+    /** Head position, fraction of the track. */
+    head: 0,
+    /** Per history row: place on the track (fraction) and size, interleaved (`uPos`, RG32F). */
+    pos: new Float32Array(N * 2),
+    /** @param {number} dt seconds @param {number} speed from {@link headSpeed} */
+    step(dt, speed) {
+      s.head = wrap(s.head + speed * dt);
+    },
+    /**
+     * Place the slice just pushed into `row`, whose push was due `ago` seconds before now.
+     * @param {number} row @param {number} ago seconds @param {number} speed current head speed
+     * @param {number} size its scale about the centre line (width and waveform), kept for good
+     */
+    place(row, ago, speed, size) {
+      s.pos[row * 2] = wrap(s.head - speed * ago);
+      s.pos[row * 2 + 1] = size;
+    },
+    /** New density: the history restarts, so do the places. @param {number} n */
+    resize(n) {
+      s.pos = new Float32Array(n * 2);
+    },
+  };
+  return s;
+}

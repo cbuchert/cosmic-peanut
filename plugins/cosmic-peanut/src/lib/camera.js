@@ -122,12 +122,72 @@ export const FOV = (38 * Math.PI) / 180;
 export const RADIUS = 1;
 
 /**
- * Camera distance that fits the sphere at maximum swell with a 1.32 margin; divided by the aspect
+ * Camera distance that fits the shape at maximum swell with a 1.32 margin; divided by the aspect
  * ratio when the view is taller than wide, so nothing clips in portrait.
  * @param {number} amp Amplitude param
  * @param {number} aspect width ÷ height
+ * @param {number} [extent] the undisplaced shape's reach from the center (default: the sphere)
  */
-export function cameraDistance(amp, aspect) {
-  const fit = ((RADIUS + amp) * 1.32) / Math.tan(FOV / 2);
+export function cameraDistance(amp, aspect, extent = RADIUS) {
+  const fit = ((extent + amp) * 1.32) / Math.tan(FOV / 2);
   return aspect < 1 ? fit / aspect : fit;
+}
+
+/** Fraction of the shorter screen side the track fills at its widest while orbiting. */
+export const TRACK_FILL = 0.75;
+/** Most of the longer side it may use. */
+const TRACK_LONG = 0.9;
+/** The self-orbit's pitch sway range (basePitch 0.42 ± 0.3). */
+const PITCH_LO = 0.12;
+const PITCH_HI = 0.72;
+
+/**
+ * Camera distance that frames a Möbius track (see ./track.js): its strip edges at half width W,
+ * ± amp along the surface normal, projected over every yaw and the sway's pitch range, fill
+ * {@link TRACK_FILL} of the shorter screen side and at most 0.9 of the longer. Exact per point:
+ * a point at view coordinates (x, y, z toward the eye) needs dist ≥ z + f·|y| ÷ target.
+ * Allocates nothing, but walks the table: call it when Track, Strip width, Amplitude or the
+ * aspect ratio change, not every frame.
+ * @param {{ data: Float32Array }} track from buildTrack
+ * @param {number} W half width @param {number} amp Amplitude param @param {number} aspect
+ */
+export function fitTrack(track, W, amp, aspect) {
+  const d = track.data;
+  const K = d.length / 12;
+  const f = 1 / Math.tan(FOV / 2);
+  const ty = aspect >= 1 ? TRACK_FILL : TRACK_LONG;
+  const tx = (aspect >= 1 ? TRACK_LONG : TRACK_FILL) * aspect;
+  let dist = 0;
+  for (let pi = 0; pi <= 4; pi++) {
+    const pitch = PITCH_LO + ((PITCH_HI - PITCH_LO) * pi) / 4;
+    const cp = Math.cos(pitch);
+    const sp = Math.sin(pitch);
+    for (let yi = 0; yi < 48; yi++) {
+      const yaw = (2 * Math.PI * yi) / 48;
+      const cy = Math.cos(yaw);
+      const sy = Math.sin(yaw);
+      for (let k = 0; k < K; k += 2) {
+        const o = k * 4;
+        const ot = (K + k) * 4;
+        const ow = (2 * K + k) * 4;
+        // n = t × w
+        const nx = d[ot + 1] * d[ow + 2] - d[ot + 2] * d[ow + 1];
+        const ny = d[ot + 2] * d[ow] - d[ot] * d[ow + 2];
+        const nz = d[ot] * d[ow + 1] - d[ot + 1] * d[ow];
+        for (let e = 0; e < 4; e++) {
+          const v = e & 1 ? W : -W;
+          const a = e & 2 ? amp : -amp;
+          const x = d[o] + v * d[ow] + a * nx;
+          const y = d[o + 1] + v * d[ow + 1] + a * ny;
+          const z = d[o + 2] + v * d[ow + 2] + a * nz;
+          const xv = cy * x - sy * z;
+          const yv = -sp * sy * x + cp * y - sp * cy * z;
+          const zv = cp * sy * x + sp * y + cp * cy * z;
+          const need = zv + (f * Math.max(Math.abs(yv) / ty, Math.abs(xv) / tx));
+          if (need > dist) dist = need;
+        }
+      }
+    }
+  }
+  return dist;
 }
