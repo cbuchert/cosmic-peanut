@@ -3,9 +3,10 @@
 
 /**
  * What Orbit speed, Bass pulse and Möbius's Beat (its wring and breath; the glow isn't motion)
- * default to when the host reports reduced motion.
+ * default to when the host reports reduced motion. Möbius Field also slows its flight (Speed, and
+ * the path's curves, which run on it) and drops the beat surge (`surge` stands in for its Beat).
  */
-export const GENTLE = Object.freeze({ orbit: 0, pulse: 0.1, beat: 0.25 });
+export const GENTLE = Object.freeze({ orbit: 0, pulse: 0.1, beat: 0.25, speed: 0.25, surge: 0 });
 
 /**
  * Effective value of a motion param: while reduced motion is on and the user hasn't moved the
