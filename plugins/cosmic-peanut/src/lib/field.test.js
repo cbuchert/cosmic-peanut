@@ -187,6 +187,39 @@ describe("createField", () => {
     expect(n).toBeLessThan(field.count / 4);
   });
 
+  it("groups the packed bands by distance level when given levels: the same bands, nearest level first", () => {
+    const fog = 12;
+    const reach = 1.5;
+    const view = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+    const plain = createField(216, 5, fog);
+    const split = createField(216, 5, fog);
+    const levels = new Float64Array([4, 8]);
+    for (const cam of [
+      [3, 1, -2],
+      [-7, 2, 11],
+    ]) {
+      plain.place(cam, reach);
+      split.place(cam, reach);
+      const n = plain.pack(view, 0.5, 0.5, reach, 30);
+      expect(split.pack(view, 0.5, 0.5, reach, 30, levels)).toBe(n);
+      expect(split.levelEnd.length).toBe(3);
+      expect(split.levelEnd[2]).toBe(n);
+      expect(split.ahead).toBe(plain.ahead);
+      /** @param {Float32Array} inst @param {number} i */
+      const key = (inst, i) => Array.from(inst.subarray(i * INST, (i + 1) * INST)).join();
+      const want = new Set(Array.from({ length: n }, (_, i) => key(plain.inst, i)));
+      let level = 0;
+      for (let i = 0; i < n; i++) {
+        expect(want.has(key(split.inst, i))).toBe(true);
+        while (i >= split.levelEnd[level]) level++;
+        const d = Math.hypot(split.inst[i * INST], split.inst[i * INST + 1], split.inst[i * INST + 2]);
+        expect(d).toBeGreaterThanOrEqual(level === 0 ? 0 : levels[level - 1]);
+        if (level < levels.length) expect(d).toBeLessThan(levels[level]);
+      }
+      expect(split.levelEnd[0]).toBeLessThan(split.levelEnd[1]); // some near bands, some mid
+    }
+  });
+
   it("reports the nearest lit band ahead (centre near the view axis) as the focus target", () => {
     const fog = 12;
     const reach = 1.5;
