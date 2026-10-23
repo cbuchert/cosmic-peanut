@@ -1,0 +1,124 @@
+{
+  "format": 1,
+  "name": "Double-crested cormorant",
+  "group": "birds",
+  "type": "TGTG",
+  "notes": "A double-crested cormorant flying right, neck outstretched, on the downstroke. The neck and hooked bill (e1) nest in a slot between the long tail and the far wing, which shows raised at V3; the lowered near wing (e0) is the dip in the back (e2). Edge structure of the koi (e0 smooth 9, e1 smooth 4).",
+  "corners": {
+    "w": 1.6,
+    "h": 0.7,
+    "s": 0
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[0.0625, -0.025], [0.1375, -0.05], [0.225, -0.0875], [0.3125, -0.175], [0.3875, -0.2625], [0.4625, -0.15], [0.5875, -0.0625], [0.725, -0.0312], [0.875, 0.0]]
+    },
+    "e1": {
+      "smooth": [[0.2429, 0.2571], [0.4571, -0.5714], [0.6, -1.0], [0.7143, -0.4286]]
+    }
+  },
+  "art": [
+    {
+      "part": "tail",
+      "fill": {
+        "smooth": [[-0.08, 0.12], [0.1, 0.2], [0.3, 0.26], [0.3, 0.14], [0.1, 0.05]]
+      }
+    },
+    {
+      "part": "feathers",
+      "stroke": {
+        "smooth": [[0.0, 0.13], [0.14, 0.16], [0.27, 0.2]]
+      },
+      "width": 0.012
+    },
+    {
+      "part": "wing",
+      "fill": {
+        "smooth": [[0.78, 0.4], [0.88, 0.3], [0.9, 0.1], [0.75, -0.15], [0.64, -0.36], [0.56, -0.25], [0.5, -0.05], [0.58, 0.2], [0.7, 0.35]]
+      }
+    },
+    {
+      "part": "primaries",
+      "stroke": {
+        "polyline": [[0.67, -0.08], [0.63, -0.35]]
+      },
+      "width": [0.022, 0.008]
+    },
+    {
+      "part": "primaries",
+      "stroke": {
+        "polyline": [[0.59, -0.04], [0.575, -0.24]]
+      },
+      "width": [0.02, 0.008]
+    },
+    {
+      "part": "scales",
+      "stroke": {
+        "smooth": [[0.64, 0.24], [0.69, 0.19], [0.74, 0.24]]
+      },
+      "width": 0.012
+    },
+    {
+      "part": "scales",
+      "stroke": {
+        "smooth": [[0.74, 0.3], [0.79, 0.25], [0.84, 0.3]]
+      },
+      "width": 0.012
+    },
+    {
+      "part": "scales",
+      "stroke": {
+        "smooth": [[0.68, 0.1], [0.73, 0.05], [0.78, 0.1]]
+      },
+      "width": 0.012
+    },
+    {
+      "part": "scales",
+      "stroke": {
+        "smooth": [[0.77, 0.16], [0.82, 0.11], [0.87, 0.16]]
+      },
+      "width": 0.012
+    },
+    {
+      "part": "pouch",
+      "fill": {
+        "smooth": [[1.9, 0.33], [2.04, 0.36], [2.08, 0.39], [1.98, 0.4], [1.88, 0.37]]
+      }
+    },
+    {
+      "part": "bill",
+      "stroke": {
+        "smooth": [[2.04, 0.415], [2.16, 0.413], [2.25, 0.415], [2.27, 0.4]]
+      },
+      "width": [0.018, 0.01]
+    },
+    {
+      "part": "eye",
+      "circle": [1.95, 0.44, 0.023]
+    },
+    {
+      "part": "pupil",
+      "circle": [1.954, 0.44, 0.012]
+    }
+  ],
+  "colours": {
+    "tail": "shade",
+    "feathers": "cut",
+    "wing": "shade",
+    "primaries": "ink",
+    "scales": "cut",
+    "pouch": "accent",
+    "bill": "ink",
+    "eye": "paper",
+    "pupil": "ink"
+  },
+  "height": {
+    "dome": 0.5,
+    "parts": {
+      "wing": 0.2,
+      "scales": -0.3,
+      "pouch": 0.2,
+      "eye": 0.4
+    }
+  }
+}

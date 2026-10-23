@@ -1,5 +1,14 @@
 {
   "species": [
-    "tern"
+    "chickadee",
+    "cormorant",
+    "duck",
+    "gull",
+    "kingfisher",
+    "nuthatch",
+    "puffin",
+    "swallow",
+    "tern",
+    "woodpecker"
   ]
 }

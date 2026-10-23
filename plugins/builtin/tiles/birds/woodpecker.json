@@ -1,0 +1,140 @@
+{
+  "format": 1,
+  "name": "Downy woodpecker",
+  "group": "birds",
+  "type": "TGTG",
+  "notes": "A downy woodpecker clinging upright, facing right. Its stiff tail points down from e0, and the tail's glide image is the dip behind the red crown (e2). The chisel bill (e1) nests in the back of the woodpecker ahead, under the shoulder. Edge structure of the chickadee (e0 smooth 7, e1 smooth 5).",
+  "corners": {
+    "w": 0.75,
+    "h": 1.15,
+    "s": 0.2
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[0.1067, 0.0], [0.24, -0.1067], [0.36, -0.3467], [0.48, -0.1067], [0.64, -0.0533], [0.8, -0.0667], [0.9067, -0.0533]]
+    },
+    "e1": {
+      "smooth": [[0.2495, -0.0349], [0.4976, -0.0613], [0.6495, -0.0349], [0.7809, -0.2903], [0.8639, -0.0672]]
+    }
+  },
+  "art": [
+    {
+      "part": "belly",
+      "fill": {
+        "smooth": [[0.55, 0.05], [0.72, 0.05], [0.84, 0.35], [0.88, 0.62], [0.8, 0.72], [0.65, 0.5], [0.55, 0.25]]
+      }
+    },
+    {
+      "part": "wing",
+      "fill": {
+        "smooth": [[0.21, 0.71], [0.35, 0.75], [0.5, 0.77], [0.62, 0.65], [0.62, 0.4], [0.5, 0.1], [0.3, 0.06], [0.14, 0.22], [0.2, 0.5]]
+      }
+    },
+    {
+      "part": "wing",
+      "fill": {
+        "smooth": [[0.25, 1.08], [0.5, 1.06], [0.58, 0.98], [0.55, 0.9], [0.4, 0.95], [0.27, 1.0]]
+      }
+    },
+    {
+      "part": "stripe",
+      "stroke": {
+        "smooth": [[0.36, 0.7], [0.4, 0.42], [0.38, 0.14]]
+      },
+      "width": 0.03
+    },
+    {
+      "part": "spots",
+      "circle": [0.24, 0.56, 0.02]
+    },
+    {
+      "part": "spots",
+      "circle": [0.26, 0.42, 0.02]
+    },
+    {
+      "part": "spots",
+      "circle": [0.24, 0.28, 0.02]
+    },
+    {
+      "part": "spots",
+      "circle": [0.52, 0.6, 0.02]
+    },
+    {
+      "part": "spots",
+      "circle": [0.54, 0.44, 0.02]
+    },
+    {
+      "part": "spots",
+      "circle": [0.5, 0.28, 0.02]
+    },
+    {
+      "part": "tail",
+      "fill": {
+        "smooth": [[0.2, -0.06], [0.27, -0.22], [0.33, -0.06], [0.3, 0.05], [0.23, 0.05]]
+      }
+    },
+    {
+      "part": "face",
+      "fill": {
+        "smooth": [[0.72, 0.82], [0.9, 0.76], [0.98, 0.88], [0.95, 1.02], [0.8, 1.0], [0.72, 0.92]]
+      }
+    },
+    {
+      "part": "crown",
+      "fill": {
+        "smooth": [[0.77, 1.05], [0.84, 1.12], [0.92, 1.14], [0.95, 1.09], [0.9, 1.03], [0.81, 1.0]]
+      }
+    },
+    {
+      "part": "mask",
+      "stroke": {
+        "smooth": [[0.88, 0.95], [0.8, 0.93], [0.73, 0.9]]
+      },
+      "width": [0.03, 0.02]
+    },
+    {
+      "part": "mask",
+      "stroke": {
+        "smooth": [[0.96, 0.79], [0.86, 0.81], [0.77, 0.84]]
+      },
+      "width": [0.022, 0.014]
+    },
+    {
+      "part": "bill",
+      "fill": {
+        "polyline": [[0.98, 0.79], [1.2, 0.835], [1.0, 0.9]]
+      }
+    },
+    {
+      "part": "eye",
+      "circle": [0.9, 0.94, 0.028]
+    },
+    {
+      "part": "pupil",
+      "circle": [0.905, 0.94, 0.015]
+    }
+  ],
+  "colours": {
+    "belly": "light",
+    "wing": "ink",
+    "stripe": "paper",
+    "spots": "paper",
+    "tail": "ink",
+    "face": "paper",
+    "crown": "accent",
+    "mask": "ink",
+    "bill": "ink",
+    "eye": "paper",
+    "pupil": "ink"
+  },
+  "height": {
+    "dome": 0.6,
+    "parts": {
+      "wing": 0.2,
+      "spots": -0.3,
+      "crown": 0.3,
+      "bill": 0.3,
+      "eye": 0.4
+    }
+  }
+}

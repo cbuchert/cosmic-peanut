@@ -60,6 +60,10 @@ checked and previewed by `uv run python -m tools.tiles`.
   mirror-symmetric bat (C3). The bat is the weakest silhouette: a C3 tile has 120° corners at
   its 3-fold points, so the wingtips there can't be sharp. A slim dolphin and a hedgehog were
   tried first and read as blobs in the regular hexagon frame.
+- **Birds** (nine new, ten with the tern): mallard, puffin, kingfisher and cormorant are TGTG with the
+  koi/halibut edge structure (e0 smooth 9, e1 smooth 4), so they morph into the fish; gull and swallow
+  share the tern's (TTTTTT); chickadee, nuthatch and woodpecker are perching TGTG birds (e0 smooth 7,
+  e1 smooth 5) that morph into each other. Symmetric TTTTTT wings: V2 halfway up and e2 = e1 with v negated.
 - **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`; GPU shared with other agents):
   one species static p50 2–3 ms; `all` with morphs (bakes on the music) p50 9 ms, p99 13–14 ms,
   58.8 fps. Three renders per vsync still hold 58.8 fps: 2–5 ms per frame, bakes included.
