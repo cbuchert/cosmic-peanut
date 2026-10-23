@@ -53,44 +53,73 @@ motion on, Orbit speed and Bass pulse act as 0 and 0.1 until you move them off t
 
 ## Möbius
 
-The pack's second visualizer, `mobius`: the same rings on a Möbius strip. It is the same entry
-module; `src/lib/shapes.js` picks the vertex shader and the scene's extent (camera fit and depth
-fade radius) by `ctx.id`. History, scheduler, pulse, camera, `rings.frag` and the blit are shared.
+The pack's second visualizer, `mobius`: a snake of waveform slices winding along a closed Möbius
+track. It is the same entry module; `src/lib/shapes.js` picks the vertex shader by `ctx.id`.
+History, scheduler, pulse, `rings.frag` and the blit are shared with the sphere.
 
-- **Mapping** (`shaders/mobius.vert`): each ring is an open slice across the strip's width
-  (v = −W…W as j = 0…M) and travels along it. Age 0…1 maps to u = 4π·age, and
-  p(u, v) = ((R + v·cos(u/2))·cos u, v·sin(u/2), (R + v·cos(u/2))·sin u) with R = 1: the strip
-  lies flat in the horizontal plane and twists out of it. The waveform pushes along the analytic
-  surface normal; the bass pulse swells the whole strip by up to 6%, as on the sphere.
-- **Two laps**: the half twist brings a slice back upside down after one lap (the normal has
-  flipped, so the waveform now pushes the other way) and lined up after two. Rings are born and
-  fade out at the same place (u = 0 ≡ 4π), where the age fades hide the overlap.
+- **Snake** (`src/lib/snake.js`): the ribbon covers Length of the track and its head advances
+  along it at Length ÷ Travel time of the track per second, so Travel time is a slice's trip from
+  head to tail. Each pushed slice is placed where the head was when its push was due
+  (`history.step` reports how long ago that was) and stays there: older slices trail behind,
+  nothing slides, and the tail fades out over its own stretch (the age fades in `rings.frag`; the
+  head fades in briefly). Places are stored as fractions of the track, so changing Track keeps
+  them. On the beat the head surges by up to 30% × envelope × Beat, eased like the other beat
+  effects; slices laid during a surge are just spaced a little further apart.
+- **Tracks** (`src/lib/track.js`): each track is a table sampled evenly in arc length (1024
+  samples; `uTrack`, RGBA32F × 3 rows: centre, unit tangent, cross-section direction with the
+  twist in it). It is built in JS on Track change, and the camera fit reads the same table. The
+  frame is analytic: n = normalize(up × t) is horizontal and can't flip, because neither track's
+  tangent is ever vertical; b = t × n; w = cos τ·n + sin τ·b.
+  - `figure-8` (default): an "unfolded Klein bottle", a Möbius strip and its mirror image joined.
+    The centre line c(φ) = (1.9 cos φ, 0.55 sin φ, 1.9 sin φ cos φ) is a lemniscate whose lobes
+    tilt out of plane like a saddle, so its two passes through the crossing are 1.1 apart, both
+    lying flat there. From the crossing, τ = π(1 − cos 2πq)/2 turns the cross-section half a turn
+    one way over lobe A (right-handed) and back over lobe B (left-handed). It is 11.9 long, about
+    1.9 laps of the loop's circle.
+  - `loop`: the unit circle, two laps (4π), with τ = u/2. A cross-section comes back upside down
+    after one lap and lined up after two. Length 1 gives back the closed band. Length 0.5 is one
+    lap, so the head meets the fading tail: use less for a visible snake.
+- **Mapping** (`shaders/mobius.vert`): a slice is an open line across the strip (v = −W…W as
+  j = 0…M) at its place on the track: p = c + size·(v·w′ + amp·s·(t × w′)). Here w′ is w turned
+  about t by the wring, and size is the scale the slice was laid at (below).
+- **Framing** (`camera.js` `fitTrack`): the camera distance is solved per point. Every strip
+  edge, ± amp along the normal, over every yaw and the sway's pitch range (0.12–0.72), must fit in
+  75% of the shorter screen side and 90% of the longer. It is recomputed only when Track, Strip
+  width, Amplitude or the aspect change. The depth fade uses the track's horizontal reach.
 - **On the beat** (`src/lib/beat.js`): each beat gives a 0–1 envelope and bumps a beat counter.
   The envelope eases up with a smoothstep over 80 ms to the beat's level (1 on a tempo beat, the
   onset strength otherwise), then eases back down with another smoothstep, reaching 0 at 0.9 of a
   beat. Every join has zero slope, so nothing clicks; a beat landing mid-envelope rises from
-  where it is. With a confident tempo (`bpm` > 0) beats are the `beatPhase` wraps and
-  onsets only accent (× 0.2, no extra beats); otherwise onsets with `onsetStrength` ≥ 0.6 are
-  beats, at least 0.2 s apart. The same rule as Tie-Dye's `createFlow`, copied since packs can't
-  import from each other. Four effects ride the envelope:
-  - **Wring**: a twist offset φ joins the half twist, u/2 + φ, so the strip rolls about its centre
-    line. φ = 0.2 rad × envelope × Beat, alternating sides each beat (the signed envelope eases
-    through the same rise, so the flip is no sharper than a beat's rise). φ is the same along
-    the whole strip, so the slices at u and u + 2π still differ by π: it stays a Möbius strip.
-  - **Breath**: the width swells to W × (1 + 0.07 × envelope × Beat). The camera keeps its fit
-    (the 1.32 margin covers it), so the frame doesn't zoom on the beat.
-  - **Glow**: the newest slices (age < 0.18) brighten by up to 25% × envelope × Beat
-    (`uGlow` in `rings.frag`). With Reduce flashing on it's a quarter of that and passes through
-    `lib/flash.js` (a copy of the builtin pack's limiter): at most 3 rises per second.
+  where it is. With a confident tempo (`bpm` > 0) beats are the `beatPhase` wraps and onsets only
+  accent (× 0.2, no extra beats); otherwise onsets with `onsetStrength` ≥ 0.6 are beats, at least
+  0.2 s apart. This is the same rule as Tie-Dye's `createFlow`, copied because packs can't import
+  from each other. Everything that changes size or amplitude is baked into the slices laid during
+  the beat, so nothing already on the strip grows:
   - **Stamp**: the rings pushed while the envelope is up are scaled by 1 + 0.8 × envelope × Beat
     (`history.step`'s `gain`, applied after the auto-gain and clamp, so the tracked peak never
-    learns from it). The beat is baked into the history: each one rides along the strip as a band
-    of louder slices, showing where it landed.
-- **Params**: all of Cosmic Peanut's, plus `width` (Strip width, 0.15–0.7, default 0.4), the half
-  width W, and `beat` (Beat, 0–2, default 1), which scales the wring, breath, glow and stamp together
-  (0 turns them off; 2 is about as strong as the first, too-strong cut). Travel time covers both laps. The camera fits R + W + amp with the sphere's
-  1.32 margin. With Reduce motion on, Beat acts as 0.25 for the wring, breath and stamp until you move it
-  off its default (the glow isn't motion and keeps the Beat value). The sphere has no Beat param:
-  its uniforms leave it exactly as before.
+    learns from it). Each beat rides along the strip as a band of louder slices.
+  - **Breath and bass swell**: each slice is laid at size (1 + 0.07 × envelope × Beat) ×
+    (1 + 0.06 × bass pulse), stored next to its place (`uPos.g`). It scales the width and the
+    waveform about the centre line.
+  - **Glow**: the newest slices (age < 0.18) brighten by up to 25% × envelope × Beat (`uGlow` in
+    `rings.frag`). With Reduce flashing on it's a quarter of that and passes through `lib/flash.js`
+    (a copy of the builtin pack's limiter): at most 3 rises per second.
+  - **Wring**, the one frame-wide beat effect: the cross-section turns about the tangent by
+    φ = 0.2 rad × envelope × Beat, alternating sides each beat (the signed envelope eases through
+    the same rise). It's a roll, not a size change, but it moves the whole strip.
+  - **Surge**: the head speeds up, as above.
+- **Params**: all of Cosmic Peanut's, plus:
+  - `width` (Strip width, 0.15–0.7, default 0.4): the half width W.
+  - `beat` (Beat, 0–2, default 1): scales the wring, breath, glow, stamp and surge together.
+    0 turns them off; 2 is about as strong as the first, too-strong cut.
+  - `track` (Track: figure-8 | loop).
+  - `length` (Length, 0.2–1, default 0.5): the fraction of the track the snake covers.
 
-`frame()` allocates nothing. Tests: `cd web && npx vitest run ../plugins/cosmic-peanut`.
+  With Reduce motion on, Beat acts as 0.25 for the wring, breath, stamp and surge until you move
+  it off its default (the glow isn't motion and keeps the Beat value). The bass pulse still
+  brightens the whole strip a little (`uPulse` in `rings.frag`, as on the sphere). The sphere has
+  no Beat, Track or Length param, and draws exactly as before.
+
+`frame()` allocates nothing (the track table and camera fit are rebuilt only on param or size
+changes). Tests: `cd web && npx vitest run ../plugins/cosmic-peanut`; `src/cosmic-peanut.test.js`
+runs the entry itself on a recording fake WebGL2 context.
