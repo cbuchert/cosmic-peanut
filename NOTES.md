@@ -3,6 +3,34 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tessellations: Tile Horizon, the floor surface (2026-10-22)
+
+**Tile Horizon** (`tile-horizon`, webgl2) casts the engine's woodcut tiling onto an endless floor
+seen low in perspective, receding to a horizon that fades into the paper. Same motifs, palettes,
+music and params as Metamorphosis, plus Height, Tilt and Fog. No engine change: it is one
+surface shader (`shaders/tess/tile-horizon.frag`) plus a camera (`src/lib/tess-floor.js`).
+
+- **Surface**: per-pixel ray–plane hit (focal 1.6 half-short-sides, ~32° half field of view),
+  `S = mat2(dFdx(p), dFdy(p))`, computed for every pixel (sky too) so the derivatives stay
+  defined across the horizon. The floor fades to paper by distance (`1 − exp(−3 (d/fog)²)`) and by
+  footprint: a half-unit tile under 16 → 5 px along its most foreshortened axis. The engine's own
+  small-tile fade uses √|det M|, the geometric mean, which stays moderate at grazing angles where
+  the depth axis already aliases, so the surface needs the worst-axis test. Fully fogged pixels
+  skip `tessShade`, so the sky costs nothing.
+- **Rings**: `TESS_RING` is the distance from the camera's ground point over 0.6 × the fog
+  distance, so figure/ground fronts and the spectrum rings sweep outwards across the floor.
+- **Camera**: ground speed = travel × 0.6 × height (the floor's apparent speed doesn't depend on
+  Height); the heading drifts as two slow sines (≤ 0.05 rad/s); the position wraps every
+  `BLEND_PERIOD` lattice steps. Drag grabs the world (0.004 rad/px pan, ≤ 1.2 rad; 0.003 rad/px
+  tilt, pitch kept within 0.03–1.3 rad); on release a critically damped spring (ω 2.2/s, solved
+  exactly per step) eases it back from rest with no overshoot. Reduce motion: heading drift
+  × 0.25, ease-back ω × 0.5 (the glide is already × 0.25 in the state). Height 0–1 → 0.25–1.5
+  units, Tilt → 0.06–0.6 rad below the horizon, Fog → 40–8 camera heights.
+- **Cost**: WebKit harness, 2560×1440, Quality high, `sync=1`: p50 7 ms, p99 10–11 ms, 58.8 fps
+  (p4 default and p3 at Tilt 1), the same as Metamorphosis; CPU p50 < 0.1 ms. The GPU was shared
+  with other agents' harnesses while measuring. Flash check: 0 flashes/s at 5 %, Reduce flashing
+  on and off.
+
 ## Tessellations: the engine and Metamorphosis (2026-10-22)
 
 **Metamorphosis** (`metamorphosis`, webgl2) is the first of a series of interlocking-tiling
