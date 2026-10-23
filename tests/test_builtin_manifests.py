@@ -49,6 +49,7 @@ def test_builtin_renderers():
         "marbling": ("webgl2", []),
         "laminar": ("webgl2", []),
         "tetraballs": ("webgl2", []),
+        "lattice": ("webgl2", []),
     }
 
 
@@ -662,3 +663,46 @@ def test_tetraballs_manifest():
     assert params["bounce"]["default"] == 1
     for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
+
+
+def test_lattice_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "lattice"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Lattice",
+        "src/lattice.js",
+        "webgl2",
+        "thumbs/lattice.jpg",
+    )
+    # One line, and original wording: no artist's name or print titles in the UI.
+    assert v["description"] and "\n" not in v["description"]
+    assert "escher" not in json.dumps(v).lower()
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "speed",
+        "reactivity",
+        "thickness",
+        "fog",
+        "palette",
+        "background",
+        "quality",
+    ]
+    # lib/lattice.js DEFAULT_SPEED: Reduce motion slows the flight only while Speed sits here.
+    speed = params["speed"]
+    assert (speed["type"], speed["min"], speed["default"]) == ("number", 0, 1)
+    assert speed["max"] >= 3
+    r = params["reactivity"]
+    assert (r["type"], r["min"], r["max"], r["default"]) == ("number", 0, 2, 1)
+    # lib/lattice.js THICKNESS (rod radius, cells).
+    t = params["thickness"]
+    assert (t["label"], t["min"], t["max"], t["default"]) == ("Rod thickness", 0.03, 0.12, 0.06)
+    fog = params["fog"]
+    assert (fog["min"], fog["max"], fog["default"]) == (0, 1, 0.5)
+    # lib/lattice.js PALETTES / QUALITIES.
+    assert params["palette"]["options"] == ["steel", "brass", "ink"]
+    assert params["palette"]["default"] == "steel"
+    assert params["background"]["options"] == ["fog", "none"]
+    assert params["background"]["default"] == "fog"
+    assert params["quality"]["options"] == ["low", "medium", "high"]
+    assert params["quality"]["default"] == "medium"
+    for f in ("fullscreen.vert", "lattice.frag", "composite.frag"):
+        assert (REPOS["builtin"] / "shaders/lattice" / f).is_file(), f
