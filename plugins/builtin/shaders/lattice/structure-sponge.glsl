@@ -21,7 +21,7 @@ const float STRUCT_HIST_INK = 0.28;
 const float STRUCT_HIST_FADE = 0.8;
 const float STRUCT_RUN_GAIN = 0.9;
 const float STRUCT_PULSE_GAIN = 2.2;
-const float STRUCT_NODE_PULSE_GAIN = 0.6;
+const float STRUCT_NODE_PULSE_GAIN = 1.0;
 #define STRUCT_FAR_FADE
 
 const vec3 SPONGE_F = vec3(9.0, 4.5, 9.0);   // zoom centre, frame cells
@@ -29,7 +29,7 @@ const vec3 SPONGE_C = vec3(-31.5, 4.5, -31.5); // the rendered cube: centre and 
 const float SPONGE_H = 40.5;
 const int SPONGE_LEVELS = 13;   // hard cap: holes down to 1e-5 of the rendered cube
 const float SPONGE_FOOT = 0.75; // a level's holes fade in as their half-width grows 1–2 × this (px)
-const float SPONGE_EDGE = 0.16; // edge band of a hole's corner, in cross units (1 = the hole's half-width)
+const float SPONGE_EDGE = 0.3; // edge band of a hole's corner, in cross units (1 = the hole's half-width)
 
 // The level-m cross coordinates of q (rendered-cube units) at scale s = 3^m: ≥ 1 in a cell's
 // middle third (2 at its centre).
