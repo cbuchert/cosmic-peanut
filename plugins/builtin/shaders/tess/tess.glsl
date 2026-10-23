@@ -11,7 +11,8 @@
 // by the figure/ground front and the spectrum rings); the default is the distance of the tile's
 // centre c from u_tRing.xy over u_tRing.z. Optional hook: define TESS_CLASS(cls, c) to recolour a
 // tile from its regular class and centre (0–2, an index into u_tCls; e.g. a surface whose charts
-// meet with a turn that swaps the classes); the default keeps cls.
+// meet with a turn that swaps the classes); the default keeps cls. Optional: define TESS_ATLAS to
+// get the bestiary's animal tiles as a second motif (shaders/tess/atlas.glsl, u_tMotif).
 //
 // Mirrors src/lib/tess.js (tested there): the symmetric displacement field (tessField ↔
 // fieldAt), the regular tile test (tessTile ↔ tileAt). Plane units: the lattice (p4: unit
@@ -213,6 +214,14 @@ float tessFeatures(vec2 uv, vec4 feat, float uvPx, float fpx) {
   return max(max(e, spine), max(fins, star));
 }
 
+#ifdef TESS_ATLAS
+// The atlas motif (shaders/tess/atlas.glsl, spliced in after this file when a surface defines
+// TESS_ATLAS): bestiary tiles instead of the warp's creatures while u_tMotif is 1.
+uniform int u_tMotif;
+vec3 tessArt(vec3 col, vec3 fill, vec3 cut, float fade, float tileSize, float fpx);
+vec4 tessAtlasShade(vec2 p, mat2 S);
+#endif
+
 // The print look for one pixel of a tile, for any surface (tessShade below is the flat
 // engine's): t = the tile under the pixel (uv, dist, orient, cls, centre), tf = the tile the
 // colour block shows there (the pixel offset by the registration u_tReg); pxq = plane units per
@@ -221,10 +230,11 @@ float tessFeatures(vec2 uv, vec4 feat, float uvPx, float fpx) {
 // features and the fade to the mean go together); dpx = target px to the outline; m = the blend
 // between the feature sets; q = the tile-plane point (ink-spread grain). TESS_RING(centre) gives
 // each tile its ring.
-// The colour-and-ink tail of the print, given the tile's fill: gouges, features, the key
-// block's outlines and the fade to the mean. q seeds the ink-spread grain. marks returns the
+// The colour-and-ink tail of the print, given the tile's fill (fade: how far it has turned to
+// its after-shift colour): gouges, features, the atlas art, the key block's outlines and the
+// fade to the mean. q seeds the ink-spread grain. marks returns the
 // gouge (x) and feature (y) coverage, for a surface that carves them (relief).
-vec4 tessPrintFill(Tile t, vec3 fill, float pxq, float tileSize, float dpx, float m, vec2 q, out vec2 marks) {
+vec4 tessPrintFill(Tile t, vec3 fill, float fade, float pxq, float tileSize, float dpx, float m, vec2 q, out vec2 marks) {
   float fpx = 1.0 / u_tPxScale;                    // full-resolution px in target px
   bool dark = dot(fill, vec3(0.2126, 0.7152, 0.0722)) < 0.18;
   vec3 cut = dark ? u_tPaper : u_tInk;             // what a gouge or a feature shows
@@ -252,6 +262,9 @@ vec4 tessPrintFill(Tile t, vec3 fill, float pxq, float tileSize, float dpx, floa
   float f = tessFeatures(t.uv, feat, 2.0 * pxq, fpx) * smoothstep(6.0 * fpx, 16.0 * fpx, tileSize);
   col = mix(col, cut, f);
   marks.y = f;
+#ifdef TESS_ATLAS
+  col = tessArt(col, fill, cut, fade, tileSize, fpx);
+#endif
 
   // Key block: bold outlines, a little ink spread where the paper takes more.
   float spread = 1.0 + 0.22 * (tessNoise(q * 9.0) - 0.5) + 0.12 * (tessNoise(gl_FragCoord.xy * 0.35) - 0.5);
@@ -269,10 +282,13 @@ vec4 tessPrint(Tile t, Tile tf, float pxq, float tileSize, float dpx, float m, v
   int fc = TESS_CLASS(tf.cls, tf.centre);
   vec3 fill = mix(u_tCls[fc], u_tClsNext[fc], fade);
   vec2 marks;
-  return tessPrintFill(t, fill, pxq, tileSize, dpx, m, q, marks);
+  return tessPrintFill(t, fill, fade, pxq, tileSize, dpx, m, q, marks);
 }
 
 vec4 tessShade(vec2 p, mat2 S) {
+#ifdef TESS_ATLAS
+  if (u_tMotif == 1) return tessAtlasShade(p, S);
+#endif
   mat2 J;
   float m;
   vec2 q = tessWarp(p, J, m);
@@ -450,7 +466,7 @@ vec4 tessShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail) {
   int fc = TESS_CLASS(t.cls, t.centre);
   vec3 fill = r.face > 0.5 ? u_tClsNext[fc] : u_tCls[fc];
   vec2 marks;
-  vec4 col = tessPrintFill(t, fill, pxq, 0.5 / pxq, dpx, r.m, t.uv, marks);
+  vec4 col = tessPrintFill(t, fill, r.face > 0.5 ? 1.0 : 0.0, pxq, 0.5 / pxq, dpx, r.m, t.uv, marks);
   // Gouges are cut into the block; eyes, spines and stars stand proud.
   detail = (FEATURE_RAISE * marks.y - GOUGE_DEPTH * marks.x) * u_tRelief.x * k;
   return col;

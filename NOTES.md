@@ -3,6 +3,73 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tessellations: the bestiary, animal tiles as data (2026-10-23)
+
+**Creatures** (Metamorphosis param: `abstract` default, `all`, `fish`, `birds`, `reptiles`,
+`mammals`; the harness also takes `p.creatures=<group>/<name>`) prints recognisable animal tiles
+instead of the warp's abstract creatures, with the same print look, palettes, rings and music.
+Species are data (`plugins/builtin/tiles/<group>/<name>.json`, authoring guide in its README),
+checked and previewed by `uv run python -m tools.tiles`.
+
+- **Tiles are Heesch types with the relations built in**: TTTTTT (p1), TGTG (pg), C4 (p4), C3
+  (p3). Only the free edges are data, in each edge's chord frame (`smooth` Catmull–Rom, `bezier`
+  or `polyline`); derived edges are isometric images, so any simple outline tiles. Editable corners:
+  TTTTTT V1–V3, TGTG w/h/shear, C3 V1, C4 none. `lib/bestiary.js` derives, blends (corners and
+  chord points linearly, no allocation) and locates; `tools/tiles/geometry.py` mirrors it, and
+  `tests/fixtures/tiles_golden.json` (the seeds, plus the koi/halibut blend) pins both to the
+  same points (vitest and pytest).
+- **A blend of valid tiles is a tile of the type, but not necessarily a simple one** (the brief
+  assumed it always was). So `check` also tests compatible pairs at 25/50/75 %, and each species
+  against its plain tile (the type-change path); a deliberately crossing pair fails in pytest.
+- **Colourings** (tested across every outline segment, wavy tiles included): TTTTTT (i + 2j) mod 3
+  over lattice steps (neighbours ±a, ±b, ±(a − b)); TGTG (copy + i) mod 2; C4 the quarter turn's
+  parity; C3 the third turn. The print state runs as p3 in atlas mode so all three class colours
+  exist; `accent` art takes the first palette slot no class uses, cycling with the shift.
+- **The atlas pass** (`shaders/tess/atlas-bake.frag`, `lib/atlas-gl.js`) bakes one period cell
+  (lattice coordinates, REPEAT) into two RGBA16F textures: outline distance and inward normal,
+  height hint; art edge distance and normal; packed copy, cell offset and role. A texel finds its
+  tile by testing the copies over the lattice steps their boxes can reach (computed per shape).
+  Its outline distance is to its own tile's outline only, since inside a tiling that is the
+  nearest edge. The art composites in painter's order, keeping the distance to the nearest
+  visible role edge. It bakes only when the tile changes: 256² while a morph re-bakes every frame,
+  then 512² with mips once settled. Outline and art come from a data texture (the art library
+  packed once at load, the outline in row 0, re-uploaded per change).
+- **Print side** (`shaders/tess/atlas.glsl`): `textureGrad` with analytic lattice derivatives
+  (seamless across the cell, mip-filtered when small). Outline and art edges are antialiased from
+  distances in target px (`S`, `pxq`), so they stay crisp at any zoom; the art role across an
+  edge is fetched one step past it. Then `tessPrint` as before: gouges follow each animal's
+  contour, figure/ground classes, `TESS_RING`/`TESS_CLASS`. **Engine change (minimal):**
+  `tess.glsl` has three `#ifdef TESS_ATLAS` hooks (a declaration, the art call in `tessPrint`, the
+  `u_tMotif` branch in `tessShade`). `tess-gl.js` splices `atlas.glsl` only for surfaces that
+  define TESS_ATLAS, and points its samplers at units 1–2: left on unit 0 they alias the print
+  target and WebGL refuses every draw (a black print). With `abstract`, all six visualizers'
+  `--shots` stills (still=150, black and light) are byte-identical to b1700b2. Other surfaces opt
+  in with the define plus `createAtlas` (see Metamorphosis).
+- **Morphing** (`lib/atlas.js` createCreatures): on tess-music's morph steps, held for
+  1 + ⌊(1 − Morph)·4⌋ steps (Morph 0 holds). Compatible species blend over 1.2 s (×4 Reduce
+  motion). The leaving species' art erodes (signed distance + w·0.12) while the arriving one's
+  grows in. About every third change switches tile type: species → plain tile → swap → plain tile
+  → species over 2.4 s, the print dipping to its mean at the swap (the lattices differ). The view
+  offset wraps every 6 cells of the atlas lattice (where all colourings repeat). Atlas zoom is
+  1.8 against 2.3, so the animals read larger.
+- **Registration is a directory scan**: one generated `index.json` per group (`tools.tiles
+  index`, checked current), with the group folders as the manifest's fixed options, so the four
+  group designers never edit a shared file.
+- **Seeds** (original outlines): koi and halibut (TGTG, a morph pair), Arctic tern (TTTTTT: a
+  translation tiling forces a notched tail, so a tern rather than a gull), sea turtle (C4) and a
+  mirror-symmetric bat (C3). The bat is the weakest silhouette: a C3 tile has 120° corners at
+  its 3-fold points, so the wingtips there can't be sharp. A slim dolphin and a hedgehog were
+  tried first and read as blobs in the regular hexagon frame.
+- **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`; GPU shared with other agents):
+  one species static p50 2–3 ms; `all` with morphs (bakes on the music) p50 9 ms, p99 13–14 ms,
+  58.8 fps. Three renders per vsync still hold 58.8 fps: 2–5 ms per frame, bakes included.
+  Abstract in the same session: p50 7–13 ms. Untested on the M1.
+- **With relief (integration, 2026-10-23):** the atlas hook (`tessArt`) sits in `tessPrintFill`,
+  the print tail `tessPrint` and `tessShadeRelief` share. Relief carves the abstract creatures
+  only: while the bestiary shows, Metamorphosis passes relief 0 (flat print, as before relief).
+  Texture units: print target 0, atlas field 1 and art 2 (set on every program, relief ones
+  included), relief height 3 (`HEIGHT_UNIT`, was 1, which aliased the atlas field).
+
 ## Tessellations: relief, the carved block, and music that moves it (2026-10-22)
 
 The engine can now carve the tiling into the block a woodcut is printed from, and the music drives

@@ -23,6 +23,11 @@
 import { createProgram, createTarget } from "./gl.js";
 
 const DIR = "shaders/tess/";
+/** Texture units of the atlas motif's field and art textures (lib/atlas-gl.js binds them). */
+export const ATLAS_FIELD_UNIT = 1;
+export const ATLAS_ART_UNIT = 2;
+/** Texture unit of the relief height texture (`u_tHeight`), clear of the atlas units. */
+export const HEIGHT_UNIT = 3;
 /** Paper texture strength in the composite. */
 const GRAIN = 1;
 /** Height pass resolution, relative to the print target (heights are smooth; the march samples it). */
@@ -58,8 +63,11 @@ export async function createTessPipeline(ctx, surface, { relief = false } = {}) 
   const [vs, engine, paperFs, surfFs] = await Promise.all(
     [DIR + "fullscreen.vert", DIR + "tess.glsl", DIR + "paper.frag", surface].map((f) => ctx.assets.text(f)),
   );
+  // A surface that defines TESS_ATLAS also gets the bestiary motif (shaders/tess/atlas.glsl),
+  // spliced in after the engine.
+  const atlas = surfFs.includes("#define TESS_ATLAS") ? await ctx.assets.text(DIR + "atlas.glsl") : "";
   /** @type {Record<string, string>} */
-  const files = { tess: engine };
+  const files = { tess: engine + atlas };
   const extra = includesOf(surfFs).filter((n) => n !== "tess");
   const texts = await Promise.all(extra.map((n) => ctx.assets.text(DIR + n + ".glsl")));
   extra.forEach((n, i) => (files[n] = texts[i]));
@@ -74,6 +82,16 @@ export async function createTessPipeline(ctx, surface, { relief = false } = {}) 
     : null;
   const paper = createProgram(gl, vs, paperFs, DIR + "paper.frag");
   const u = prog.u;
+  if (atlas) {
+    // The atlas samplers live on units 1 and 2 (lib/atlas-gl.js binds them there); left on
+    // unit 0 they would alias the print target's texture and WebGL refuses the draw. The relief
+    // programs carry them too, and keep the height texture off them (HEIGHT_UNIT).
+    for (const pr of rel ? [prog, rel.main, rel.height] : [prog]) {
+      gl.useProgram(pr.program);
+      gl.uniform1i(pr.u.u_aField, ATLAS_FIELD_UNIT);
+      gl.uniform1i(pr.u.u_aArt, ATLAS_ART_UNIT);
+    }
+  }
   const vao = gl.createVertexArray();
   const target = createTarget(gl);
   let scale = 1;
@@ -148,9 +166,10 @@ export async function createTessPipeline(ctx, surface, { relief = false } = {}) 
         gl.uniform2f(ru.u_res, target.width, target.height);
         upload(ru, s, w);
         uploadRelief(ru, s);
-        gl.activeTexture(gl.TEXTURE1);
+        gl.activeTexture(gl.TEXTURE0 + HEIGHT_UNIT);
         gl.bindTexture(gl.TEXTURE_2D, rel.target.tex);
-        gl.uniform1i(ru.u_tHeight, 1);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.uniform1i(ru.u_tHeight, HEIGHT_UNIT);
         gl.uniform2f(ru.u_tHeightTexel, 1 / rel.target.width, 1 / rel.target.height);
         setSurface(gl, ru, target.width, target.height);
         gl.drawArrays(gl.TRIANGLES, 0, 3);

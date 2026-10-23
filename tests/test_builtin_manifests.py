@@ -693,6 +693,7 @@ def test_metamorphosis_manifest():
         "hatching",
         "relief",
         "light",
+        "creatures",
         "quality",
     ]
     # Relief (lib/tess-music.js RELIEF_DEFAULT; 0 is the flat print) and the raking light's
@@ -713,6 +714,14 @@ def test_metamorphosis_manifest():
         360,
         135,
     )
+    # Creatures: the warp's abstract creatures (default, unchanged) or the bestiary's animal tiles
+    # by group (lib/bestiary.js GROUPS; lib/atlas.js creatureList). Fixed options, so designers
+    # adding species never edit the manifest.
+    c = params["creatures"]
+    assert (c["type"], c["label"], c["default"]) == ("select", "Creatures", "abstract")
+    assert c["options"] == ["abstract", "all", "fish", "birds", "reptiles", "mammals"]
+    for g in c["options"][2:]:
+        assert (REPOS["builtin"] / "tiles" / g / "index.json").is_file(), g
     # Option order is lib/tess-music.js SYMMETRIES, lib/tess.js PALETTES, tess-music QUALITIES.
     assert params["symmetry"]["options"] == ["p4", "p3"]
     assert params["palette"]["options"] == ["ink", "dusk", "four-block", "ochre", "watercolour"]
@@ -759,7 +768,7 @@ def test_tile_horizon_manifest():
     ]
     (meta,) = [m for m in _manifest("builtin")["visualizers"] if m["id"] == "metamorphosis"]
     for p in meta["params"]:
-        if p["id"] in RELIEF_PARAMS:
+        if p["id"] in RELIEF_PARAMS or p["id"] == "creatures":  # Metamorphosis-only for now
             continue
         assert params[p["id"]] == p, p["id"]
     for name in ("height", "tilt", "fog"):
@@ -783,7 +792,7 @@ def test_endless_zoom_manifest():
     params = {p["id"]: p for p in v["params"]}
     # Metamorphosis's params, plus the surface's own before Quality.
     (m,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "metamorphosis"]
-    shared = [p for p in m["params"] if p["id"] not in ("quality", *RELIEF_PARAMS)]
+    shared = [p for p in m["params"] if p["id"] not in ("quality", "creatures", *RELIEF_PARAMS)]
     assert v["params"][: len(shared)] == shared
     assert list(params)[len(shared) :] == ["spiral", "zoom", "direction", "quality"]
     # Option order is lib/tess-zoom.js SPIRALS and DIRECTIONS (default DEFAULT_SPIRAL).

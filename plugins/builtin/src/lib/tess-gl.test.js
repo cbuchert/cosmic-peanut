@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { HEIGHT_SCALE, includesOf, spliceIncludes, withDefines } from "./tess-gl.js";
+import { ATLAS_ART_UNIT, ATLAS_FIELD_UNIT, HEIGHT_SCALE, HEIGHT_UNIT, includesOf, spliceIncludes, withDefines } from "./tess-gl.js";
 
 describe("relief program variants", () => {
   it("puts the defines right after #version (GLSL ES needs #version first) and changes nothing else", () => {
@@ -25,5 +25,11 @@ describe("shader includes", () => {
   });
   it("splices each one in place", () => {
     expect(spliceIncludes(src, { tess: "T", disk: "D" })).toBe("a\nT\nb\nD\nc // #include nope-not-a-line\n");
+  });
+});
+
+describe("texture units", () => {
+  it("keeps the print target (0), the atlas textures and the relief height on separate units", () => {
+    expect(new Set([0, ATLAS_FIELD_UNIT, ATLAS_ART_UNIT, HEIGHT_UNIT]).size).toBe(4);
   });
 });
