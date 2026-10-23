@@ -211,12 +211,19 @@ export function foldElement(x, y, t, g) {
  * (T ← T ∘ E), then rebases — T ← g ∘ T with g the tiling symmetry that folds T(0) back into the
  * fundamental domain — which leaves the picture unchanged (the tiling is g-invariant) but keeps
  * the coefficients small enough for float32 in the shader, however far it travels.
+ *
+ * g is always orientation-preserving (an odd fold is closed with the tiling's mirror z ↦ z̄), so
+ * T is never mirrored (m[8] stays 0). After each rebase T is re-projected onto the exact isometry
+ * translate(T(0)) ∘ rotate(arg T′(0)), the form e^{iθ}(z + a)/(1 + āz): the composed 2×2
+ * matrix's rounding error off that form otherwise grows about tenfold per thousand frames, and
+ * T(0) left the disk after about three minutes.
  * @param {ReturnType<typeof tiling>} t
  */
 export function createDrift(t) {
   const e = createIsometry();
   const g = createIsometry();
   const c = new Float64Array(2);
+  const MIRROR = Float64Array.from([1, 0, 0, 0, 0, 0, 1, 0, 1]); // z ↦ z̄, a symmetry of every tiling
   return {
     m: createIsometry(),
     heading: 0,
@@ -232,9 +239,25 @@ export function createDrift(t) {
       mobiusCompose(this.m, this.m, e);
     },
     rebase() {
-      mobiusApply(this.m, 0, 0, c);
+      const m = this.m;
+      mobiusApply(m, 0, 0, c);
       foldElement(c[0], c[1], this.tiling, g);
-      mobiusCompose(this.m, g, this.m);
+      if (g[8] !== m[8]) mobiusCompose(g, MIRROR, g); // keep g ∘ T orientation-preserving
+      mobiusCompose(m, g, m);
+      // Re-project onto translate(T(0)) ∘ rotate(arg T′(0)), T′(0) = (ad − bc) / d².
+      mobiusApply(m, 0, 0, c);
+      const k = Math.hypot(c[0], c[1]);
+      if (k > 0.999) {
+        c[0] *= 0.999 / k;
+        c[1] *= 0.999 / k;
+      }
+      const nr = m[0] * m[6] - m[1] * m[7] - (m[2] * m[4] - m[3] * m[5]);
+      const ni = m[0] * m[7] + m[1] * m[6] - (m[2] * m[5] + m[3] * m[4]);
+      const dr = m[6] * m[6] - m[7] * m[7];
+      const di = 2 * m[6] * m[7];
+      const theta = Math.atan2(ni * dr - nr * di, nr * dr + ni * di);
+      mobiusTranslate(m, c[0], c[1]);
+      mobiusCompose(m, m, mobiusRotate(e, theta));
     },
     /** @param {number} dt @param {number} speed @param {number} turn */
     step(dt, speed, turn) {

@@ -2,9 +2,9 @@
 //
 // Per pixel: a disk point w (screen mode: the screen scaled so its corners sit just past the rim;
 // env mode: an equirect direction, each hemisphere stereographically onto its own disk), then the
-// view isometry z = T(w) (a Möbius or anti-Möbius map, rebased on the CPU so its coefficients stay
-// small), then the triangle-group fold into the fundamental domain. src/lib/hyperbolic.js mirrors
-// the maths (tiling(), fold(), mobiusApply()) and is tested. Tile edges (the geodesic circle C)
+// view isometry z = T(w) (a Möbius map, rebased on the CPU so its coefficients stay small; the
+// rebase never mirrors, so uConj stays 0), then the triangle-group fold into the fundamental
+// domain. src/lib/hyperbolic.js mirrors the maths (tiling(), fold(), mobiusApply()) and is tested. Tile edges (the geodesic circle C)
 // glow; the triangle mirrors are faint; tiles are tinted by their generation (inversion count).
 // Output is linear light; alpha is left 0 — the output pass sets alpha = max(r, g, b).
 varying vec2 vUv;
