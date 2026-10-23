@@ -100,7 +100,8 @@ void main() {
       float w = rho - 1.0;
       float q = length(vec2(w, X.y));
       float d0 = u_side * (q - u_k);
-      float eps = max(2e-4, 0.5 * pxAng * t);           // half a target pixel
+      // half a target pixel; inside, looser with depth (the fog hides it there)
+      float eps = max(2e-4, pxAng * t * (0.5 + (u_side < 0.0 ? 6.0 * t * t / (FOG_END * FOG_END) : 0.0)));
       float r;                                          // safe radius
       float est;                                        // distance estimate for the ink
       shell = d0 <= u_dmax + eps;

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createTessState } from "./tess-music.js";
 import { createTile, fieldAt, groupOf, tileAt } from "./tess.js";
 import { BLEND_PERIOD } from "./tess-music.js";
-import { blendPose, conformalAspect, createDrag, createPose, createTorusCamera, DIST, FLOW_U, FLY, mapParams, ORBIT, THICKNESS, TRAVEL, createViewMix, DRAG_RATE, DRAG_RETURN, PITCH_LIMIT, DIVE_TIME, IDLE_TOGGLE, MIN_HOLD, PHRASE_STEPS, VIEWS, viewName, wallFade, insidePose, latticeCounts, minorFraction, minorRate, outsidePose, planePoint } from "./torus.js";
+import { blendPose, conformalAspect, createDrag, createPose, createTorusCamera, DIST, insideScale, FLOW_U, FLY, mapParams, ORBIT, THICKNESS, TRAVEL, createViewMix, DRAG_RATE, DRAG_RETURN, PITCH_LIMIT, DIVE_TIME, IDLE_TOGGLE, MIN_HOLD, PHRASE_STEPS, VIEWS, viewName, wallFade, insidePose, latticeCounts, minorFraction, minorRate, outsidePose, planePoint } from "./torus.js";
 
 const S3 = Math.sqrt(3);
 const THICK = [0.2, 0.28, 0.38, 0.45, 0.5];
@@ -516,3 +516,32 @@ describe("params", () => {
     expect(TRAVEL.min).toBeGreaterThan(0);
   });
 });
+
+describe("inside render scale", () => {
+  it("renders the tube's inside at a lower scale per Quality (grazing walls cost the most)", () => {
+    expect(insideScale("high")).toBe(0.8);
+    expect(insideScale("medium")).toBe(0.6);
+    expect(insideScale("low")).toBe(0.45);
+    expect(insideScale("bogus")).toBe(0.8);
+  });
+
+  it("switches only while the dive is under the paper (the camera crosses the wall in full fade)", () => {
+    const cam = createTorusCamera();
+    const g = { travel: 0 };
+    let side = 1;
+    let flips = 0;
+    for (const view of ["inside", "outside"]) {
+      for (let i = 0; i < Math.round((DIVE_TIME + 1) * 60); i++) {
+        g.travel += 1 / 60;
+        cam.step(1 / 60, g, { view, thickness: 0.36, stepped: false, reduceMotion: false });
+        if (cam.side !== side) {
+          flips++;
+          expect(cam.fade).toBeGreaterThan(0.95);
+          side = cam.side;
+        }
+      }
+    }
+    expect(flips).toBe(2);
+  });
+});
+

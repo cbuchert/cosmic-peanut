@@ -18,7 +18,7 @@
 import { createProgram } from "./lib/gl.js";
 import { createTessPipeline } from "./lib/tess-gl.js";
 import { createTessState, renderScale } from "./lib/tess-music.js";
-import { createTorusCamera, latticeCounts, mapParams } from "./lib/torus.js";
+import { createTorusCamera, insideScale, latticeCounts, mapParams } from "./lib/torus.js";
 import { BIRTH, COLS, createWaveHistory, LAP_ROWS, liveDisp, ROWS, stepFactor, waveAmp } from "./lib/torus-wave.js";
 
 /** March steps per Quality (low, medium, high): the displaced shell takes short steps. */
@@ -112,10 +112,13 @@ export default async function create(ctx) {
   let stepK = 1;
   let steps = STEPS.high;
 
+  // Inside the tube the print renders at insideScale; the switch happens as the camera crosses
+  // the wall, hidden by the paper fade.
+  let side = 1;
   const setQuality = () => {
     const q = String(ctx.params.quality);
     steps = q === "low" ? STEPS.low : q === "medium" ? STEPS.medium : STEPS.high;
-    tess.resize(renderScale(q));
+    tess.resize(side < 0 ? insideScale(q) : renderScale(q));
   };
   setQuality();
 
@@ -156,6 +159,10 @@ export default async function create(ctx) {
       camIn.stepped = s.stepped;
       camIn.reduceMotion = ctx.reduceMotion;
       cam.step(time.dt, s, camIn);
+      if (cam.side !== side) {
+        side = cam.side;
+        setQuality();
+      }
       // The waveform rolls round the tube from the hole: one history row per push, the beat
       // stamped into the row being laid down (s.env: 80 ms smoothstep rise, gone by 0.9 beat),
       // the bass baked into its height.

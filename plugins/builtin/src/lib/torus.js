@@ -413,3 +413,11 @@ export function mapParams(p, out) {
   o.detail = num(p.detail, 0, 1, 0.15);
   return out;
 }
+/**
+ * Render scale inside the tube per Quality: looking down it, nearly every wall is seen at a
+ * grazing angle, where the displaced march takes the most steps, so the inside prints at a lower
+ * scale than lib/tess-music.js renderScale's (1 / 0.75 / 0.5). The visualizer switches when the
+ * camera crosses the wall, under the full paper fade.
+ * @param {unknown} q Quality param
+ */
+export const insideScale = (q) => (q === "low" ? 0.45 : q === "medium" ? 0.6 : 0.8);
