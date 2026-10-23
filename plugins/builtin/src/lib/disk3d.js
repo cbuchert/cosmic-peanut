@@ -22,13 +22,13 @@
  */
 import { createDrag } from "./sphere-view.js";
 
-export const SCENES = ["sphere", "flat"];
+export const SCENES = ["flat", "sphere"];
 export const CAMERAS = ["auto", "still"];
 export const MOVES = ["orbit", "swoop", "skim", "pullback"];
 
 /** The coin: printed face radius, bevel width, half-thickness, waveform amplitude per unit of
  * Reactivity (the rim is displaced by at most 2× this), and the most it tilts (rad). */
-export const COIN = { face: 1, bevel: 0.15, half: 0.05, waveAmp: 0.06, maxTilt: 0.3 };
+export const COIN = { face: 1, bevel: 0.15, half: 0.05, waveAmp: 0.07, maxTilt: 0.3 };
 /** The tiled sphere's radius. */
 export const SPHERE_R = 9;
 /** The camera keeps this far from the coin, and this far inside the sphere. */

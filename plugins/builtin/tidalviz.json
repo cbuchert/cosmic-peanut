@@ -412,6 +412,9 @@
       "renderer": "webgl2",
       "thumbnail": "thumbs/poincare-disk.jpg",
       "params": [
+        { "id": "scene", "type": "select", "label": "Scene", "options": ["flat", "sphere"], "default": "flat" },
+        { "id": "camera", "type": "select", "label": "Camera", "options": ["auto", "still"], "default": "auto" },
+        { "id": "spin", "type": "number", "label": "Spin", "min": 0, "max": 2, "step": 0.01, "default": 1 },
         { "id": "tiling", "type": "select", "label": "Tiling", "options": ["{7,3}", "{5,4}", "{4,5}", "{6,4}"], "default": "{7,3}" },
         { "id": "palette", "type": "select", "label": "Palette", "options": ["ink", "dusk", "four-block", "ochre", "watercolour"], "default": "four-block" },
         { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },

@@ -72,7 +72,7 @@ describe("params", () => {
   it("falls back to the defaults for unknown or missing values", () => {
     const o = readDiskParams({ tiling: "{9,9}" }, ctx, createDiskOptions());
     expect(o.tiling).toBe("{7,3}");
-    expect([o.scene, o.camera, o.spin]).toEqual(["sphere", "auto", 1]);
+    expect([o.scene, o.camera, o.spin]).toEqual(["flat", "auto", 1]);
     expect([o.reactivity, o.speed, o.morph, o.ink, o.hatching]).toEqual([1, 1, 0.7, 1, 0.6]);
     expect(o.palette).toBe("four-block");
   });

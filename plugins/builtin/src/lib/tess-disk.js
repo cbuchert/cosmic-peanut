@@ -765,8 +765,8 @@ const num = (/** @type {unknown} */ v, /** @type {number} */ d) => (Number.isFin
 
 /** The tess state's options plus the Tiling, filled in place by readDiskParams. */
 export const createDiskOptions = () => ({
-  /** "sphere" (the coin in the tiled sphere) or "flat" (the print alone, as it first was). */
-  scene: "sphere",
+  /** "flat" (the print alone, as it first was) or "sphere" (the coin in the tiled sphere). */
+  scene: "flat",
   /** "auto" (the camera flies) or "still". */
   camera: "auto",
   /** The sphere's counter-spin, 0–2. */
@@ -793,7 +793,7 @@ export const createDiskOptions = () => ({
  * @param {ReturnType<typeof createDiskOptions>} out
  */
 export function readDiskParams(params, ctx, out) {
-  out.scene = params.scene === "flat" ? "flat" : "sphere";
+  out.scene = params.scene === "sphere" ? "sphere" : "flat";
   out.camera = params.camera === "still" ? "still" : "auto";
   out.spin = num(params.spin, 1);
   out.tiling = TILINGS.includes(String(params.tiling)) ? String(params.tiling) : TILINGS[0];

@@ -251,7 +251,7 @@ describe("camera director", () => {
   it("lists its moves, cameras and scenes", () => {
     expect(MOVES).toEqual(["orbit", "swoop", "skim", "pullback"]);
     expect(CAMERAS).toEqual(["auto", "still"]);
-    expect(SCENES).toEqual(["sphere", "flat"]);
+    expect(SCENES).toEqual(["flat", "sphere"]);
   });
 
   it("never clips the coin or leaves the sphere, through every move and tilt", () => {
