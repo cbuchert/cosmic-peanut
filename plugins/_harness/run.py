@@ -30,6 +30,7 @@ VIZ = {
     "marbling": "builtin",
     "laminar": "builtin",
     "tetraballs": "builtin",
+    "metamorphosis": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }

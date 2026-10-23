@@ -49,6 +49,7 @@ def test_builtin_renderers():
         "marbling": ("webgl2", []),
         "laminar": ("webgl2", []),
         "tetraballs": ("webgl2", []),
+        "metamorphosis": ("webgl2", []),
     }
 
 
@@ -589,3 +590,43 @@ def test_tetraballs_manifest():
     assert params["bounce"]["default"] == 1
     for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
+
+
+def test_metamorphosis_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "metamorphosis"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Metamorphosis",
+        "src/metamorphosis.js",
+        "webgl2",
+        "thumbs/metamorphosis.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "symmetry",
+        "palette",
+        "reactivity",
+        "speed",
+        "morph",
+        "ink",
+        "hatching",
+        "quality",
+    ]
+    # Option order is lib/tess-music.js SYMMETRIES, lib/tess.js PALETTES, tess-music QUALITIES.
+    assert params["symmetry"]["options"] == ["p4", "p3"]
+    assert params["palette"]["options"] == ["ink", "dusk", "four-block", "ochre", "watercolour"]
+    assert params["quality"]["options"] == ["low", "medium", "high"]
+    r = params["reactivity"]
+    assert (r["min"], r["max"], r["default"]) == (0, 2, 1)
+    m = params["morph"]
+    assert (m["min"], m["max"]) == (0, 1)
+    h = params["hatching"]
+    assert (h["min"], h["max"]) == (0, 1)
+    # The palettes and the visualizer's name stay neutral (original work, no artist's name).
+    text = json.dumps(v).lower()
+    assert "escher" not in text
+    for name in (
+        "shaders/tess/tess.glsl",
+        "shaders/tess/metamorphosis.frag",
+        "shaders/tess/paper.frag",
+    ):
+        assert (REPOS["builtin"] / name).is_file(), name
