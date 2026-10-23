@@ -3,6 +3,40 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Lattice (2026-10-22)
+
+A new builtin `webgl2` visualizer: an endless cubic lattice (a rounded cube at every node, rods
+along the three axes) that the camera flies through. Params: Speed, Reactivity, Rod thickness,
+Fog, Palette (steel, brass, ink), Background (fog, none), Quality (low, medium, high).
+
+- **Render:** one full-screen raymarch by domain repetition (`p - round(p)`: exact distances, so
+  rays run quickly down the empty channels) at Quality's render scale (0.5 / 0.67 / 0.85, 56 / 80 /
+  110 steps), then a full-resolution composite. Headlight + key light, 5-sample AO. The fog mixes
+  in display space: mixed in linear light, the cream ink fog washed the lattice out within a cell
+  (and every fog looked thinner than its density on dark backgrounds).
+- **Motion** (`lib/lattice-camera.js`): a seeded walk cell centre → adjacent cell centre (runs of
+  2–5 cells, then a perpendicular turn), smoothed by a uniform cubic B-spline (C2) and flown by
+  arc length. The spline stays ≥ 0.47 cell from every rod axis and ≥ 0.6 from every node (tested
+  over 2 minutes × 3 seeds), so the cube size is capped to fit (`geometry`). The view looks 1.2
+  cells ahead along the path (turns start early and turn about half as fast); `up` is parallel
+  transported. Drag look-around eases back with Möbius Field's critically damped spring.
+- **Music:** the beat envelope (`lib/lattice-beat.js`, tempo-locked / strong onsets, 80 ms
+  smoothstep rise, back to 0 by 0.9 beat) drives only the fly-speed surge (+50 % × Reactivity) and
+  the pulses. Each beat launches one pulse from the node nearest the path 1.6 cells ahead; its front
+  runs 3 cells out along the rods (on the rod graph that's L1 distance, so the shader needs no
+  graph walk), easing in over 80 ms and out by 0.9 beat. Nothing pumps the whole scene. Rods take
+  their axis's band energy (x bass, y mids, z treble) against a 4 s auto-gain, eased and
+  flash-limited; cube faces scroll a 64 × 256 RGBA8 history (spectrogram, waveform on y faces), one
+  row per frame, older on cubes farther from the camera. Reduce flashing: pulses × 0.3 and ≥ 1/3 s
+  apart, axis light × 0.35. Reduce motion: Speed 1 → 0.25, no surge, running light and pulse
+  travel × 0.3.
+- **Frame time** (harness, WebKit, 2560 × 1440, `sync=1`, `rep=4`; WebKit clamps the clock to
+  1 ms, so these are coarse): low p50 2 / p99 3 ms; medium p50 1.5–2.5 / p99 2–2.75 ms; high p50
+  2.5–4.5 / p99 5.75–6.25 ms; 58.8 fps throughout. Flash check under the 10 Hz strobe: ≤ 3 rises/s
+  at 2 % with Reduce flashing on (lum range 0.34–0.46).
+- **Not test-first:** the GLSL (no JS copy of it, by design), the entry module's GL wiring (driven by
+  the harness: resize, every param flipped, dispose, no errors) and the look (tuned by stills).
+
 ## Beat tracking: Ballroom harness and a new tracker (2026-10-22)
 
 `uv run python -m tools.beat_eval` streams all 698 Ballroom clips hop by hop through the real
