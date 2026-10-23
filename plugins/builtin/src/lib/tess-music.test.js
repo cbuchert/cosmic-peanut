@@ -457,6 +457,22 @@ describe("tess state (the seam a surface visualizer drives)", () => {
     expect(maxEnv).toBe(0);
   });
 
+  it("exposes the morph's family weights and turn for surfaces with their own warp", () => {
+    const st = createTessState();
+    const a = st.step(frame(0), DT, opts());
+    expect(a.morphW).toBeInstanceOf(Float32Array);
+    expect(a.morphW.length).toBe(4);
+    const w = a.morphW;
+    // Starts in the hooked family; a bright passage steps it towards hooked, a dark one to lobed.
+    expect(Array.from(w)).toEqual([0, 0, 0, 1]);
+    let s = a;
+    for (let i = 1; i < 600; i++) s = st.step(frame(i * DT, { centroid: 0.02 }), DT, opts());
+    expect(s.morphW).toBe(w);
+    expect(w[0]).toBeGreaterThan(0.5);
+    expect(w.reduce((x, y) => x + y, 0)).toBeCloseTo(1, 5);
+    expect(Math.abs(s.theta)).toBeLessThanOrEqual(0.35 + 1e-9);
+  });
+
   it("travel advances with the glide; the outline follows Ink and the height", () => {
     const st = createTessState();
     const s0 = st.step(frame(0), DT, opts()).travel;

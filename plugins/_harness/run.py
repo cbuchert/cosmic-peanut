@@ -35,6 +35,7 @@ VIZ = {
     "endless-zoom": "builtin",
     "tiled-sphere": "builtin",
     "tiled-torus": "builtin",
+    "poincare-disk": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }
