@@ -50,6 +50,7 @@ def test_builtin_renderers():
         "laminar": ("webgl2", []),
         "tetraballs": ("webgl2", []),
         "metamorphosis": ("webgl2", []),
+        "tiled-torus": ("webgl2", []),
     }
 
 
@@ -629,4 +630,45 @@ def test_metamorphosis_manifest():
         "shaders/tess/metamorphosis.frag",
         "shaders/tess/paper.frag",
     ):
+        assert (REPOS["builtin"] / name).is_file(), name
+
+
+def test_tiled_torus_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "tiled-torus"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Tiled Torus",
+        "src/tiled-torus.js",
+        "webgl2",
+        "thumbs/tiled-torus.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "view",
+        "symmetry",
+        "thickness",
+        "palette",
+        "reactivity",
+        "speed",
+        "morph",
+        "ink",
+        "hatching",
+        "quality",
+    ]
+    # Option order is lib/torus.js VIEWS, lib/tess-music.js SYMMETRIES, lib/tess.js PALETTES,
+    # tess-music QUALITIES; Thickness is lib/torus.js THICKNESS.
+    assert params["view"]["options"] == ["auto", "outside", "inside"]
+    assert params["symmetry"]["options"] == ["p4", "p3"]
+    assert params["palette"]["options"] == ["ink", "dusk", "four-block", "ochre", "watercolour"]
+    assert params["quality"]["options"] == ["low", "medium", "high"]
+    t = params["thickness"]
+    assert (t["min"], t["max"], t["default"]) == (0.2, 0.5, 0.36)
+    r = params["reactivity"]
+    assert (r["min"], r["max"], r["default"]) == (0, 2, 1)
+    m = params["morph"]
+    assert (m["min"], m["max"]) == (0, 1)
+    h = params["hatching"]
+    assert (h["min"], h["max"]) == (0, 1)
+    text = json.dumps(v).lower()
+    assert "escher" not in text
+    for name in ("shaders/tess/tess.glsl", "shaders/tess/torus.frag", "shaders/tess/paper.frag"):
         assert (REPOS["builtin"] / name).is_file(), name
