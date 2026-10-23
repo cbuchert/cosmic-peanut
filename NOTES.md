@@ -106,7 +106,8 @@ on the seam above (`shaders/tess/torus.frag`, `src/lib/torus.js`); the engine is
   tess-music, ≥ 20 s since the last change), or after 60 s without one. Drag orbits outside and
   turns the look inside; it eases back over 1.6 s (smoothstep) after release.
 - **Music:** all motion is the state's glide travel (bass + the eased beat surge): orbit 0.04
-  rad, fly 0.2 rad, tile flow 0.004 / 0.006 turns along / around the tube, per unit of travel.
+  rad, fly 0.2 rad, tile flow 0.004 turns along the ring per unit of travel (the spin round the
+  tube: see Spin and twist below).
   TESS_RING runs along the ring, 0 at the camera's azimuth to 1 half a turn away both ways, so
   figure/ground fronts and the spectrum rings travel around the torus from the viewer.
 - **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`, GPU shared with other agents:
@@ -126,6 +127,21 @@ baked into the row being pushed: nothing on the surface changes size on a beat. 
 2560×1440, `sync=1`, interleaved with Metamorphosis under the same shared-GPU load): outside
 4 ms p50 / 5–6 ms p99, inside 6–7 / 7–8 ms, Metamorphosis 6–7 / 7–9; 58.8 fps everywhere.
 
+**Spin and twist (2026-10-23).** The tiles roll round the tube: the spin shifts the conformal t
+(not φ), so tiles stay square, growing over the outer equator and shrinking into the hole. Rate =
+`SPIN` (1/60) × Spin param × glide travel: Spin is turns a minute at rest (travel 1/s at Speed 1),
+signed, −2…2, default 1; bass and the eased beat surge speed it up (tested: never reverses, the
+per-frame rate change stays < 15 % of the base under kicks). Reduce motion: × 0.4 on top of the
+glide's × 0.25. Twist (0–2 half-turns a lap, default 0) adds tw · θ/2π to t, so the tiles stream
+round the ring in a helix; `twistTurns` snaps tw so ly · tw is a whole number of BLEND_PERIOD y
+periods (tested closed across θ = ±π for p4 and p3, with spin), and S gains its shear term. The
+waves stay on the geometry: `disp()` and torus-disp.frag never see `u_flow` / `u_twist` (a source
+test guards it), so the tiles slide over waves that keep rolling hole → top → outer equator.
+Inside, the whole wall turns round the camera. Cost unchanged (WebKit, 2560×1440, `sync=1`,
+interleaved, shared GPU): outside 4–5 / 5–6 ms p50 / p99, inside 6–6.5 / 7, Metamorphosis 6–6.5 / 7;
+58.8 fps; Twist 2 the same. Stills: scratchpad `shots/torus-spin-*.png` (outside, inside, spin 0
+vs 1 at the same frame, twist, p3 twist 2).
+
 **Handoff for the next agent (Tiled Torus):**
 - Wave history: `src/lib/torus-wave.js` `createWaveHistory` (trigger, auto-gain, `resampleLoop`
   seamless θ, `smoothRing`, `SHAPE_BLEND`, `ROW_SLEW`, stamp/bass in `rowGain`); one R16F row per
@@ -138,15 +154,14 @@ baked into the row being pushed: nothing on the surface changes size on a beat. 
   is tested against the real gradient; `liveDisp` sets the shell. Rays that run out of steps in the
   shell are projected onto the surface.
 - Clearance: `maxDisp` ≤ 0.45 k (tested), so the inside camera (on the centre circle) is ≥ 0.55 k
-  from any wall. Uniforms: `u_dispMap`, `u_amp`, `u_dmax`, `u_stepK`, `u_flow` (fu, fv), `u_side`.
+  from any wall. Uniforms: `u_dispMap`, `u_amp`, `u_dmax`, `u_stepK`, `u_flow` (fu, fv), `u_twist`, `u_side`.
 - Gotchas: the march cost is grazing walls inside the tube (hence `insideScale`, switched under
   the paper fade, and the fog-scaled tolerance); row-to-row cliffs (beat stamps) shrink the step
   factor 2–3×, hence the slew limit; zsh doesn't word-split `$var` in loops; the shared scratchpad
   gets overwritten by other agents, keep scripts in your own folder.
-- Left: spin/twist of the tiles round the tube (a tested implementation, conformal t-shift and
-  twist snapped to whole tile periods per lap, is in the scratchpad patch
-  `torus/spin-twist-and-inside-scale.patch`; apply only its spin/twist hunks), and adopting the
-  relief engine when it lands.
+- Spin / twist: `SPIN`, `REDUCED_SPIN`, `twistTurns`, `planePoint(…, tw)` in `src/lib/torus.js`;
+  camera `fv` is the spin; uniform `u_twist`. Tiles only: keep the displacement free of them.
+- Left: adopting the relief engine once it's merged.
 
 ## Beat tracking: Ballroom harness and a new tracker (2026-10-22)
 
