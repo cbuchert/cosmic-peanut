@@ -28,8 +28,9 @@
  *
  * Structures (lib/structures.js; shaders/lattice/README.md is the contract): what the camera flies
  * through is pluggable — a GLSL scene SDF + surface parameterization, a camera path provider, a
- * pulse topology, a clearance check and a small runtime. "cubic" is Lattice's (the Structure
- * param picks it); Tentacle Lattice (`ctx.id` "tentacle-lattice") is fixed to "tentacle": six
+ * pulse topology, a clearance check and a small runtime. Lattice's Structure param picks
+ * "cubic" (the default), "sponge" (an endless Menger zoom) or "kaleidoscope" (a KIFS cathedral);
+ * Tentacle Lattice (`ctx.id` "tentacle-lattice") is fixed to "tentacle": six
  * swaying, tapered tentacles per node, materials crossfading (shade.glsl MATERIALS), handshakes
  * along each beat pulse, a quarter-turn twist at its node and a local bass swell.
  *

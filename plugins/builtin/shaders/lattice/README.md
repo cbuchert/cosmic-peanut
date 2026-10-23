@@ -22,6 +22,8 @@ and `post.frag`. You shouldn't need anything else from this repo's history.
 | `src/lib/lattice-pulses.js` | shared | `createPulses(snap)`: the beat-pulse pool. |
 | `src/lib/lattice-beat.js`, `lattice-history.js`, `lattice.js` | shared | Beat envelope, history ring, params, palettes, axis light. |
 | `src/lib/tentacle-lattice.js` | tentacle | Pure tested logic mirrored by `structure-tentacle.glsl`. |
+| `src/lib/structure-sponge.js`, `sponge-camera.js` | sponge | The zoom world (JS mirror of the SDF), pulse rebasing, the zoom camera. |
+| `src/lib/kaleido.js`, `structure-kaleidoscope.js` | kaleidoscope | KIFS distance (JS mirror), looks and music, the scaled camera. |
 
 The scene shader is assembled as `assembleShader(lattice.frag, { common, structure, march, shade },
 entry.defines)`. Each `// #include <name>` line is replaced by that part. Each define becomes
@@ -103,7 +105,8 @@ STRUCTURES[name] = {
 ```
 
 `StructureRuntime` is `{ onBeat(source), step(audio, dt, f), upload(gl, u, f), params(changed) }`.
-`f` is the `StructureFrame` `{ react, live, bpm, origin, pulses }`. The hooks run in this order:
+`f` is the `StructureFrame` `{ react, live, bpm, origin, pulses, cam }` (`cam` is the camera
+provider; a zooming one also reports `depth` and `scale`). The hooks run in this order:
 1. `onBeat` right after a pulse launches;
 2. `step` once a frame, after the pulses step;
 3. `upload` with the scene program bound, after the shared uniforms.
@@ -113,7 +116,8 @@ uploads everything in `common.glsl`.
 
 Lattice's **Structure** param lists `STRUCTURE_OPTIONS`. Add your name there and to the manifest
 (`plugins/builtin/tidalviz.json`, plus its test in `tests/test_builtin_manifests.py`). Changing
-the param recompiles the scene program and swaps the runtime; the camera and pulses carry on.
+the param recompiles the scene program and swaps the runtime. The camera and pulses carry on when
+the new entry shares their `camera` / `pulseSource`; otherwise the entry creates new ones.
 Tentacle Lattice is a separate visualizer id, fixed to `"tentacle"` by `structureFor`.
 
 `src/lib/structures.test.js` runs against every table entry. It checks the shape of each entry,
@@ -173,6 +177,48 @@ with an eased amplitude. The shader lights a surface point by how close
 
   Fronts are then rings spreading over the walls instead of lights running along struts.
 
+## Fractal structures: Sponge and Kaleidoscope
+
+**Sponge** (`structure-sponge.glsl`, `lib/structure-sponge.js`, `lib/sponge-camera.js`): a Menger
+sponge flown as an endless zoom.
+- **World.** Frame cells put the home cube M at [0, 9]³ (tunnels 3 wide, then 1, 1/3 …). M is the
+  edge-middle sub-cube (1, 0, 1) of its parent, which is the same sub-cube of its own parent, and
+  so on: the cubes nest about F = (9, 4.5, 9), the fixed point of S(p) = F + (p − F)/3. Space is
+  folded across the faces through F (x = 9, z = 9). The world is exactly invariant under S. The
+  shader carves the cube 2 levels above M (its walls ≥ 40 cells from F, beyond `far`).
+- **Rebase.** The camera flies in *dives* of five B-spline points, from M's central tunnel into a
+  tunnel one third the size (SWERVE: sideways through the window where M's x tunnel crosses; or,
+  if a beat asked, TURN: a quarter turn into the wall cube's x tunnel, after which the dives are
+  reflected across x − 9 = z − 9). When it enters the next dive, every point is mapped by S⁻¹,
+  `scale` ×3 and `depth` +1. Positions stay within ~12 cells of F forever.
+- **Local cells.** Every length the shared shaders use is absolute (fog, headlight, AO, normals,
+  pulse width, hit test), so the sponge shader works in the camera's *local* cells,
+  `(frame − F) / u_zs`: the runtime re-uploads `u_cam` and `u_pulse` that way, and a rebase
+  changes nothing on screen. Pulse sources are kept in their launch frame by the shared pool;
+  `createPulseRebase` carries them through later rebases.
+- **Levels.** IQ's Menger cross per level (Lipschitz 1). A level's holes grow in from nothing as
+  their half-width passes 1–2 px; a point already farther than a cell from a level's features
+  skips the finer ones. Both tests scale with the zoom.
+- **Surfaces.** Hole walls are node faces (sub-cube face coordinates → history); the hole's
+  corner edges (both cross coordinates near the wall) are struts: running light, beat pulses.
+  Pulses are Euclidean spheres from the path point ahead.
+
+**Kaleidoscope** (`structure-kaleidoscope.glsl`, `lib/kaleido.js`, `lib/structure-kaleidoscope.js`):
+- **Distance.** Knighty's Menger KIFS, bent by a rotation R: fold to the positive octant, sort,
+  rotate, scale by S about O; the running derivative is S per step. The march steps 0.8 of it
+  (R lets a step's box poke out of the last one). The fractal fills a mirror-repeated cell of
+  period 6, centred on the cell edges, so its central tunnels are the naves. The shader stops
+  iterating where a step's boxes are under 1.5 px.
+- **Known open channels.** The naves (radius 1.3 about the cell edges) are also carved, and the
+  camera is the cubic camera ×6 (≤ 1 cell off a nave axis). So `clearance` is the room left in the
+  naves, whatever the parameters and the music.
+- **Music.** Four curated looks (`LOOKS`) hold 45 s and crossfade over 12 s. Mids bend the fold
+  angles and treble the offsets, against their own slow averages, eased through two 1.2 s
+  stages, within ±`BEND`. A beat pulse bends the offsets (≤ 7 %) only near its front (`u_live`):
+  a local ripple, never a pump.
+- **Surfaces.** Nave walls cut through the fractal are node faces (the history wraps around the
+  nave); the fractal is the strut kind (running light, pulses).
+
 ## Identity stills (proving a refactor changes no pixels)
 
 1. Serve the repo from `plugins/_harness`'s parent:
@@ -183,7 +229,10 @@ with an eased amplitude. The shader lights a surface point by how close
    60 Hz and seeds `Math.random`; frame 372 is just after a harness beat). Use a Playwright
    WebKit page at 1280 × 720, `device_scale_factor=2`. `run.py --shots DIR --tag before` does
    this at `still=150` for the default params.
-3. After the change, take the same stills and compare **every byte**:
+3. After the change, take the same stills and compare **every byte**. Still mode is not quite
+   deterministic (a still occasionally comes out in one of two versions, before and after alike),
+   so compare several samples taken alternately from a `git archive` of the old tree served
+   alongside:
    `uv run --with pillow python -c "import sys;from PIL import Image as I;a,b=(I.open(p).convert('RGBA').tobytes() for p in sys.argv[1:]);print('IDENTICAL' if a==b else 'DIFFER')" before.png after.png`.
    Do **not** use `ImageChops.difference(...).getbbox()` on RGBA images: Pillow's `getbbox` looks
    at the alpha channel only, so any two opaque images look "identical". Check your comparer

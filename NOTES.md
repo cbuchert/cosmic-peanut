@@ -3,6 +3,50 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Lattice fractals: Sponge and Kaleidoscope (2026-10-23)
+
+Two new options of Lattice's **Structure** param, each a structure file, a JS module and a table
+entry (plugins/builtin/shaders/lattice/README.md → "Fractal structures").
+
+- **Sponge: an exact self-similar zoom, not a fake one.** The cubes nest about a zoom centre F
+  (the fixed point of S(p) = F + (p − F)/3, M an edge-middle sub-cube of its parent at every
+  level), folded across the faces through F. The world is invariant under S, so a rebase (×3
+  about F, when the camera enters the next dive) needs no crossfade. A periodic sponge was
+  considered and rejected: at each rebase the coarsest carved level drops, and the tunnel the
+  camera just left is 1–3 cells away.
+- **The shader works in the camera's local cells** (`(frame − F) / scale`; the runtime
+  re-uploads `u_cam` and `u_pulse`). Fog, headlight, AO, normals, pulse width and the hit test
+  are absolute lengths in shade.glsl and march.glsl; in frame cells they would all jump ×3 at
+  each rebase. Measured: mean |Δ| between frames across a rebase 15.3/255 vs 15.0–15.7 for the
+  frames around it (silent flight, rebase at frame 356).
+- **Fine levels by pixel footprint**: a level's holes grow in from nothing over 1–2 px half-width
+  (no pops), and both that test and the far-from-cells early-out are scale-invariant.
+- **Camera**: B-spline dives of five points (SWERVE straight on, or on a beat TURN a quarter turn
+  — the next dive reflected across x − 9 = z − 9, a symmetry of the world), ≥ 0.437 cell clear
+  in the frame's own units (3 seeds × 60 s), positions within 12 cells of F over 10 min (depth >
+  40). One dive ≈ 6.9 s at Speed 1.
+- **Kaleidoscope**: Knighty's Menger KIFS bent by a rotation, running derivative, mirror-repeated
+  (period 6), centred on the cell edges so its own central tunnels are the naves; the naves are
+  also carved (radius 1.3), where the cubic camera ×6 flies (≤ 1 cell off axis): clearance ≥ 0.3
+  whatever the parameters. DE tests: 0.8 × DE balls stay empty and |∇| < 1.25 over all looks at
+  ±BEND; a mutant without the running derivative fails both. A "far from the box" early-out was
+  tried and dropped (rotation lets the next box poke out: the Lipschitz test caught a jump).
+- **Looks**: four curated (nave, vault, gallery, arcade) from ~12 tried; two (cut-cylinder
+  tunnels, dark foam) were rejected. 45 s holds, 12 s crossfades; mids bend the angles, treble
+  the offsets, ±0.12, through two 1.2 s stages; beats bend the offsets ≤ 7 % only near a front.
+
+**Frame time** (WebKit, 2560×1440, Medium, `sync=1`, 30 s of `audio=music`, ms p50/p99; the GPU
+is shared with other agents, so p99 swings ±4 ms run to run): Sponge 8–9 / 10–14, Kaleidoscope
+7–8 / 10–14, Cubic in the same runs 4–6 / 9–10. GPU-bound (`rep=8`): Sponge ≈ 4.5–5 ms,
+Kaleidoscope ≈ 3.7 ms. Before render scales 0.9 / 0.8 and a 1 px fade footprint the Sponge's p99
+was 16–17 ms.
+
+**Identity**: the entry now creates a structure's own camera and pulse pool on a Structure
+change and passes the camera in StructureFrame. Cubic (4 param sets) and Tentacle Lattice (2)
+stills byte-identical to e3dcaca, 5 alternating samples each. The harness's still mode itself is
+not quite deterministic (a still occasionally comes out in one of two versions, for the base tree
+too), so compare several alternating samples, not one pair.
+
 ## Lattice camera: smooth, with turns on the beat (2026-10-22)
 
 The user, watching Tentacle Lattice: "It's jumpy." Diagnosis came first: 60 s at 120 BPM through
