@@ -78,9 +78,9 @@ export function compositeAlpha(r, g, b, coverage) {
 
 /** Key-light soft-shadow taps and AO taps per Quality (cinematic; shade.glsl SHADOW_CAP, AO_CAP). */
 const SAMPLES = {
-  low: { shadow: 10, ao: 3 },
-  medium: { shadow: 16, ao: 5 },
-  high: { shadow: 24, ao: 6 },
+  low: { shadow: 8, ao: 3 },
+  medium: { shadow: 12, ao: 4 },
+  high: { shadow: 20, ao: 6 },
 };
 /** @param {unknown} quality the Quality param → its sample counts (unknown → medium) */
 export function shadingSamples(quality) {
