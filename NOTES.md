@@ -66,6 +66,10 @@ checked and previewed by `uv run python -m tools.tiles`.
   image, so thickness at x and at W − x sum to 2h (deep head ⇔ thin tail) and a dorsal fin is a
   belly slot. Dropped: angelfish (both swept fins become dents that eat the body) and a C4 skate
   (C4 can't be mirror-symmetric; the pinwheel read as a blob).
+- **Birds** (nine new, ten with the tern): mallard, puffin, kingfisher and cormorant are TGTG with the
+  koi/halibut edge structure (e0 smooth 9, e1 smooth 4), so they morph into the fish; gull and swallow
+  share the tern's (TTTTTT); chickadee, nuthatch and woodpecker are perching TGTG birds (e0 smooth 7,
+  e1 smooth 5) that morph into each other. Symmetric TTTTTT wings: V2 halfway up and e2 = e1 with v negated.
 - **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`; GPU shared with other agents):
   one species static p50 2–3 ms; `all` with morphs (bakes on the music) p50 9 ms, p99 13–14 ms,
   58.8 fps. Three renders per vsync still hold 58.8 fps: 2–5 ms per frame, bakes included.
