@@ -1,5 +1,12 @@
 {
   "species": [
+    "chameleon",
+    "crocodile",
+    "gharial",
+    "horned-lizard",
+    "monitor",
+    "softshell",
+    "tortoise",
     "turtle"
   ]
 }
