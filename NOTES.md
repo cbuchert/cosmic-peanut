@@ -3,6 +3,24 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Lattice structure seam (2026-10-22)
+
+The Lattice family is split so structures and shading can change independently:
+`shaders/lattice/README.md` is the contract (file map, structure-file and camera-provider
+interfaces, pulse topology, the identity-still procedure, known quirks). One GLSL file, one JS
+module and one `STRUCTURES` entry add a structure; Lattice's new **Structure** param picks it
+(today: `cubic`; Tentacle Lattice is fixed to `tentacle`).
+
+- **Byte-identical:** 11 stills (Lattice default, brass, ink over light, high + thick + fog 0.8;
+  Tentacle Lattice default, each material, ink over light, high + extreme params; all at
+  `still=372`) match the pre-refactor build byte for byte.
+- **Two traps found on the way.** First, Pillow's `getbbox()` on an RGBA difference only looks at
+  alpha, so the comparison script used before called *any* two opaque stills identical. The earlier
+  Lattice/Tentacle identity sets were re-checked with an exact byte compare and do hold. Second,
+  computing the node face's values up front and carrying them in a struct changed the GPU's rounding
+  (1–17 pixels off by one 8-bit step). Bisected to the face mask; `shade.glsl` now asks the structure
+  inside each branch (`structNodeFace` / `structStrut`), which is exact.
+
 ## Tentacle Lattice (2026-10-22)
 
 A second builtin on Lattice's entry module and shader: `ctx.id` "tentacle-lattice" prepends

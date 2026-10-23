@@ -96,4 +96,14 @@ describe("createPulses", () => {
     expect(p.liveAmp[0]).toBe(p.amp[1]);
     expect(p.liveAmp[0]).toBeGreaterThan(0);
   });
+
+  it("takes the structure's pulse topology: a custom source snap replaces the nearest node", () => {
+    const p = createPulses((point, out) => {
+      for (let c = 0; c < 3; c++) out[c] = point[c] * 2;
+      return out;
+    });
+    p.launch(new Float64Array([0.25, 1.5, -1]), 1, false, 0.5);
+    p.step(0.01, new Float64Array(3));
+    expect(Array.from(p.data.subarray(0, 3))).toEqual([0.5, 3, -2]);
+  });
 });

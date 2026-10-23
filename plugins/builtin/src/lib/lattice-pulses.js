@@ -24,8 +24,19 @@ const REDUCED_GAP = 1 / 3;
 /** @param {number} x */
 const smooth = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 
-export function createPulses() {
+/** The cubic lattices' pulse topology: a pulse starts at the node nearest the point. */
+export function nearestNode(/** @type {ArrayLike<number>} */ point, /** @type {Float64Array} */ out) {
+  for (let c = 0; c < 3; c++) out[c] = Math.round(point[c]);
+  return out;
+}
+
+/**
+ * @param {(point: ArrayLike<number>, out: Float64Array) => Float64Array} [snap] where a pulse
+ *   launched near `point` starts (a structure's pulse topology; default: the nearest node)
+ */
+export function createPulses(snap = nearestNode) {
   const node = new Float64Array(PULSE_CAP * 3);
+  const at = new Float64Array(3);
   const level = new Float32Array(PULSE_CAP);
   const age = new Float32Array(PULSE_CAP).fill(Infinity);
   const life = new Float32Array(PULSE_CAP).fill(1);
@@ -42,7 +53,7 @@ export function createPulses() {
     liveAmp: new Float32Array(PULSE_CAP),
     liveCount: 0,
     /**
-     * Launch a pulse from the node nearest `point` (cells).
+     * Launch a pulse from where the topology puts `point` (cells; by default its nearest node).
      * @param {ArrayLike<number>} point @param {number} lvl brightness (beat level × Reactivity, 0–2)
      * @param {boolean} reduceFlashing
      * @param {number} period seconds per beat
@@ -54,7 +65,8 @@ export function createPulses() {
       since = 0;
       const i = next;
       next = (next + 1) % PULSE_CAP;
-      for (let c = 0; c < 3; c++) node[i * 3 + c] = Math.round(point[c]);
+      snap(point, at);
+      for (let c = 0; c < 3; c++) node[i * 3 + c] = at[c];
       level[i] = reduceFlashing ? REDUCED_LEVEL * lvl : lvl;
       age[i] = 0;
       life[i] = Math.max(RISE + 0.05, FALL * period);

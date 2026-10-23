@@ -686,7 +686,12 @@ def test_lattice_manifest():
         "palette",
         "background",
         "quality",
+        "structure",
     ]
+    # lib/structures.js STRUCTURE_OPTIONS: one entry per structure file (the seam for new ones).
+    assert params["structure"]["type"] == "select"
+    assert params["structure"]["options"] == ["cubic"]
+    assert params["structure"]["default"] == "cubic"
     # lib/lattice.js DEFAULT_SPEED: Reduce motion slows the flight only while Speed sits here.
     speed = params["speed"]
     assert (speed["type"], speed["min"], speed["default"]) == ("number", 0, 1)
@@ -705,7 +710,16 @@ def test_lattice_manifest():
     assert params["background"]["default"] == "fog"
     assert params["quality"]["options"] == ["low", "medium", "high"]
     assert params["quality"]["default"] == "medium"
-    for f in ("fullscreen.vert", "lattice.frag", "composite.frag"):
+    for f in (
+        "fullscreen.vert",
+        "lattice.frag",
+        "common.glsl",
+        "march.glsl",
+        "shade.glsl",
+        "post.frag",
+        "structure-cubic.glsl",
+        "structure-tentacle.glsl",
+    ):
         assert (REPOS["builtin"] / "shaders/lattice" / f).is_file(), f
 
 
@@ -734,8 +748,8 @@ def test_tentacle_lattice_manifest():
         "background",
         "quality",
     ]
-    # Lattice's params, less Rod thickness, unchanged.
-    shared = {p["id"]: p for p in lattice["params"] if p["id"] != "thickness"}
+    # Lattice's params, less Rod thickness and Structure (it's fixed to "tentacle"), unchanged.
+    shared = {p["id"]: p for p in lattice["params"] if p["id"] not in ("thickness", "structure")}
     for pid, spec in shared.items():
         assert params[pid] == spec, pid
     # lib/tentacle-lattice.js LENGTH, and Sway / Twitch 0–2 (Reduce motion calms Twitch at 1).
