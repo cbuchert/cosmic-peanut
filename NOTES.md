@@ -3,6 +3,22 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tentacube: hyperbolic drift precision (2026-10-22)
+
+`createDrift` (lib/hyperbolic.js) kept the view as a free 2×2 complex matrix, rescaled only to
+|det| = 1. Rounding error off the disk-isometry form λ·[a b; b̄ ā] grows about tenfold per 1,000
+frames, because each rebase multiplies by a large tiling element. At Tentacube's speeds T(0)
+left the disk after 10,662–24,899 steps (about 3 min at 60 or 144 Hz; sooner when faster).
+From then on the background is NaN, and in WebKit the frame turns solid white. The rebase
+could also pick a mirroring element (5,500–27,000 mirrored frames per 30,000). That's invisible
+for a symmetric {p,q}, but wrong.
+**Fix:** an odd fold is closed with the mirror z ↦ z̄, so the rebase is always a rotation of
+the tiling. After each rebase, T is re-projected onto translate(T(0)) ∘ rotate(arg T′(0)), as
+tess-disk's view does. A 30,000-step test at 30/60/144 Hz and with jittered dt, across three
+tilings, holds the form error below 1e-9 and |T(0)| below 0.4, with no mirroring. The early
+picture is unchanged: early harness stills (150 frames) are pixel-identical. The fold output
+matches the old code to 1e-10 over the first minute, with the same tile generations.
+
 ## Beat tracking: Ballroom harness and a new tracker (2026-10-22)
 
 `uv run python -m tools.beat_eval` streams all 698 Ballroom clips hop by hop through the real
