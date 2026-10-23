@@ -22,6 +22,17 @@ describe("headSpeed", () => {
     expect(headSpeed(0.5, 7, 0.5, 2)).toBeCloseTo((0.5 / 7) * (1 + SURGE), 12);
     expect(headSpeed(0.5, 7, 1, 0)).toBeCloseTo(0.5 / 7, 12);
   });
+
+  it("never surges a snake past the whole track: a full-length band stays exactly closed", () => {
+    expect(headSpeed(1, 7, 1, 2)).toBe(1 / 7); // Length 1: no room, no surge
+    for (const L of [0.5, 0.8, 0.95]) {
+      for (const beat of [1, 2]) {
+        // Even a beat envelope stuck at 1 covers at most the whole track in one Travel time.
+        expect(headSpeed(L, 7, 1, beat) * 7, `L ${L} Beat ${beat}`).toBeLessThanOrEqual(1 + 1e-12);
+      }
+    }
+    expect(headSpeed(0.5, 7, 1, 1)).toBeCloseTo((0.5 / 7) * (1 + SURGE), 12); // room to spare: full surge
+  });
 });
 
 describe("createSnake", () => {

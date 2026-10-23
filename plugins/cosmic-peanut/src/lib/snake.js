@@ -12,12 +12,15 @@ export const SURGE = 0.3;
 
 /**
  * Head speed in track fractions per second: Length of the track per Travel time, plus the surge.
+ * The surge is capped at the room left on the track, env × (1 − Length) ÷ Length, so the snake
+ * never covers more than the whole track: at Length 1 a full band stays exactly closed.
  * @param {number} length the Length param (fraction of the track the snake covers)
  * @param {number} travel the Travel time param, seconds from head to tail
  * @param {number} env createBeat's `env` @param {number} beat the Beat param (after `gentle`)
  */
 export function headSpeed(length, travel, env, beat) {
-  return (length / travel) * (1 + SURGE * env * beat);
+  const room = length > 0 ? (1 - length) / length : 0;
+  return (length / travel) * (1 + env * Math.min(SURGE * beat, room));
 }
 
 /** @param {number} x */

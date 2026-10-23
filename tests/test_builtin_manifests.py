@@ -187,17 +187,18 @@ def test_mobius_has_cosmic_peanuts_params_plus_width_beat_track_and_length():
         "step": 0.01,
         "default": 1,
     }
-    # The snake rides a figure-8 (a Möbius strip and its mirror image) or today's loop; Length is
-    # the fraction of the track it covers (1 on the loop gives back the closed band).
+    # The ribbon rides the loop (default) or a figure-8 (a Möbius strip and its mirror image);
+    # Length is the fraction of the track it covers (below 1 it snakes).
     assert track == {
         "id": "track",
         "type": "select",
         "label": "Track",
         "options": ["figure-8", "loop"],
-        "default": "figure-8",
+        "default": "loop",
     }
     assert (length["id"], length["type"], length["label"]) == ("length", "number", "Length")
-    assert length["max"] == 1 and 0 < length["min"] <= 0.25 and length["default"] == 0.5
+    # Defaults give back the original closed band; figure-8 and the snake are options.
+    assert length["max"] == 1 and 0 < length["min"] <= 0.25 and length["default"] == 1
     assert {"beat", "track", "length"}.isdisjoint(p["id"] for p in sphere["params"])
 
 

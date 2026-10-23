@@ -53,8 +53,9 @@ motion on, Orbit speed and Bass pulse act as 0 and 0.1 until you move them off t
 
 ## Möbius
 
-The pack's second visualizer, `mobius`: a snake of waveform slices winding along a closed Möbius
-track. It is the same entry module; `src/lib/shapes.js` picks the vertex shader by `ctx.id`.
+The pack's second visualizer, `mobius`: waveform slices on a closed Möbius band, by default
+today's loop at full length. Shorten Length, or switch Track to the figure-8, and the ribbon
+becomes a snake winding along the track. It is the same entry module; `src/lib/shapes.js` picks the vertex shader by `ctx.id`.
 History, scheduler, pulse, `rings.frag` and the blit are shared with the sphere.
 
 - **Snake** (`src/lib/snake.js`): the ribbon covers Length of the track and its head advances
@@ -64,21 +65,24 @@ History, scheduler, pulse, `rings.frag` and the blit are shared with the sphere.
   nothing slides, and the tail fades out over its own stretch (the age fades in `rings.frag`; the
   head fades in briefly). Places are stored as fractions of the track, so changing Track keeps
   them. On the beat the head surges by up to 30% × envelope × Beat, eased like the other beat
-  effects; slices laid during a surge are just spaced a little further apart.
+  effects; slices laid during a surge are just spaced a little further apart. The surge is capped
+  at the room left on the track (envelope × (1 − Length) ÷ Length), so the ribbon never covers
+  more than the whole track. At Length 1 there is no surge, and the band closes exactly as it did
+  before the snake: newest and oldest slices meet at one place, hidden by the age fades.
 - **Tracks** (`src/lib/track.js`): each track is a table sampled evenly in arc length (1024
   samples; `uTrack`, RGBA32F × 3 rows: centre, unit tangent, cross-section direction with the
   twist in it). It is built in JS on Track change, and the camera fit reads the same table. The
   frame is analytic: n = normalize(up × t) is horizontal and can't flip, because neither track's
   tangent is ever vertical; b = t × n; w = cos τ·n + sin τ·b.
-  - `figure-8` (default): an "unfolded Klein bottle", a Möbius strip and its mirror image joined.
+  - `figure-8`: an "unfolded Klein bottle", a Möbius strip and its mirror image joined.
     The centre line c(φ) = (1.9 cos φ, 0.55 sin φ, 1.9 sin φ cos φ) is a lemniscate whose lobes
     tilt out of plane like a saddle, so its two passes through the crossing are 1.1 apart, both
     lying flat there. From the crossing, τ = π(1 − cos 2πq)/2 turns the cross-section half a turn
     one way over lobe A (right-handed) and back over lobe B (left-handed). It is 11.9 long, about
     1.9 laps of the loop's circle.
-  - `loop`: the unit circle, two laps (4π), with τ = u/2. A cross-section comes back upside down
-    after one lap and lined up after two. Length 1 gives back the closed band. Length 0.5 is one
-    lap, so the head meets the fading tail: use less for a visible snake.
+  - `loop` (default): the unit circle, two laps (4π), with τ = u/2. A cross-section comes back
+    upside down after one lap and lined up after two. At Length 1 (the default) it's the closed
+    band. Length 0.5 is one lap, so the head meets the fading tail: use less for a visible snake.
 - **Mapping** (`shaders/mobius.vert`): a slice is an open line across the strip (v = −W…W as
   j = 0…M) at its place on the track: p = c + size·(v·w′ + amp·s·(t × w′)). Here w′ is w turned
   about t by the wring, and size is the scale the slice was laid at (below).
@@ -112,8 +116,9 @@ History, scheduler, pulse, `rings.frag` and the blit are shared with the sphere.
   - `width` (Strip width, 0.15–0.7, default 0.4): the half width W.
   - `beat` (Beat, 0–2, default 1): scales the wring, breath, glow, stamp and surge together.
     0 turns them off; 2 is about as strong as the first, too-strong cut.
-  - `track` (Track: figure-8 | loop).
-  - `length` (Length, 0.2–1, default 0.5): the fraction of the track the snake covers.
+  - `track` (Track: loop | figure-8, default loop).
+  - `length` (Length, 0.2–1, default 1): the fraction of the track the ribbon covers. Below 1 it
+    snakes.
 
   With Reduce motion on, Beat acts as 0.25 for the wring, breath, stamp and surge until you move
   it off its default (the glow isn't motion and keeps the Beat value). The bass pulse still
