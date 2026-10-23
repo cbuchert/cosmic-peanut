@@ -721,6 +721,8 @@ def test_lattice_manifest():
         "gyroid",
         "schwarz-p",
         "schwarz-d",
+        "sponge",
+        "kaleidoscope",
     ]
     # Each option's shader file (the TPMS share one, a define per surface).
     shared = {"gyroid": "tpms", "schwarz-p": "tpms", "schwarz-d": "tpms"}
@@ -758,6 +760,8 @@ def test_lattice_manifest():
         "brdf.glsl",
         "bloom.frag",
         "structure-tpms.glsl",
+        "structure-sponge.glsl",
+        "structure-kaleidoscope.glsl",
     ):
         assert (REPOS["builtin"] / "shaders/lattice" / f).is_file(), f
 

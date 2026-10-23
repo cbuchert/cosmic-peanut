@@ -16,9 +16,11 @@ describe("structureFor", () => {
     expect(structureFor("lattice", "cubic")).toBe("cubic");
     expect(structureFor("lattice", "no-such")).toBe("cubic");
     expect(structureFor("lattice", undefined)).toBe("cubic");
-    expect(STRUCTURE_OPTIONS).toEqual(["cubic", "octet", "diamond", "bitruncated", "gyroid", "schwarz-p", "schwarz-d"]);
+    expect(STRUCTURE_OPTIONS).toEqual(["cubic", "octet", "diamond", "bitruncated", "gyroid", "schwarz-p", "schwarz-d", "sponge", "kaleidoscope"]);
     expect(structureFor("lattice", "octet")).toBe("octet");
     expect(structureFor("lattice", "gyroid")).toBe("gyroid");
+    expect(structureFor("lattice", "sponge")).toBe("sponge");
+    expect(structureFor("lattice", "kaleidoscope")).toBe("kaleidoscope");
     for (const name of STRUCTURE_OPTIONS) expect(STRUCTURES[name]).toBeDefined();
   });
 });

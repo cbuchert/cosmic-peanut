@@ -303,7 +303,7 @@
     {
       "id": "lattice",
       "name": "Lattice",
-      "description": "Fly through an endless lattice of cubes and rods: each beat sends light racing out along the rods, and the cube faces scroll with the spectrum.",
+      "description": "Fly through an endless structure: a lattice of cubes and rods, strut trusses, minimal surfaces, a Menger sponge or a kaleidoscope. Each beat sends light racing out through it, and its surfaces scroll with the spectrum.",
       "author": "Tidalviz",
       "entry": "src/lattice.js",
       "renderer": "webgl2",
@@ -317,7 +317,7 @@
         { "id": "background", "type": "select", "label": "Background", "options": ["fog", "none"], "default": "fog" },
         { "id": "look", "type": "select", "label": "Look", "options": ["classic", "cinematic"], "default": "classic" },
         { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "medium" },
-        { "id": "structure", "type": "select", "label": "Structure", "options": ["cubic", "octet", "diamond", "bitruncated", "gyroid", "schwarz-p", "schwarz-d"], "default": "cubic" }
+        { "id": "structure", "type": "select", "label": "Structure", "options": ["cubic", "octet", "diamond", "bitruncated", "gyroid", "schwarz-p", "schwarz-d", "sponge", "kaleidoscope"], "default": "cubic" }
       ]
     },
     {

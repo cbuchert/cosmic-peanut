@@ -26,7 +26,11 @@
 import { createCamera } from "./lattice-camera.js";
 import { pointPulseLight, strutFrontLights } from "./lattice-lights.js";
 import { nearestNode } from "./lattice-pulses.js";
+import { createSpongeCamera } from "./sponge-camera.js";
 import { cubicClearance, cubicRuntime } from "./structure-cubic.js";
+import { createKaleidoCamera, kaleidoRuntime } from "./structure-kaleidoscope.js";
+import { kaleidoClearance } from "./kaleido.js";
+import { pathPoint, spongeClearance, spongeRuntime } from "./structure-sponge.js";
 import { tentacleClearance, tentacleRuntime } from "./structure-tentacle.js";
 import * as bitruncated from "./structure-bitruncated.js";
 import * as diamond from "./structure-diamond.js";
@@ -41,6 +45,8 @@ import { tpmsStructure } from "./structure-tpms.js";
  * @property {number} bpm the beat tempo used this frame (0 = none)
  * @property {Float64Array} origin the integer origin all shader positions are relative to
  * @property {ReturnType<typeof import('./lattice-pulses.js').createPulses>} pulses
+ * @property {{ pos: Float64Array, depth?: number, scale?: number }} cam the camera provider (a
+ *   zooming one also reports its rebase `depth` and local `scale`)
  */
 
 /**
@@ -123,10 +129,38 @@ export const STRUCTURES = {
   gyroid: { shader: "structure-tpms.glsl", defines: ["TPMS_GYROID"], ...tpmsStructure("gyroid"), scale: 1, steps: 1.4, fog: 2.2, far: 24 },
   "schwarz-p": { shader: "structure-tpms.glsl", defines: ["TPMS_P"], ...tpmsStructure("schwarz-p"), scale: 1, steps: 1.4, fog: 2.2, far: 24 },
   "schwarz-d": { shader: "structure-tpms.glsl", defines: ["TPMS_D"], ...tpmsStructure("schwarz-d"), scale: 1, steps: 1.4, fog: 2.2, far: 24 },
+  sponge: {
+    shader: "structure-sponge.glsl",
+    defines: [],
+    camera: createSpongeCamera,
+    pulseSource: pathPoint,
+    clearance: spongeClearance,
+    // Lengths are local cells (the shader rescales with the zoom); `far` stays well inside the
+    // rendered cube (≤ 14 × 2 frame cells from the camera). Up to 13 carving levels a step: a
+    // slightly smaller render.
+    scale: 0.9,
+    steps: 1,
+    fog: 1.3,
+    far: 14,
+    runtime: spongeRuntime,
+  },
+  kaleidoscope: {
+    shader: "structure-kaleidoscope.glsl",
+    defines: [],
+    camera: createKaleidoCamera,
+    pulseSource: pathPoint,
+    clearance: kaleidoClearance,
+    // Several times cubic's cost per step: a smaller render, a little more budget.
+    scale: 0.8,
+    steps: 1.2,
+    fog: 0.8,
+    far: 24,
+    runtime: kaleidoRuntime,
+  },
 };
 
 /** Lattice's Structure param options (Tentacle Lattice is its own visualizer, fixed to "tentacle"). */
-export const STRUCTURE_OPTIONS = ["cubic", "octet", "diamond", "bitruncated", "gyroid", "schwarz-p", "schwarz-d"];
+export const STRUCTURE_OPTIONS = ["cubic", "octet", "diamond", "bitruncated", "gyroid", "schwarz-p", "schwarz-d", "sponge", "kaleidoscope"];
 
 /**
  * The structure to render: Tentacle Lattice's own, else Lattice's Structure param (unknown → cubic).
