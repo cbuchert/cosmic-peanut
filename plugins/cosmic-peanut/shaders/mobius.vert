@@ -6,13 +6,16 @@
 // The strip lies in the horizontal plane with the twist out of plane:
 //   p(u, v) = ((R + v·cos(u/2))·cos u, v·sin(u/2), (R + v·cos(u/2))·sin u)
 // and the waveform pushes along the surface normal, which flips over once per lap.
+// On the beat (src/lib/beat.js) the strip wrings: a twist offset φ = uTwist joins the half twist,
+// u/2 + φ, so it rolls about its centre line. φ is the same for every u, so the slices at u and
+// u + 2π still differ by π and it stays a Möbius strip. uBreath swells the width with it.
 precision highp float;
 precision highp sampler2D;
 
 in vec2 aIdx;                  // x: point across the strip (0..M), y: ring age index (0 = newest)
 uniform sampler2D uHist;       // M x N waveform history, circular in rows
 uniform int uHead, uN, uM;
-uniform float uFrac, uAmp, uPulse, uWidth;
+uniform float uFrac, uAmp, uPulse, uWidth, uTwist, uBreath;
 uniform mat4 uProj, uView;
 out float vAge, vDepth, vSample, vEmpty;
 
@@ -27,8 +30,9 @@ void main() {
   s *= 1.0 - vEmpty;
   float age = (float(i) + uFrac) / float(uN - 1);         // 0 newest .. 1 oldest
   float u = clamp(age, 0.0, 1.0) * 12.5663706;             // two laps
-  float v = (aIdx.x / float(uM) * 2.0 - 1.0) * uWidth;
-  float cu = cos(u), su = sin(u), ch = cos(0.5 * u), sh = sin(0.5 * u);
+  float v = (aIdx.x / float(uM) * 2.0 - 1.0) * uWidth * uBreath;
+  float tw = 0.5 * u + uTwist;                             // half twist plus the beat's wring
+  float cu = cos(u), su = sin(u), ch = cos(tw), sh = sin(tw);
   float rho = R + v * ch;
   vec3 p = vec3(rho * cu, v * sh, rho * su);
   vec3 du = vec3(-rho * su - 0.5 * v * sh * cu, 0.5 * v * ch, rho * cu - 0.5 * v * sh * su);

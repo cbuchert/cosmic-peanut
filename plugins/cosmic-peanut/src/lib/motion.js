@@ -1,8 +1,11 @@
 // @ts-check
 /** Reduced motion (PRD "Camera and motion"). */
 
-/** What Orbit speed and Bass pulse default to when the host reports reduced motion. */
-export const GENTLE = Object.freeze({ orbit: 0, pulse: 0.1 });
+/**
+ * What Orbit speed, Bass pulse and Möbius's Beat (its wring and breath; the glow isn't motion)
+ * default to when the host reports reduced motion.
+ */
+export const GENTLE = Object.freeze({ orbit: 0, pulse: 0.1, beat: 0.25 });
 
 /**
  * Effective value of a motion param: while reduced motion is on and the user hasn't moved the

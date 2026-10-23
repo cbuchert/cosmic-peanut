@@ -2,7 +2,8 @@
 /**
  * Cosmic Peanut — each moment's waveform becomes a ring on an invisible sphere; rings drift from
  * the north pole to the south pole while the camera slowly orbits. `webgl2` renderer. The pack's
- * Möbius visualizer is the same module with another vertex shader and extent (./lib/shapes.js).
+ * Möbius visualizer is the same module with another vertex shader and extent (./lib/shapes.js),
+ * plus the beat's wring, breath and glow (./lib/beat.js; zero for the sphere, which has no Beat).
  *
  * All geometry is computed on the GPU from a static (j, i) vertex grid and an M × N R32F history
  * texture used as a circular buffer, so a frame is a few uniforms, at most a few one-row uploads,
@@ -10,6 +11,7 @@
  * tested); this file is the GL glue. frame() allocates nothing.
  */
 import { cameraDistance, createCamera } from "./lib/camera.js";
+import { breath, createBeat, createGlow, wring } from "./lib/beat.js";
 import { buildGrid } from "./lib/geometry.js";
 import { createProgram } from "./lib/gl.js";
 import { createHistory } from "./lib/history.js";
@@ -36,6 +38,7 @@ export default async function create(ctx) {
   const m = /** @type {import('../tidalviz').Manifest} */ (manifest);
   const orbitDefault = paramDefault(m, ctx.id, "orbit");
   const pulseDefault = paramDefault(m, ctx.id, "pulse");
+  const beatDefault = paramDefault(m, ctx.id, "beat"); // NaN for the sphere
 
   const rings = createProgram(gl, ringVs, ringFs, "shaders/rings");
   const blit = createProgram(gl, blitVs, blitFs, "shaders/blit");
@@ -53,6 +56,8 @@ export default async function create(ctx) {
   });
   const camera = createCamera();
   const pulse = createPulse();
+  const beat = createBeat();
+  const glow = createGlow();
 
   /** Build the grid and a sentinel-filled history texture for the current density. */
   function allocate() {
@@ -119,6 +124,9 @@ export default async function create(ctx) {
       const strength = gentle(Number(p.pulse), pulseDefault, ctx.reduceMotion, GENTLE.pulse);
       const amp = Number(p.amp);
       const halfWidth = Number(p.width); // Möbius only (NaN for the sphere, which ignores it)
+      // Möbius only: the sphere has no Beat param, so 0, and its uniforms do nothing.
+      const beatAmt = p.beat === undefined ? 0 : Number(p.beat);
+      const beatMotion = gentle(beatAmt, beatDefault, ctx.reduceMotion, GENTLE.beat);
       const extent = shape.extent(halfWidth);
       const path = renderPath(p.lines, p.antialias);
       const fine = path === "canvas";
@@ -127,6 +135,8 @@ export default async function create(ctx) {
       gl.bindTexture(gl.TEXTURE_2D, hist);
       history.step(audio.waveform, dt, Number(p.travel), Number(p.detail));
       const pulseAmt = pulse.step(audio, dt) * strength;
+      beat.step(audio, dt);
+      const glowAmt = glow.step(beat.env, beatAmt, dt, ctx.reduceFlashing);
 
       camera.update(dt, orbit);
       const { width, height } = ctx.size;
@@ -160,6 +170,9 @@ export default async function create(ctx) {
       gl.uniform1f(U.uGain, ringGain(Number(p.bright), history.N, fine));
       gl.uniform1f(U.uPalette, paletteIndex(p.palette));
       gl.uniform1f(U.uPulse, pulseAmt);
+      gl.uniform1f(U.uGlow ?? null, glowAmt);
+      gl.uniform1f(U.uTwist ?? null, wring(beat.swing, beatMotion));
+      gl.uniform1f(U.uBreath ?? null, breath(beat.env, beatMotion));
       gl.uniformMatrix4fv(U.uProj, false, camera.proj);
       gl.uniformMatrix4fv(U.uView, false, camera.view);
       gl.bindVertexArray(vao);

@@ -170,13 +170,24 @@ def test_cosmic_peanut_manifest_matches_prd():
     assert {p["id"]: p.get("step") for p in v["params"]}["travel"] == 0.5
 
 
-def test_mobius_has_cosmic_peanuts_params_plus_width():
+def test_mobius_has_cosmic_peanuts_params_plus_width_and_beat():
     vs = {v["id"]: v for v in _manifest("cosmic-peanut")["visualizers"]}
     sphere, mobius = vs["cosmic-peanut"], vs["mobius"]
     assert mobius["params"][: len(sphere["params"])] == sphere["params"]
-    (width,) = mobius["params"][len(sphere["params"]) :]
+    width, beat = mobius["params"][len(sphere["params"]) :]
     assert (width["id"], width["type"], width["label"]) == ("width", "number", "Strip width")
     assert 0.35 <= width["default"] <= 0.45 and width["min"] > 0 and width["max"] < 1
+    # One knob for the wring, breath and glow on the beat; the sphere has none (stays unchanged).
+    assert beat == {
+        "id": "beat",
+        "type": "number",
+        "label": "Beat",
+        "min": 0,
+        "max": 2,
+        "step": 0.01,
+        "default": 1,
+    }
+    assert "beat" not in {p["id"] for p in sphere["params"]}
 
 
 def test_stargate_manifest():

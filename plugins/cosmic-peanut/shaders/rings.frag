@@ -1,11 +1,12 @@
 #version 300 es
 // Additive glow: cosine palette by age, far side dimmer (implies the sphere), newest brightest.
+// uGlow (Möbius's beat glow, 0 for the sphere) lifts the newest slices on the beat.
 // Premultiplied for the transparent canvas: alpha = brightest channel, so with blend ONE, ONE the
 // summed alpha always covers the summed colour and the rings composite as light over any backdrop.
 precision highp float;
 
 in float vAge, vDepth, vSample, vEmpty;
-uniform float uCamDist, uRadius, uGain, uPalette, uPulse;
+uniform float uCamDist, uRadius, uGain, uPalette, uPulse, uGlow;
 out vec4 o;
 
 vec3 pal(float t) {
@@ -18,7 +19,7 @@ void main() {
   float edges = smoothstep(0.0, 0.035, vAge) * (1.0 - smoothstep(0.88, 1.0, vAge));
   float back = clamp((vDepth - (uCamDist - uRadius)) / (2.0 * uRadius), 0.0, 1.0);
   float depthFade = mix(1.0, 0.16, back);
-  float fresh = mix(1.5, 0.35, vAge);
+  float fresh = mix(1.5, 0.35, vAge) * (1.0 + uGlow * (1.0 - smoothstep(0.0, 0.18, vAge)));
   vec3 c = pal(vAge * 0.55 - uPulse * 0.08) + abs(vSample) * 0.35 + uPulse * 0.12;
   c *= edges * depthFade * fresh * uGain * (1.0 - vEmpty);
   o = vec4(c, max(c.r, max(c.g, c.b)));

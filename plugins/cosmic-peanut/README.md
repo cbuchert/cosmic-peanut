@@ -65,7 +65,26 @@ fade radius) by `ctx.id`. History, scheduler, pulse, camera, `rings.frag` and th
 - **Two laps**: the half twist brings a slice back upside down after one lap (the normal has
   flipped, so the waveform now pushes the other way) and lined up after two. Rings are born and
   fade out at the same place (u = 0 ≡ 4π), where the age fades hide the overlap.
+- **On the beat** (`src/lib/beat.js`): each beat gives a 0–1 envelope (one-pole attack, 15 ms;
+  the kick falls by e^−2.5 over one beat, so it peaks at ≈ 0.8 and is ≈ 8% when the next lands)
+  and bumps a beat counter. With a confident tempo (`bpm` > 0) beats are the `beatPhase` wraps and
+  onsets only accent (× 0.2, no extra beats); otherwise onsets with `onsetStrength` ≥ 0.6 are
+  beats, at least 0.2 s apart. The same rule as Tie-Dye's `createFlow`, copied since packs can't
+  import from each other. Three effects ride the envelope:
+  - **Wring**: a twist offset φ joins the half twist, u/2 + φ, so the strip rolls about its centre
+    line. φ = 0.45 rad × envelope × Beat, alternating sides each beat (the signed envelope goes
+    through the same attack, so the flip is no sharper than a beat's rise). φ is the same along
+    the whole strip, so the slices at u and u + 2π still differ by π: it stays a Möbius strip.
+  - **Breath**: the width swells to W × (1 + 0.15 × envelope × Beat). The camera keeps its fit
+    (the 1.32 margin covers it), so the frame doesn't zoom on the beat.
+  - **Glow**: the newest slices (age < 0.18) brighten by up to 60% × envelope × Beat
+    (`uGlow` in `rings.frag`). With Reduce flashing on it's a quarter of that and passes through
+    `lib/flash.js` (a copy of the builtin pack's limiter): at most 3 rises per second.
 - **Params**: all of Cosmic Peanut's, plus `width` (Strip width, 0.15–0.7, default 0.4), the half
-  width W. Travel time covers both laps. The camera fits R + W + amp with the sphere's 1.32 margin.
+  width W, and `beat` (Beat, 0–2, default 1), which scales the wring, breath and glow together
+  (0 turns them off). Travel time covers both laps. The camera fits R + W + amp with the sphere's
+  1.32 margin. With Reduce motion on, Beat acts as 0.25 for the wring and breath until you move it
+  off its default (the glow isn't motion and keeps the Beat value). The sphere has no Beat param:
+  its uniforms leave it exactly as before.
 
 `frame()` allocates nothing. Tests: `cd web && npx vitest run ../plugins/cosmic-peanut`.

@@ -41,7 +41,8 @@
         { "id": "palette", "type": "select", "label": "Palette", "options": ["nebula", "ember", "phosphor"], "default": "nebula" },
         { "id": "lines", "type": "select", "label": "Lines", "options": ["soft", "fine"], "default": "soft" },
         { "id": "antialias", "type": "boolean", "label": "Antialias soft lines", "default": true },
-        { "id": "width", "type": "number", "label": "Strip width", "min": 0.15, "max": 0.7, "step": 0.01, "default": 0.4 }
+        { "id": "width", "type": "number", "label": "Strip width", "min": 0.15, "max": 0.7, "step": 0.01, "default": 0.4 },
+        { "id": "beat", "type": "number", "label": "Beat", "min": 0, "max": 2, "step": 0.01, "default": 1 }
       ]
     }
   ]
