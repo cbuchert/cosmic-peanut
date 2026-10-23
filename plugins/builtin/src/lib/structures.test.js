@@ -8,7 +8,8 @@ describe("structureFor", () => {
     expect(structureFor("lattice", "cubic")).toBe("cubic");
     expect(structureFor("lattice", "no-such")).toBe("cubic");
     expect(structureFor("lattice", undefined)).toBe("cubic");
-    expect(STRUCTURE_OPTIONS).toEqual(["cubic"]);
+    expect(STRUCTURE_OPTIONS).toEqual(["cubic", "octet", "diamond", "bitruncated"]);
+    expect(structureFor("lattice", "octet")).toBe("octet");
     for (const name of STRUCTURE_OPTIONS) expect(STRUCTURES[name]).toBeDefined();
   });
 });
@@ -56,10 +57,18 @@ describe("STRUCTURES", () => {
     }
   });
 
+  /** A node and a point on a strut, per structure (default: the cubic lattices'). */
+  const INSIDE = {
+    octet: [[0, 0, 0], [0.5, 0.51, 0.02]],
+    diamond: [[0, 0, 0], [0.26, 0.25, 0.24]],
+    bitruncated: [[1, 0.5, 0], [1, 0.26, 0.25]],
+  };
+
   it("clearance is the worst case: it goes negative inside the geometry", () => {
-    for (const s of Object.values(STRUCTURES)) {
-      expect(s.clearance(new Float64Array([0, 0, 0]))).toBeLessThan(0); // a node
-      expect(s.clearance(new Float64Array([0.5, 0.01, 0.02]))).toBeLessThan(0); // on a strut
+    for (const [name, s] of Object.entries(STRUCTURES)) {
+      for (const p of INSIDE[/** @type {keyof typeof INSIDE} */ (name)] ?? [[0, 0, 0], [0.5, 0.01, 0.02]]) {
+        expect(s.clearance(new Float64Array(p)), `${name} ${p}`).toBeLessThan(0);
+      }
     }
   });
 });

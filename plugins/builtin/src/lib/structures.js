@@ -25,6 +25,9 @@ import { createCamera } from "./lattice-camera.js";
 import { nearestNode } from "./lattice-pulses.js";
 import { cubicClearance, cubicRuntime } from "./structure-cubic.js";
 import { tentacleClearance, tentacleRuntime } from "./structure-tentacle.js";
+import * as bitruncated from "./structure-bitruncated.js";
+import * as diamond from "./structure-diamond.js";
+import * as octet from "./structure-octet.js";
 
 /**
  * What a structure's runtime sees each frame.
@@ -64,6 +67,17 @@ import { tentacleClearance, tentacleRuntime } from "./structure-tentacle.js";
 /** Least clearance (cells) a camera path must keep from its structure's worst-case geometry. */
 export const NEAR_CLEARANCE = 0.15;
 
+/**
+ * A strut lattice's entry: its own shader, camera, pulse topology, clearance and runtime, the
+ * cubic budget otherwise.
+ * @param {string} name @param {Structure["camera"]} camera @param {Structure["pulseSource"]} pulseSource
+ * @param {Structure["clearance"]} clearance @param {Structure["runtime"]} runtime
+ * @returns {Structure}
+ */
+function strutEntry(name, camera, pulseSource, clearance, runtime) {
+  return { shader: `structure-${name}.glsl`, defines: [], camera, pulseSource, clearance, scale: 1, steps: 1, fog: 1, far: 36, runtime };
+}
+
 /** @type {Record<string, Structure>} */
 export const STRUCTURES = {
   cubic: {
@@ -92,10 +106,14 @@ export const STRUCTURES = {
     far: 16,
     runtime: tentacleRuntime,
   },
+  // Strut lattices (period 2), each flown along its own straight channels (lib/strut-camera.js).
+  octet: strutEntry("octet", octet.octetCamera, octet.pulseSource, octet.clearance, octet.octetRuntime),
+  diamond: strutEntry("diamond", diamond.diamondCamera, diamond.pulseSource, diamond.clearance, diamond.diamondRuntime),
+  bitruncated: strutEntry("bitruncated", bitruncated.bitruncatedCamera, bitruncated.pulseSource, bitruncated.clearance, bitruncated.bitruncatedRuntime),
 };
 
 /** Lattice's Structure param options (Tentacle Lattice is its own visualizer, fixed to "tentacle"). */
-export const STRUCTURE_OPTIONS = ["cubic"];
+export const STRUCTURE_OPTIONS = ["cubic", "octet", "diamond", "bitruncated"];
 
 /**
  * The structure to render: Tentacle Lattice's own, else Lattice's Structure param (unknown → cubic).
