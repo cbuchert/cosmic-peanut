@@ -125,6 +125,75 @@ History, scheduler, pulse, `rings.frag` and the blit are shared with the sphere.
   brightens the whole strip a little (`uPulse` in `rings.frag`, as on the sphere). The sphere has
   no Beat, Track or Length param, and draws exactly as before.
 
-`frame()` allocates nothing (the track table and camera fit are rebuilt only on param or size
-changes). Tests: `cd web && npx vitest run ../plugins/cosmic-peanut`; `src/cosmic-peanut.test.js`
+## Möbius Field
+
+The pack's third visualizer, `mobius-field`: an endless field of glowing Möbius bands, with the
+camera flying through them. Every band is Möbius's closed band (the loop at Length 1) in the same
+additive waveform lines. It has its own entry module (`src/mobius-field.js`) and shaders
+(`shaders/field.vert`, `shaders/field.frag`). The history, scheduler, beat, pulse, flash, params,
+gl helpers and the soft-lines target (`src/lib/soft.js`, shared with the sphere and the strip)
+are all the pack's.
+
+- **One draw** (`shaders/field.vert`): a static (j, i) grid drawn for every band at once with
+  `drawElementsInstanced`. Each instance has 12 floats: its centre minus the camera and its fade;
+  its pose as a quaternion (random orientation × a slow spin about its own axis, 0.04–0.16 rad/s
+  either way); and its scale (0.55–0.95), history lag, palette shift (±0.08) and wring side
+  (±1). The loop is computed analytically in the shader. It is the same curve and frame as
+  `track.js`'s `loop` table, without the six texel fetches per vertex.
+- **Shared history, different moments**: all bands read one history. Each band lags its own
+  0–N/8 rows (`rowLag`) and draws N − N/8 slices, so neighbours show different moments and
+  don't move in lockstep. The beat stamp, breath and bass swell are baked in per slice at push
+  time exactly as on Möbius (`uPos.g`, written through the snake's table with the head standing
+  still), so nothing already on a band changes size on a beat. Slices glide around each band
+  from a fixed head.
+- **Endless field** (`src/lib/field.js`): bands sit one per cell (jittered by up to 0.3 of a
+  cell, a seeded shuffle of cells) in a box of side 2.2 × Fog. The box is centred on the camera
+  and wraps: each band's offset is taken modulo the box. The fade is per band, by centre
+  distance. The fog fades bands in from black between 0.5 × Fog and Fog. The near fade takes a
+  band out between 3 and 1.2 of its radii from the camera, so none fills the screen. A band is
+  black for the last 10% before it wraps, so wrapping never pops. Positions are float64 in JS;
+  the GPU only sees offsets from the camera, so precision never degrades however far it flies.
+  Changing Fog stretches the field about the camera rather than reshuffling it.
+- **Only what's in view is drawn**: each frame the bands that are lit and whose bounding sphere
+  touches the frustum are packed, compacted, into the instance buffer (one `bufferSubData`).
+  Because of that, Bands means *about how many band centres are in view* at 16:9, whatever the
+  Fog. The box holds Bands ÷ 0.0459 bands (the frustum's share of the box out to Fog), for
+  example 872 for the default 40. Most of them are behind or beside the camera and cost nothing.
+  Counting bands only partly in view, about 1.5 × Bands are drawn.
+- **Camera** (`src/lib/fly.js`): flies forward along a path whose yaw and pitch are slow sums of
+  incommensurate sines. Yaw wanders about ±2 rad, pitch about ±0.2 rad, turns stay under 0.25
+  rad/s, and there are no jerks. The path's clock runs on the base speed, so the beat surge
+  (× 1 + 0.6 × envelope × Beat, the same eased 80 ms envelope) speeds the flight but never the
+  turning. Drag to look around (0.004 rad/px, grab-the-scene). On release a critically damped
+  spring (2.5/s) brings the view back to the path heading: it starts from rest and never
+  overshoots. It has its own 60° perspective and a rotation-only view. With Reduce motion,
+  Speed acts as 0.25 (and the path's curves slow with it, ×0.18), the surge goes, the spin
+  slows the same way, and Beat acts as 0.25 for the wring, breath and stamp, until you move
+  Speed or Beat off their defaults.
+- **Beat**: the stamp, breath and swell are per slice (above). The wring is per band at the
+  strip's 0.2 rad × Beat, alternating each beat, but each band turns to its own side, so they
+  don't all roll in unison. The surge is per frame. The glow on the newest slices is as on
+  Möbius, flash-limited under Reduce flashing.
+- **Colour** (`shaders/field.frag`): `rings.frag`'s palettes, age fades and glow, shifted per
+  band. The band's fade replaces the sphere's depth cue. The output is the same premultiplied
+  (c, max(c)) with blend ONE, ONE onto a transparent clear. Gain is the strip's × 0.3: bands are
+  small on screen and overlap, and at 0.8 the field blew out to white.
+- **Params**: Travel time, Amplitude, Detail, Bass pulse, Brightness, Rings (density), Palette,
+  Lines, Antialias soft lines, Strip width and Beat, as on Möbius, plus:
+  - `bands` (Bands, 12–80, default 40): about how many bands are in view.
+  - `speed` (Speed, 0–4 units/s, default 1.4): flight speed (bands are ~1.5 units across).
+  - `fog` (Fog, 6–24, default 14): how far you see. The field spreads out with it.
+
+  Dropped: Orbit speed (the camera flies instead), and Track and Length (every band is the
+  closed loop).
+- **Budget** (WebKit harness, 2560 × 1440, this Mac): each band draws 210 slices × 257 points
+  (every 2nd point across a slice, `STRIDE`), about 54k line vertices. At the defaults that is
+  about 63 bands and 3.4M vertices drawn on average (4.2M at most), 5 ms p50 / 10 ms p99 per
+  frame including GPU time (`sync=1`), holding 60 fps with `rep=2`. Bands 80: about 123 bands,
+  6.6M vertices, 8 / 15 ms. Every point (`STRIDE` 1) at the defaults: 8 / 14 ms, and it no
+  longer holds `rep=2`. Bands 80 with dense rings (11M vertices) takes 13 / 22 ms, over budget
+  at p99. No distance level of detail was needed at the defaults.
+
+`frame()` allocates nothing in any of the three (the track table, camera fit, field layout and
+instance buffer are rebuilt only on param or size changes). Tests: `cd web && npx vitest run ../plugins/cosmic-peanut`; `src/cosmic-peanut.test.js`
 runs the entry itself on a recording fake WebGL2 context.
