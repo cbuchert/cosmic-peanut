@@ -3,6 +3,48 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Cosmic Peanut pack: a cinematic Look (2026-10-22)
+
+A Look param (classic | cinematic) on the sphere, Möbius and Möbius Field. Details and sources are
+in `plugins/cosmic-peanut/README.md` → Look.
+
+- **Classic is untouched, and that is checked twice.** A GL-call snapshot was recorded from the
+  code before the change: every call, handles by id, arrays by hash, over 7 visualizer and param
+  paths. Deterministic WebKit stills before and after are byte-identical (all six, over black
+  and over the light backdrop). Cinematic objects are created only when Look turns cinematic.
+- **Default stays classic.** Cinematic is better on the sphere and Möbius: smooth lines at any
+  DPR, highlights that roll off instead of clipping, a soft halo. On the Field it trades classic's
+  sparkle (GL lines dropping sub-pixel segments) for depth of field and softness. That is a
+  different character, not clearly better, and the user had called the Field perfect.
+- **Implemented from the papers:**
+  - Chan & Durand 2005: prefiltered line quads; Gaussian filter, closed-form erf coverage instead
+    of their cone-filter table.
+  - Jimenez 2014: the 13-tap downsample, Karis average and tent upsample, energy-conserving lerp.
+  - Narkowicz 2016: the ACES fit.
+  - Thin-lens CoC (Potmesil & Chakravarty 1981): the blur disk's variance c²/16 is added to the
+    line's Gaussian, so a line's integral is unchanged as it defocuses.
+  - Jarzynski & Olano 2020 (PCG3D): grain.
+- **What the stills changed:**
+  - Gain moved back into display space, before the decode, as classic has it. Applied in linear
+    light, lines came out ~1.4× too bright.
+  - The display transfer is a 2.2 power, not sRGB. The sRGB linear toe and the ACES toe together
+    left the Field's faint lines at a quarter of their brightness (mean frame 0.9 vs 5.3).
+  - The Field blooms at 4%, not 12%: with the power curve, its veiling glare showed as a haze
+    (median background 0 → 2/255).
+  - Field DoF A = 6, not 12: at 12 nearly every band was soft.
+- **WebKit** (Playwright 2359) exposes `EXT_color_buffer_float`, `EXT_color_buffer_half_float`,
+  `EXT_float_blend` and `OES_texture_float_linear`. RGBA16F is complete as a render target.
+  `ALIASED_LINE_WIDTH_RANGE` is [1, 1], which is why wide lines have to be quads.
+- **Field budget.**
+  - Quads at device resolution with DoF cost 2.7× classic; DoF fill was about a third of that.
+  - A CSS-pixel scene brought it to 1.6×.
+  - Distance LOD (stride 2/4/8 at 4 and 8 units) brought it to ≈ 1×: 16.5–20.5 vs 16–23 ms p50
+    under heavy GPU contention, where classic's uncontended time is 5 ms.
+  - The Field kept quads: they are what makes its depth of field possible.
+- Möbius cinematic is ~2× classic (6.5–7.5 vs 2.5–4.5 ms p50), still 58.8 fps. Turning its DoF
+  off changed nothing measurable. Flash counts under the 10 Hz strobe are unchanged (1/s, both
+  looks, Reduce flashing on and off).
+
 ## Beat tracking: Ballroom harness and a new tracker (2026-10-22)
 
 `uv run python -m tools.beat_eval` streams all 698 Ballroom clips hop by hop through the real
