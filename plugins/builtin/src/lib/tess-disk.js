@@ -19,7 +19,15 @@
  * the quotient, so the colouring lifts to a proper colouring of the whole infinite tiling.
  */
 
-import { FOLD_ITERATIONS, tiling } from "./hyperbolic.js";
+import {
+  createIsometry,
+  FOLD_ITERATIONS,
+  mobiusApply,
+  mobiusCompose,
+  mobiusRotate,
+  mobiusTranslate,
+  tiling,
+} from "./hyperbolic.js";
 import { WARP_LIMIT } from "./tess.js";
 
 export const TILINGS = ["{7,3}", "{5,4}", "{4,5}", "{6,4}"];
@@ -350,18 +358,87 @@ export function diskGeometry(name) {
 export const createTile = () => ({ cls: -1, quad: -1, kite: -1, u: 0, v: 0, odd: 0 });
 
 /**
- * The tiling at a disk point, step for step as disk.frag computes it (for the tests): fold
- * into T tracking the quotient matrix and parity, into the frame, the chart square, the warp,
- * the quadrant, its kite's uv and colour. `kite` identifies the kite in the quotient.
+ * The fold into the frame, as disk.frag does it: rotate into the sector, mirror into T, invert
+ * in C, repeat (lib/hyperbolic.js fold), tracking the quotient matrix E (from `e0`, times the
+ * inverse of each step) and the parity; an odd fold ends with the mirror a, so the frame map is
+ * always a rotation of the tiling. Optionally accumulates that map as an isometry.
  * @param {unknown} name
  */
-export function createDiskTiler(name) {
+function createFolder(name) {
   const g = diskGroup(name);
   const geo = diskGeometry(name);
   const { r, p } = g;
   const { alpha, cx } = geo.tiling;
   const r2 = geo.tiling.r * geo.tiling.r;
   const a2 = 2 * alpha;
+  const step = createIsometry();
+  const MB = Float64Array.from([Math.cos(alpha), Math.sin(alpha), 0, 0, 0, 0, Math.cos(alpha), -Math.sin(alpha), 1]);
+  const MC = Float64Array.from([cx, 0, r2 - cx * cx, 0, 1, 0, -cx, 0, 1]);
+  const MA = Float64Array.from([1, 0, 0, 0, 0, 0, 1, 0, 1]);
+  return {
+    /**
+     * @param {number} x @param {number} y disk point
+     * @param {ArrayLike<number>} e0 starting quotient element (the view's rebase record)
+     * @param {Int32Array} E receives the frame's quotient element
+     * @param {number[] | Float64Array} pt receives the frame point
+     * @param {Float64Array | null} [iso] receives the frame map (point ↦ frame point)
+     * @returns {number} parity of the fold (before the closing mirror)
+     */
+    fold(x, y, e0, E, pt, iso = null) {
+      E.set(e0);
+      if (iso) iso.set([1, 0, 0, 0, 0, 0, 1, 0, 0]);
+      let odd = 0;
+      for (let i = 0; i < FOLD_ITERATIONS; i++) {
+        const k = Math.floor(Math.atan2(y, x) / a2);
+        if (k !== 0) {
+          const c = Math.cos(-k * a2);
+          const s = Math.sin(-k * a2);
+          [x, y] = [x * c - y * s, x * s + y * c];
+          matMul(r, E, g.rho.subarray(4 * (((k % p) + p) % p)), E);
+          if (iso) mobiusCompose(iso, mobiusRotate(step, -k * a2), iso);
+        }
+        if (Math.atan2(y, x) > alpha) {
+          const c = Math.cos(a2);
+          const s = Math.sin(a2);
+          [x, y] = [x * c + y * s, x * s - y * c];
+          matMul(r, E, g.B, E);
+          odd ^= 1;
+          if (iso) mobiusCompose(iso, MB, iso);
+        }
+        const dx = x - cx;
+        const d2 = dx * dx + y * y;
+        if (d2 >= r2) break;
+        x = cx + (r2 * dx) / d2;
+        y = (r2 * y) / d2;
+        matMul(r, E, g.C, E);
+        odd ^= 1;
+        if (iso) mobiusCompose(iso, MC, iso);
+      }
+      if (odd) {
+        y = -y;
+        matMul(r, E, g.A, E);
+        if (iso) mobiusCompose(iso, MA, iso);
+      }
+      pt[0] = x;
+      pt[1] = y;
+      return odd;
+    },
+  };
+}
+
+const IDENTITY = new Int32Array([1, 0, 0, 1]);
+
+/**
+ * The tiling at a disk point, step for step as disk.frag computes it (for the tests): fold
+ * into the frame tracking the quotient matrix, the chart square, the warp, the quadrant, its
+ * kite's uv and colour. `kite` identifies the kite in the quotient.
+ * @param {unknown} name
+ */
+export function createDiskTiler(name) {
+  const g = diskGroup(name);
+  const geo = diskGeometry(name);
+  const folder = createFolder(name);
+  const { r } = g;
   const E = new Int32Array(4);
   const K = new Int32Array(4);
   const quadEl = [
@@ -371,45 +448,18 @@ export function createDiskTiler(name) {
     matMul(r, g.A, g.C, new Int32Array(4)),
   ];
   const w = [0, 0];
+  const pt = [0, 0];
   return {
     /**
-     * @param {number} x @param {number} y disk point
+     * @param {number} x0 @param {number} y0 disk point
      * @param {Float32Array | null} amps the warp (createDiskWarp().amps), or null for the bare kites
      * @param {ReturnType<typeof createTile>} out
+     * @param {ArrayLike<number>} [e0] the view's quotient record (createDiskView().e0)
      */
-    tileAt(x, y, amps, out) {
-      E[0] = 1;
-      E[1] = 0;
-      E[2] = 0;
-      E[3] = 1;
-      let odd = 0;
-      for (let i = 0; i < FOLD_ITERATIONS; i++) {
-        const k = Math.floor(Math.atan2(y, x) / a2);
-        if (k !== 0) {
-          const c = Math.cos(-k * a2);
-          const s = Math.sin(-k * a2);
-          [x, y] = [x * c - y * s, x * s + y * c];
-          matMul(r, E, g.rho.subarray(4 * (((k % p) + p) % p)), E);
-        }
-        if (Math.atan2(y, x) > alpha) {
-          const c = Math.cos(a2);
-          const s = Math.sin(a2);
-          [x, y] = [x * c + y * s, x * s - y * c];
-          matMul(r, E, g.B, E);
-          odd ^= 1;
-        }
-        const dx = x - cx;
-        const d2 = dx * dx + y * y;
-        if (d2 >= r2) break;
-        x = cx + (r2 * dx) / d2;
-        y = (r2 * y) / d2;
-        matMul(r, E, g.C, E);
-        odd ^= 1;
-      }
-      if (odd) {
-        y = -y;
-        matMul(r, E, g.A, E);
-      }
+    tileAt(x0, y0, amps, out, e0 = IDENTITY) {
+      const odd = folder.fold(x0, y0, e0, E, pt);
+      const x = pt[0];
+      const y = pt[1];
       // Chart: ζ = (z − m) / (1 − m z), then Klein, then the square.
       const m = geo.m;
       const nx = x - m;
@@ -569,4 +619,124 @@ export function createDiskWarp() {
     },
   };
   return w;
+}
+
+// ---- The view --------------------------------------------------------------------------------
+
+/** Hyperbolic distance the view travels per unit of the tess state's glide travel. */
+export const DISK_DRIFT = 0.12;
+/** The flow's slow wander (rad/s of the clock) and how fast a drag's new direction eases in (s). */
+const HEADING_RATE = 0.031;
+const STEER_TAU = 0.35;
+/** Most a single frame's drag may move the plane (disk units at the centre). */
+const MAX_DRAG = 0.5;
+const wrapAngle = (/** @type {number} */ a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+/**
+ * The view isometry T (screen disk → tiling): it drifts by DISK_DRIFT × the glide's travel, the
+ * picture flowing along `flow` (screen radians), which wanders slowly; a drag carries the plane
+ * with the pointer and steers the flow round to the drag's direction (eased). After every move
+ * T is rebased, T ← g ∘ T with g the fold of T(0) into the frame, so its coefficients stay small
+ * however far it goes (as lib/hyperbolic.js createDrift does, but g is always a rotation of the
+ * tiling — a mirror would flip the creatures — and T is re-projected onto an exact isometry,
+ * which createDrift's matrix loses over minutes). g changes which quotient element a kite has, so
+ * `e0` records the product of the g⁻¹ and the shader starts its fold from it: the colours don't
+ * change. Nothing is allocated per frame or per pointer event.
+ * @param {unknown} name Tiling option
+ */
+export function createDiskView(name) {
+  let folder = createFolder(name);
+  const m = createIsometry();
+  const e = createIsometry();
+  const g = createIsometry();
+  const E = new Int32Array(4);
+  const pt = [0, 0];
+  const c = new Float64Array(2);
+  let clock = 0;
+  let steer = 0;
+  let steerTo = 0;
+  let down = false;
+  let px = 0;
+  let py = 0;
+  /** T ← g ∘ T (g even, from the fold of T(0)), e0 ← e0 · ψ(g⁻¹), then T exact again. */
+  const rebase = () => {
+    mobiusApply(m, 0, 0, c);
+    folder.fold(c[0], c[1], v.e0, E, pt, g);
+    v.e0.set(E);
+    mobiusCompose(m, g, m);
+    // Re-project onto translate(T(0)) ∘ rotate(arg T′(0)).
+    mobiusApply(m, 0, 0, c);
+    const k = Math.hypot(c[0], c[1]);
+    if (k > 0.999) {
+      c[0] *= 0.999 / k;
+      c[1] *= 0.999 / k;
+    }
+    // T′(0) = (ad − bc) / d²
+    const nr = m[0] * m[6] - m[1] * m[7] - (m[2] * m[4] - m[3] * m[5]);
+    const ni = m[0] * m[7] + m[1] * m[6] - (m[2] * m[5] + m[3] * m[4]);
+    const dr = m[6] * m[6] - m[7] * m[7];
+    const di = 2 * m[6] * m[7];
+    const theta = Math.atan2(ni * dr - nr * di, nr * dr + ni * di);
+    mobiusTranslate(m, c[0], c[1]);
+    mobiusCompose(m, m, mobiusRotate(e, theta));
+    mobiusApply(m, 0, 0, v.centre);
+  };
+  const v = {
+    /** T as [a, b, c, d (complex), conj] (Float64Array(9), the same array always). */
+    m,
+    /** The quotient element the shader's fold starts from (Int32Array(4), mod the group's r). */
+    e0: new Int32Array([1, 0, 0, 1]),
+    /** T(0), the tiling point at the screen's centre. */
+    centre: new Float64Array(2),
+    /** Direction the picture flows on screen (rad, y up). */
+    flow: 0,
+    /** @param {unknown} n Tiling option */
+    setTiling(n) {
+      folder = createFolder(n);
+      v.e0.set([1, 0, 0, 1]);
+      rebase();
+    },
+    /** @param {{ kind: string, dx: number, dy: number }} ev CSS px (y down) */
+    pointer(ev) {
+      if (ev.kind === "down") down = true;
+      else if (ev.kind === "up") down = false;
+      else if (down) {
+        px += ev.dx;
+        py += ev.dy;
+      }
+    },
+    /**
+     * @param {number} travel glide travel this frame (tess state `travel` delta)
+     * @param {number} dt s @param {number} radius the disk's radius, CSS px
+     * @param {boolean} reduceMotion slows the wander
+     */
+    step(travel, dt, radius, reduceMotion) {
+      clock += dt * (reduceMotion ? 0.25 : 1);
+      const wander = 0.6 + 0.9 * Math.sin(clock * HEADING_RATE);
+      if (px !== 0 || py !== 0) {
+        // The content under the screen centre moves with the drag: T ← T ∘ E, E(Δw) = 0.
+        let dx = px / Math.max(1, radius);
+        let dy = -py / Math.max(1, radius);
+        const l = Math.hypot(dx, dy);
+        if (l > MAX_DRAG) {
+          dx *= MAX_DRAG / l;
+          dy *= MAX_DRAG / l;
+        }
+        mobiusTranslate(e, -dx, -dy);
+        mobiusCompose(m, m, e);
+        steerTo = Math.atan2(dy, dx) - wander;
+        px = 0;
+        py = 0;
+      }
+      steer += wrapAngle(steerTo - steer) * (1 - Math.exp(-dt / STEER_TAU));
+      v.flow = wrapAngle(wander + steer);
+      // The camera moves against the flow: E sends 0 to r·e^{i(flow + π)}.
+      const r = Math.tanh((DISK_DRIFT * travel) / 2);
+      mobiusTranslate(e, -r * Math.cos(v.flow), -r * Math.sin(v.flow));
+      mobiusCompose(m, m, e);
+      rebase();
+    },
+  };
+  rebase();
+  return v;
 }

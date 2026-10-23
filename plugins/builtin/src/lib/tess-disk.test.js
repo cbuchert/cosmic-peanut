@@ -4,7 +4,9 @@ import { mobiusApply, mobiusCompose } from "./hyperbolic.js";
 import { WARP_LIMIT } from "./tess.js";
 import {
   createDiskTiler,
+  createDiskView,
   createDiskWarp,
+  DISK_DRIFT,
   createTile,
   DISK_MODES,
   DISK_STEPS,
@@ -436,5 +438,100 @@ describe.each(TILINGS)("the warped %s tiling", (name) => {
       crossings++;
     }
     expect(crossings).toBeGreaterThan(500);
+  });
+});
+
+describe("the view: drift through the plane, drag to steer", () => {
+  const tiler = createDiskTiler("{7,3}");
+  const a = createTile();
+  const b = createTile();
+  const z = new Float64Array(2);
+  /** uv of the kite under screen-disk point (x, y) through the view. */
+  /** @param {{ m: Float64Array, e0: Int32Array }} v */
+  const snap = (v) => ({ m: Float64Array.from(v.m), e0: Int32Array.from(v.e0) });
+  const seen = (/** @type {{ m: Float64Array, e0: Int32Array }} */ v, /** @type {number} */ x, /** @type {number} */ y, /** @type {ReturnType<typeof createTile>} */ out) => {
+    mobiusApply(v.m, x, y, z);
+    return tiler.tileAt(z[0], z[1], null, out, v.e0);
+  };
+  const DT = 1 / 60;
+
+  it("travels DISK_DRIFT hyperbolic units per unit of glide travel, along its flow", () => {
+    const view = createDiskView("{7,3}");
+    view.step(2.7, DT, 300, false); // off the kite corner at the start
+    for (let i = 0; i < 5; i++) {
+      const before = snap(view);
+      view.step(0.5, DT, 300, false);
+      // What was at the centre now sits DISK_DRIFT × 0.5 away along the flow.
+      const r = Math.tanh((DISK_DRIFT * 0.5) / 2);
+      seen(before, 0, 0, a);
+      seen(view, r * Math.cos(view.flow), r * Math.sin(view.flow), b);
+      expect(b.kite).toBe(a.kite);
+      expect(b.cls).toBe(a.cls);
+      expect(b.u).toBeCloseTo(a.u, 6);
+      expect(b.v).toBeCloseTo(a.v, 6);
+    }
+    expect(DISK_DRIFT).toBeGreaterThan(0.05);
+  });
+
+  it("stays precise however far it goes (rebased by rotations of the tiling only)", () => {
+    const view = createDiskView("{5,4}");
+    for (let i = 0; i < 20000; i++) {
+      view.step(0.05, DT, 300, false);
+      expect(view.m[8]).toBe(0); // never mirrored
+    }
+    expect(Math.hypot(view.centre[0], view.centre[1])).toBeLessThan(0.8);
+    for (let i = 0; i < 8; i++) expect(Math.abs(view.m[i])).toBeLessThan(5);
+    // Still an isometry: distances from the centre are kept.
+    const p = new Float64Array(2);
+    const o = new Float64Array(2);
+    mobiusApply(view.m, 0, 0, o);
+    mobiusApply(view.m, 0.5, 0, p);
+    const d = Math.hypot(p[0] - o[0], p[1] - o[1]) / Math.hypot(1 - (o[0] * p[0] + o[1] * p[1]), o[0] * p[1] - o[1] * p[0]);
+    expect(d).toBeCloseTo(0.5, 9);
+  });
+
+  it("a drag carries the plane with the pointer", () => {
+    const view = createDiskView("{7,3}");
+    view.step(2.7, DT, 300, false);
+    const before = snap(view);
+    view.pointer({ kind: "down", dx: 0, dy: 0 });
+    view.pointer({ kind: "move", dx: 24, dy: -12 }); // CSS px: right and up
+    view.step(0, DT, 300, false);
+    seen(before, 0, 0, a);
+    seen(view, 24 / 300, 12 / 300, b);
+    expect(b.kite).toBe(a.kite);
+    expect(b.u).toBeCloseTo(a.u, 6);
+    expect(b.v).toBeCloseTo(a.v, 6);
+  });
+
+  it("steers the drift: after a drag the plane keeps flowing the way it was dragged, easing round", () => {
+    const view = createDiskView("{7,3}");
+    for (let i = 0; i < 60; i++) view.step(0.02, DT, 300, false);
+    view.pointer({ kind: "down", dx: 0, dy: 0 });
+    view.pointer({ kind: "move", dx: -30, dy: 0 }); // to the left
+    view.pointer({ kind: "up", dx: 0, dy: 0 });
+    let last = view.flow;
+    let jump = 0;
+    for (let i = 0; i < 120; i++) {
+      view.step(0.02, DT, 300, false);
+      jump = Math.max(jump, Math.abs(Math.atan2(Math.sin(view.flow - last), Math.cos(view.flow - last))));
+      last = view.flow;
+    }
+    expect(Math.cos(view.flow)).toBeLessThan(-0.95);
+    expect(jump).toBeLessThan(0.15); // eased, never a snap
+    // Moves after the release don't drag.
+    const before = snap(view);
+    view.pointer({ kind: "move", dx: 50, dy: 50 });
+    view.step(0, DT, 300, false);
+    for (let i = 0; i < 8; i++) expect(view.m[i]).toBeCloseTo(before.m[i], 9);
+  });
+
+  it("switches tiling in place", () => {
+    const view = createDiskView("{7,3}");
+    const m = view.m;
+    view.setTiling("{4,5}");
+    view.step(0.1, DT, 300, false);
+    expect(view.m).toBe(m);
+    expect(Math.hypot(view.centre[0], view.centre[1])).toBeLessThan(0.8);
   });
 });
