@@ -1,0 +1,93 @@
+{
+  "format": 1,
+  "name": "Orca",
+  "group": "mammals",
+  "type": "TGTG",
+  "notes": "Swims right. The tall upright dorsal fin is a deep dent mid-belly (the fin of the orca in the row below sits in it); the paddle flipper is the dip before the tail stock. The blunt head (e1) makes the crescent fluke notch. Paper markings: eye patch, white chin and belly, the flank lobe behind the fin; the saddle is light. Same counts as koi and halibut (s9, s4): morphs with the fish, the dolphin and the humpback.",
+  "corners": {
+    "w": 1.8,
+    "h": 0.7,
+    "s": 0
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[0.0444, 0.0], [0.2333, 0.05], [0.3333, 0.0222], [0.4167, 0.0167], [0.5167, 0.1889], [0.6, 0.0111], [0.6556, -0.0222], [0.7333, -0.1111], [0.8444, -0.0222]]
+    },
+    "e1": {
+      "smooth": [[0.1429, -0.1143], [0.4, -0.2429], [0.6571, -0.2286], [0.8857, -0.1143]]
+    }
+  },
+  "art": [
+    {
+      "part": "white",
+      "fill": {
+        "smooth": [[1.15, 0.08], [1.4, 0.03], [1.7, 0.05], [1.9, 0.16], [1.75, 0.2], [1.5, 0.17], [1.25, 0.15]]
+      }
+    },
+    {
+      "part": "white",
+      "fill": {
+        "smooth": [[0.42, 0.2], [0.58, 0.13], [0.72, 0.1], [0.7, 0.22], [0.58, 0.32], [0.46, 0.3]]
+      }
+    },
+    {
+      "part": "white",
+      "fill": {
+        "smooth": [[1.42, 0.5], [1.55, 0.58], [1.7, 0.6], [1.66, 0.51], [1.52, 0.46]]
+      }
+    },
+    {
+      "part": "saddle",
+      "fill": {
+        "smooth": [[0.6, 0.45], [0.72, 0.48], [0.82, 0.6], [0.7, 0.59], [0.62, 0.52]]
+      }
+    },
+    {
+      "part": "mouth",
+      "stroke": {
+        "smooth": [[1.95, 0.25], [1.86, 0.23], [1.76, 0.24]]
+      },
+      "width": [0.016, 0.01]
+    },
+    {
+      "part": "eye",
+      "circle": [1.75, 0.45, 0.028]
+    },
+    {
+      "part": "flipper",
+      "stroke": {
+        "smooth": [[1.44, 0.08], [1.36, 0.0], [1.32, -0.13]]
+      },
+      "width": [0.016, 0.006]
+    },
+    {
+      "part": "fluke",
+      "stroke": {
+        "smooth": [[0.34, 0.5], [0.22, 0.6], [0.1, 0.67]]
+      },
+      "width": [0.014, 0.005]
+    },
+    {
+      "part": "fluke",
+      "stroke": {
+        "smooth": [[0.34, 0.2], [0.22, 0.1], [0.1, 0.03]]
+      },
+      "width": [0.014, 0.005]
+    }
+  ],
+  "colours": {
+    "white": "paper",
+    "saddle": "light",
+    "mouth": "ink",
+    "eye": "ink",
+    "flipper": "cut",
+    "fluke": "cut"
+  },
+  "height": {
+    "dome": 0.75,
+    "parts": {
+      "white": 0.1,
+      "eye": 0.3
+    }
+  }
+}

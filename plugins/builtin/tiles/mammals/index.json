@@ -1,5 +1,11 @@
 {
   "species": [
-    "bat"
+    "bat",
+    "dolphin",
+    "elephant",
+    "humpback",
+    "lion",
+    "orca",
+    "seal"
   ]
 }

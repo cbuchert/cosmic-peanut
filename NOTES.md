@@ -76,6 +76,12 @@ checked and previewed by `uv run python -m tools.tiles`.
   (TTTTTT in profile; legs on the side edges so the back stays an arched hump). In TGTG and
   TTTTTT, legs on the belly dent the back, so the walking gait and the corners place them. An
   iguana (TTTTTT, chameleon's edges) read as a bat: its long tail notched the shoulder. Dropped.
+- **Mammals**: the bat is redesigned with its wingtips at V1/V5 (free corners, so they're sharp,
+  poking into a neighbour's ear notch at V3) and its wrists on the 3-fold centres. Added: elephant
+  face (C3, trunk tip at V3), lion face in its mane (C4), harbour seal from above (TTTTTT, with e2
+  = e1 mirrored and v negated so the body comes out symmetric), and dolphin, orca and humpback
+  (TGTG s9/s4 like koi/halibut, so all five morph). A running fox, leaping hare, flying squirrel
+  and hedgehog were dropped: legs became notches in the back, and C4 squares read as frogs.
 - **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`; GPU shared with other agents):
   one species static p50 2–3 ms; `all` with morphs (bakes on the music) p50 9 ms, p99 13–14 ms,
   58.8 fps. Three renders per vsync still hold 58.8 fps: 2–5 ms per frame, bakes included.
