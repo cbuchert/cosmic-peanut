@@ -140,6 +140,9 @@ COSMIC_PEANUT_PARAMS = {
     # Added after the PRD at the user's request: 2× MSAA for soft lines costs ~7.5 MB of GPU
     # memory at 1440p, so it can be switched off.
     "antialias": ("boolean", "Antialias soft lines", True, None, None, None),
+    # Added after the PRD: classic is the original look, pixel for pixel; cinematic adds HDR
+    # lines, bloom, filmic tone mapping, prefiltered lines and lens character (README → Look).
+    "look": ("select", "Look", "classic", None, None, ["classic", "cinematic"]),
 }
 
 
@@ -177,6 +180,20 @@ def test_cosmic_peanut_manifest_matches_prd():
     assert got == COSMIC_PEANUT_PARAMS
     assert [p["id"] for p in v["params"]] == list(got)
     assert {p["id"]: p.get("step") for p in v["params"]}["travel"] == 0.5
+
+
+def test_every_cosmic_peanut_visualizer_has_the_same_look_param_after_antialias():
+    for v in _manifest("cosmic-peanut")["visualizers"]:
+        ids = [p["id"] for p in v["params"]]
+        assert ids[ids.index("antialias") + 1] == "look", v["id"]
+        (look,) = [p for p in v["params"] if p["id"] == "look"]
+        assert look == {
+            "id": "look",
+            "type": "select",
+            "label": "Look",
+            "options": ["classic", "cinematic"],
+            "default": COSMIC_PEANUT_PARAMS["look"][2],
+        }
 
 
 def test_mobius_has_cosmic_peanuts_params_plus_width_beat_track_and_length():

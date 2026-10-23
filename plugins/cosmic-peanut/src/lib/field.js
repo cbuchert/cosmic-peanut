@@ -18,6 +18,12 @@ export const FOG_START = 0.5;
 export const NEAR = [1.2, 3];
 /** The box's half side, in Fog distances: bands are black for the last stretch before they wrap. */
 export const BOX = 1.1;
+/**
+ * The cinematic look's focus target (./dof.js) is the nearest band ahead: lit at least this much
+ * and its centre within this share of the view's half angles of the axis.
+ */
+export const AHEAD_FADE = 0.3;
+export const AHEAD_CONE = 0.5;
 /** Floats per instance: offset xyz, fade | quaternion xyzw | scale, row offset, hue, wring side. */
 export const INST = 12;
 
@@ -126,54 +132,77 @@ export function createField(count, seed, fog) {
     angle: new Float32Array(layout.count),
     /** The visible bands' instance data, {@link INST} floats each (first `pack()` of them). */
     inst: new Float32Array(layout.count * INST),
+    /** After `pack`: view depth of the nearest lit band ahead ({@link AHEAD_CONE}), Infinity if none. */
+    ahead: Infinity,
+    /** After `pack` with levels: where each distance level's bands end in `inst` (cumulative). */
+    levelEnd: new Int32Array(1),
     /**
      * Write the bands that are lit and at least partly in view (bounding sphere of radius
      * reach × scale against the frustum) into `inst`, compacted.
      * @param {Float32Array} view rotation-only view matrix @param {number} tanX @param {number} tanY
      * @param {number} reach a band's bounding radius at scale 1 @param {number} rows most history
      *   rows a band lags behind ({@link rowLag}); each band's offset is its share of that
+     * @param {ArrayLike<number>} [levels] ascending distances: when given, the bands are written
+     *   grouped by distance level (nearer than levels[0], then up to levels[1], …), each group's
+     *   end in `levelEnd`; the cinematic Field draws each level with its own detail
      * @returns {number} instances written
      */
-    pack(view, tanX, tanY, reach, rows) {
+    pack(view, tanX, tanY, reach, rows, levels) {
       const { quat, scale, offset, hue, side } = layout;
       const secX = Math.sqrt(1 + tanX * tanX);
       const secY = Math.sqrt(1 + tanY * tanY);
       const out = f.inst;
+      const passes = levels ? levels.length + 1 : 1;
+      if (f.levelEnd.length !== passes) f.levelEnd = new Int32Array(passes); // first call only
       let n = 0;
-      for (let k = 0; k < f.count; k++) {
-        if (f.fade[k] <= 0) continue;
-        const x = f.rel[k * 3];
-        const y = f.rel[k * 3 + 1];
-        const z = f.rel[k * 3 + 2];
-        // View space (rotation only: the camera sits at the origin of the offsets).
-        const vx = view[0] * x + view[4] * y + view[8] * z;
-        const vy = view[1] * x + view[5] * y + view[9] * z;
-        const depth = -(view[2] * x + view[6] * y + view[10] * z);
-        const r = reach * scale[k];
-        if (depth <= -r) continue;
-        if (Math.abs(vx) > depth * tanX + r * secX || Math.abs(vy) > depth * tanY + r * secY) continue;
-        const o = n * INST;
-        out[o] = x;
-        out[o + 1] = y;
-        out[o + 2] = z;
-        out[o + 3] = f.fade[k];
-        // Orientation, then the spin about the band's own axis (local y): q ⊗ (0, sin ½a, 0, cos ½a).
-        const s = Math.sin(f.angle[k] / 2);
-        const c = Math.cos(f.angle[k] / 2);
-        const qx = quat[k * 4];
-        const qy = quat[k * 4 + 1];
-        const qz = quat[k * 4 + 2];
-        const qw = quat[k * 4 + 3];
-        out[o + 4] = qx * c - qz * s;
-        out[o + 5] = qw * s + qy * c;
-        out[o + 6] = qz * c + qx * s;
-        out[o + 7] = qw * c - qy * s;
-        out[o + 8] = scale[k];
-        out[o + 9] = Math.floor(offset[k] * rows);
-        out[o + 10] = hue[k];
-        out[o + 11] = side[k];
-        n++;
+      let ahead = Infinity;
+      for (let level = 0; level < passes; level++) {
+        const lo = levels && level > 0 ? levels[level - 1] ** 2 : 0;
+        const hi = levels && level < levels.length ? levels[level] ** 2 : Infinity;
+        for (let k = 0; k < f.count; k++) {
+          if (f.fade[k] <= 0) continue;
+          const x = f.rel[k * 3];
+          const y = f.rel[k * 3 + 1];
+          const z = f.rel[k * 3 + 2];
+          // View space (rotation only: the camera sits at the origin of the offsets).
+          const vx = view[0] * x + view[4] * y + view[8] * z;
+          const vy = view[1] * x + view[5] * y + view[9] * z;
+          const depth = -(view[2] * x + view[6] * y + view[10] * z);
+          if (level === 0 && depth > 0 && depth < ahead && f.fade[k] >= AHEAD_FADE) {
+            if (Math.abs(vx) <= depth * tanX * AHEAD_CONE && Math.abs(vy) <= depth * tanY * AHEAD_CONE) ahead = depth;
+          }
+          if (levels) {
+            const d2 = x * x + y * y + z * z;
+            if (d2 < lo || d2 >= hi) continue;
+          }
+          const r = reach * scale[k];
+          if (depth <= -r) continue;
+          if (Math.abs(vx) > depth * tanX + r * secX || Math.abs(vy) > depth * tanY + r * secY) continue;
+          const o = n * INST;
+          out[o] = x;
+          out[o + 1] = y;
+          out[o + 2] = z;
+          out[o + 3] = f.fade[k];
+          // Orientation, then the spin about the band's own axis (local y): q ⊗ (0, sin ½a, 0, cos ½a).
+          const s = Math.sin(f.angle[k] / 2);
+          const c = Math.cos(f.angle[k] / 2);
+          const qx = quat[k * 4];
+          const qy = quat[k * 4 + 1];
+          const qz = quat[k * 4 + 2];
+          const qw = quat[k * 4 + 3];
+          out[o + 4] = qx * c - qz * s;
+          out[o + 5] = qw * s + qy * c;
+          out[o + 6] = qz * c + qx * s;
+          out[o + 7] = qw * c - qy * s;
+          out[o + 8] = scale[k];
+          out[o + 9] = Math.floor(offset[k] * rows);
+          out[o + 10] = hue[k];
+          out[o + 11] = side[k];
+          n++;
+        }
+        f.levelEnd[level] = n;
       }
+      f.ahead = ahead;
       return n;
     },
     /** Advance every band's spin. @param {number} dt seconds */

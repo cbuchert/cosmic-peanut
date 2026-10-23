@@ -67,7 +67,9 @@ def run(page, url: str, seconds: float) -> dict:
     return page.evaluate("window.__stats ? window.__stats() : {errors: window.__errors}")
 
 
-def shots(browser, base: str, vizs: list[str], out: Path, tag: str, prefix: str) -> None:
+def shots(
+    browser, base: str, vizs: list[str], out: Path, tag: str, prefix: str, query: str = ""
+) -> None:
     """Deterministic stills (`still=150`: 2.5 s of fixed 60 Hz steps) over each backdrop."""
     out.mkdir(parents=True, exist_ok=True)
     page = browser.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=2)
@@ -77,7 +79,7 @@ def shots(browser, base: str, vizs: list[str], out: Path, tag: str, prefix: str)
         page.screenshot(path=out / f"backdrop-{bg}.png")
     for viz in vizs:
         for bg in BACKDROPS:
-            page.goto(f"{base}?repo={prefix}{VIZ[viz]}&viz={viz}&bg={bg}&still=150")
+            page.goto(f"{base}?repo={prefix}{VIZ[viz]}&viz={viz}&bg={bg}&still=150&{query}")
             page.wait_for_function(
                 "window.__still === true || window.__errors.length > 0", timeout=30000
             )
@@ -107,7 +109,7 @@ def main() -> None:
     with sync_playwright() as p:
         browser = getattr(p, args.browser).launch()
         if args.shots:
-            shots(browser, base, args.viz, args.shots, args.tag, args.prefix)
+            shots(browser, base, args.viz, args.shots, args.tag, args.prefix, args.query)
             browser.close()
             return
         for viz in args.viz:
