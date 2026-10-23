@@ -3,6 +3,46 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tiled Torus: the tiling on a torus, outside and inside (2026-10-22)
+
+**Tiled Torus** (`tiled-torus`, webgl2) wraps the tessellation engine's tiling around a torus
+(ring radius 1, tube radius = Thickness), seen tumbling over paper (`outside`), flown through
+along the tube's centre circle (`inside`, fog down the tube), or both (`auto`). It is a surface
+on the seam above (`shaders/tess/torus.frag`, `src/lib/torus.js`); the engine is unchanged.
+
+- **Mapping:** conformal coordinates, x = lx (θ/2π + fu), y = ly (t(φ) + fv) with
+  t(φ) = (1/π) atan(√((1−k)/(1+k)) tan(φ/2)) (atan2 form, continuous on (−π, π]). Tiles are
+  squares everywhere (bigger on the outer equator, (1+k)/(1−k) times the inner ones), not just
+  near-square. lx = nu, ly = nv (p4) or nv √3 (p3, the rectangular sublattice (1, 0), (0, √3)):
+  nu, nv multiples of BLEND_PERIOD, chosen so ly / lx is within 15 % of the conformal ratio
+  k / √(1 − k²) with nu near 30. The tests check the warp field and tile classes repeat after lx
+  and ly for both groups, so both symmetries are supported.
+- **S is analytic:** the ray differential on the hit's tangent plane times the analytic
+  gradients of θ and t, so outlines don't break at θ = ±π, φ = ±π (WebKit seam close-up checked)
+  or the silhouette; screen derivatives would need wrapping at both seams and fail at the edge.
+- **Render:** sphere tracing the exact torus SDF (64/80/96 steps by Quality), from the bounding
+  sphere outside; inside, a ray that grazes the curving wall and runs out of steps takes where
+  it got to (falling back to the fog colour drew a bright crescent). Outside, the silhouette is
+  inked from the closest miss in px.
+- **Camera:** one azimuth shared by the orbit and the fly path, so a dive goes straight in where
+  the camera is and comes out where it has flown to. The dive lerps the position over 6 s
+  (smoothstep; reduce motion 12 s) and turns the heading down the tube only after 40 % of it, so
+  the torus stays in view while the camera closes in; crossing the wall dissolves through paper
+  (fade 1 on the wall, 0 at 0.6 tube radii). Auto dives on phrase changes (every 8 bar steps of
+  tess-music, ≥ 20 s since the last change), or after 60 s without one. Drag orbits outside and
+  turns the look inside; it eases back over 1.6 s (smoothstep) after release.
+- **Music:** all motion is the state's glide travel (bass + the eased beat surge): orbit 0.04
+  rad, fly 0.2 rad, tile flow 0.004 / 0.006 turns along / around the tube, per unit of travel.
+  TESS_RING runs along the ring, 0 at the camera's azimuth to 1 half a turn away both ways, so
+  figure/ground fronts and the spectrum rings travel around the torus from the viewer.
+- **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`, GPU shared with other agents:
+  Metamorphosis measured 8 / 13 ms p50 / p99 at the same time, against 6–8 / 7–11 above):
+  outside p50 5 ms, p99 9–10 ms (p3 the same); inside p50 12 ms, p99 17 ms (full-screen tiles
+  plus the march), 58.8 fps for both. Two renders per vsync inside still hold 58.8 fps (7.5 ms
+  each); three drop to 18.5 fps. CPU < 0.1 ms. Flash check: 0 flashes/s at 2 % and 5 %, reduce
+  flashing on and off. Untested on the M1 reference machine; Quality medium brings an
+  inside render to about 5 ms (from 7.5).
+
 ## Tessellations: Tiled Sphere (2026-10-22)
 
 **Tiled Sphere** (`tiled-sphere`, webgl2) wraps the woodcut tiling round a sphere, seen from

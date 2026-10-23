@@ -34,6 +34,7 @@ VIZ = {
     "tile-horizon": "builtin",
     "endless-zoom": "builtin",
     "tiled-sphere": "builtin",
+    "tiled-torus": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }
