@@ -10,10 +10,13 @@ from pathlib import Path
 from . import geometry as g
 
 FIXTURE = g.REPO / "tests/fixtures/tiles_golden.json"
+# The seeds only: the fixture tests the code (one per type, plus a morph pair), so designers adding
+# species never touch it.
+SEEDS = ("birds/tern", "fish/halibut", "fish/koi", "mammals/bat", "reptiles/turtle")
 
 
 def build(root: Path = g.TILES) -> dict:
-    species = [g.load(p) for p in g.species_files(root)]
+    species = [g.load(root / f"{sid}.json") for sid in SEEDS]
 
     def entry(shape: g.Shape) -> dict:
         return {
