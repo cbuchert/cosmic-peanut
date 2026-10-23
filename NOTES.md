@@ -95,6 +95,39 @@ high + thick + fog 0.8, explicit cubic at thin rods; Tentacle Lattice default an
   agents, so ±1 ms): p50 / p99 octet 4.75 / 6.25 ms, diamond 8 / 9.5, bitruncated 4.5 / 6.25,
   cubic 1.5 / 2. A single-frame run read diamond's CPU p50 as 12 ms once: noise.
 
+## Lattice: triply periodic minimal surfaces (2026-10-23)
+
+Lattice's Structure param gains `gyroid`, `schwarz-p` and `schwarz-d`: thickened sheets
+|f − c| ≤ t whose saddle walls split space into two labyrinths; the camera flies one.
+`shaders/lattice/README.md` has the design (one GLSL file with a define per surface, `lib/tpms.js`,
+`lib/net-camera.js`, `lib/structure-tpms.js`).
+
+- **Bounds, measured:** max |∇f| = √3 for all three (sampled 1.73205; lip 1.75), Hessian spectral
+  norm 2 (gyroid, D) and 1 (P). The march step is (|f − c| − t) / (k lip): 0.89 of the near-wall
+  distance for G and D, 0.77 for P. Clearance takes the better of the first-order bound and a
+  second-order one; with only the first, P's necks (∇f = 0, f = 1) failed the 0.15-cell floor.
+- **Camera:** a net walk (srs / cubic / diamond, nodes at f's maxima) through `createCamera`'s
+  B-spline and springs. 60 s × 3 seeds at 2 cells/s with beats: least worst-case clearance gyroid
+  0.60, P 0.30, D 0.38 cells; view rate ≤ 1.1 / 1.9 / 1.5 rad/s at 2 cells/s, and the README's
+  beat-run limits (along < 1, jerk < 25, ω < 1.6, ω̇ < 4) hold for all three at Speed 1.
+- **Pulses:** first try snapped the source by steepest descent of f; on P's axis lines the gradient
+  points along the axis, so it stalled in the neck (f = 1). Now: the nearest of 26 cast rays, then
+  Newton. Euclidean fronts; the ring reads as a pale band (the steel and brass glow is near the
+  walls' own tone; a per-structure wall tone would need a `shade.glsl` hook).
+- **Look:** history age 12 rows/cell aliased into a moiré on far walls; 6 rows/cell doesn't. Steps
+  × 1.4 removed most 1-pixel dark silhouette rims (rays grazing the saddles ran out of steps). Fog
+  × 2.2 for depth.
+- **Frame time** (harness, WebKit, 2560 × 1440, `sync=1`, `rep=4`, two runs each, GPU shared with
+  other agents' runs so noisy): Medium — cubic p50 2–2.25 / p99 3.75–4.25 ms (reference); gyroid
+  2.75 / 3.25–3.75; Schwarz P 2.5–3.25 / 3.75–4.75; Schwarz D 3.25–4 / 4.75–8.5 ms. All 58.8 fps
+  but one D run (55.6 at rep 4). High, gyroid: p50 8.25 / p99 11.75–12.5 ms.
+- **Cubic and Tentacle Lattice byte-identical:** 8 stills (cubic default at 150 and 372, thick +
+  brass, ink + high + fog 0.2, none + low + speed 2, music + reactivity 2; tentacle default and
+  chrome) match the pre-change build byte for byte (the comparer says DIFFER on two different stills).
+- **Not test-first:** the GLSL (mirrored by `lib/tpms.js`, whose bounds are tested), the entry's
+  camera swap on a Structure change (driven by flipping the param in WebKit: no errors) and the
+  look (tuned by stills).
+
 ## Lattice camera: smooth, with turns on the beat (2026-10-22)
 
 The user, watching Tentacle Lattice: "It's jumpy." Diagnosis came first: 60 s at 120 BPM through

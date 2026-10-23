@@ -713,9 +713,20 @@ def test_lattice_manifest():
     assert look["default"] in look["options"]
     # lib/structures.js STRUCTURE_OPTIONS: one entry per structure file (the seam for new ones).
     assert params["structure"]["type"] == "select"
-    assert params["structure"]["options"] == ["cubic", "octet", "diamond", "bitruncated"]
+    assert params["structure"]["options"] == [
+        "cubic",
+        "octet",
+        "diamond",
+        "bitruncated",
+        "gyroid",
+        "schwarz-p",
+        "schwarz-d",
+    ]
+    # Each option's shader file (the TPMS share one, a define per surface).
+    shared = {"gyroid": "tpms", "schwarz-p": "tpms", "schwarz-d": "tpms"}
     for name in params["structure"]["options"]:
-        assert (REPOS["builtin"] / f"shaders/lattice/structure-{name}.glsl").is_file(), name
+        f = f"shaders/lattice/structure-{shared.get(name, name)}.glsl"
+        assert (REPOS["builtin"] / f).is_file(), name
     assert params["structure"]["default"] == "cubic"
     # lib/lattice.js DEFAULT_SPEED: Reduce motion slows the flight only while Speed sits here.
     speed = params["speed"]
@@ -746,6 +757,7 @@ def test_lattice_manifest():
         "structure-tentacle.glsl",
         "brdf.glsl",
         "bloom.frag",
+        "structure-tpms.glsl",
     ):
         assert (REPOS["builtin"] / "shaders/lattice" / f).is_file(), f
 

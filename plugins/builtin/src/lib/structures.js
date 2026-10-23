@@ -31,6 +31,7 @@ import { tentacleClearance, tentacleRuntime } from "./structure-tentacle.js";
 import * as bitruncated from "./structure-bitruncated.js";
 import * as diamond from "./structure-diamond.js";
 import * as octet from "./structure-octet.js";
+import { tpmsStructure } from "./structure-tpms.js";
 
 /**
  * What a structure's runtime sees each frame.
@@ -118,10 +119,14 @@ export const STRUCTURES = {
   octet: strutEntry("octet", octet.octetCamera, octet.pulseSource, octet.clearance, octet.octetRuntime),
   diamond: strutEntry("diamond", diamond.diamondCamera, diamond.pulseSource, diamond.clearance, diamond.diamondRuntime),
   bitruncated: strutEntry("bitruncated", bitruncated.bitruncatedCamera, bitruncated.pulseSource, bitruncated.clearance, bitruncated.bitruncatedRuntime),
+  // Triply periodic minimal surfaces (lib/tpms.js): one shader, a define per surface.
+  gyroid: { shader: "structure-tpms.glsl", defines: ["TPMS_GYROID"], ...tpmsStructure("gyroid"), scale: 1, steps: 1.4, fog: 2.2, far: 24 },
+  "schwarz-p": { shader: "structure-tpms.glsl", defines: ["TPMS_P"], ...tpmsStructure("schwarz-p"), scale: 1, steps: 1.4, fog: 2.2, far: 24 },
+  "schwarz-d": { shader: "structure-tpms.glsl", defines: ["TPMS_D"], ...tpmsStructure("schwarz-d"), scale: 1, steps: 1.4, fog: 2.2, far: 24 },
 };
 
 /** Lattice's Structure param options (Tentacle Lattice is its own visualizer, fixed to "tentacle"). */
-export const STRUCTURE_OPTIONS = ["cubic", "octet", "diamond", "bitruncated"];
+export const STRUCTURE_OPTIONS = ["cubic", "octet", "diamond", "bitruncated", "gyroid", "schwarz-p", "schwarz-d"];
 
 /**
  * The structure to render: Tentacle Lattice's own, else Lattice's Structure param (unknown → cubic).

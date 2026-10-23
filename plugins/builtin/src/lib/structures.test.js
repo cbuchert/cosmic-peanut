@@ -16,8 +16,9 @@ describe("structureFor", () => {
     expect(structureFor("lattice", "cubic")).toBe("cubic");
     expect(structureFor("lattice", "no-such")).toBe("cubic");
     expect(structureFor("lattice", undefined)).toBe("cubic");
-    expect(STRUCTURE_OPTIONS).toEqual(["cubic", "octet", "diamond", "bitruncated"]);
+    expect(STRUCTURE_OPTIONS).toEqual(["cubic", "octet", "diamond", "bitruncated", "gyroid", "schwarz-p", "schwarz-d"]);
     expect(structureFor("lattice", "octet")).toBe("octet");
+    expect(structureFor("lattice", "gyroid")).toBe("gyroid");
     for (const name of STRUCTURE_OPTIONS) expect(STRUCTURES[name]).toBeDefined();
   });
 });
@@ -73,16 +74,38 @@ describe("STRUCTURES", () => {
     for (const s of Object.values(STRUCTURES)) expect(typeof pulseLightsOf(s)).toBe("function");
   });
 
-  /** A node and a point on a strut, per structure (default: the cubic lattices'). */
+  it("the TPMS structures launch pulses from the nearest wall, near the path", () => {
+    const out = new Float64Array(3);
+    for (const name of ["gyroid", "schwarz-p", "schwarz-d"]) {
+      const s = STRUCTURES[name];
+      const cam = s.camera(3);
+      cam.update(4, 1);
+      const at = cam.ahead(1.6, new Float64Array(3));
+      s.pulseSource(at, out);
+      expect(s.clearance(out), name).toBeLessThan(0);
+      expect(Math.hypot(out[0] - at[0], out[1] - at[1], out[2] - at[2]), name).toBeLessThan(2.5);
+    }
+  });
+
+  /** Points inside each structure's geometry: by default a cubic node and a point on a strut. */
   const INSIDE = {
+    default: [
+      [0, 0, 0],
+      [0.5, 0.01, 0.02],
+    ],
+    // A node and a point on a strut.
     octet: [[0, 0, 0], [0.5, 0.51, 0.02]],
     diamond: [[0, 0, 0], [0.26, 0.25, 0.24]],
     bitruncated: [[1, 0.5, 0], [1, 0.26, 0.25]],
+    // On each sheet's mid-surface (f = 0).
+    gyroid: [[0, 0, 0]],
+    "schwarz-p": [[1, 1, 1]],
+    "schwarz-d": [[0, 0, 0]],
   };
 
   it("clearance is the worst case: it goes negative inside the geometry", () => {
     for (const [name, s] of Object.entries(STRUCTURES)) {
-      for (const p of INSIDE[/** @type {keyof typeof INSIDE} */ (name)] ?? [[0, 0, 0], [0.5, 0.01, 0.02]]) {
+      for (const p of INSIDE[/** @type {keyof typeof INSIDE} */ (name in INSIDE ? name : "default")]) {
         expect(s.clearance(new Float64Array(p)), `${name} ${p}`).toBeLessThan(0);
       }
     }
