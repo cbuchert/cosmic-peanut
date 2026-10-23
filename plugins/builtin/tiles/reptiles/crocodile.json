@@ -1,0 +1,163 @@
+{
+  "format": 1,
+  "name": "Crocodile",
+  "group": "reptiles",
+  "type": "TGTG",
+  "notes": "A crocodile from above, swimming right (+x); the glide row above swims left. V0 is the tail tip and e1 starts up the tail of the crocodile ahead, so each snout (e1) lies on the tail in front and its own rear (e3) is a snout-shaped notch over the tail; the lobe above that notch is the left hind leg trailing back. Walking gait on belly e0: right hind leg pointing back, right fore leg forward. The back is e0 mirrored about x = (w + s)/2, so the left legs come from belly dents and the right legs carve the back; the left legs' dents also make the throat. Morphs with the gharial and the monitor: same point counts, corresponding legs and dents.",
+  "corners": {
+    "w": 2.1,
+    "h": 0.55,
+    "s": 0.2
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[0.1429, -0.0167], [0.3048, -0.0048], [0.2762, -0.0476], [0.2667, -0.0952], [0.3238, -0.0952], [0.381, -0.0095], [0.4905, 0.0048], [0.5143, 0.0905], [0.5619, 0.0952], [0.5619, 0.0524], [0.5905, 0.0048], [0.7143, -0.0048], [0.7429, -0.0571], [0.781, -0.0952], [0.8286, -0.081], [0.8095, -0.0048], [0.8429, 0.0048], [0.8571, 0.081], [0.8952, 0.1], [0.9333, 0.0524], [0.9238, 0.0], [0.9714, 0.0]]
+    },
+    "e1": {
+      "smooth": [[0.2292, -0.2803], [0.4394, -0.6584], [0.6102, -0.9781], [0.7022, -0.981], [0.6161, -0.5942], [0.5518, -0.2175], [0.6365, 0.0496]]
+    }
+  },
+  "art": [
+    {
+      "part": "armour",
+      "fill": {
+        "smooth": [[0.64, 0.235], [1.0, 0.22], [1.4, 0.22], [1.72, 0.225], [1.92, 0.24], [1.92, 0.31], [1.72, 0.315], [1.4, 0.34], [1.0, 0.34], [0.64, 0.32]]
+      }
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "polyline": [[0.74, 0.235], [0.74, 0.32]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "polyline": [[0.86, 0.235], [0.86, 0.32]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "polyline": [[0.98, 0.235], [0.98, 0.32]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "polyline": [[1.1, 0.235], [1.1, 0.32]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "polyline": [[1.22, 0.235], [1.22, 0.32]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "polyline": [[1.34, 0.235], [1.34, 0.32]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "polyline": [[1.46, 0.235], [1.46, 0.32]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "polyline": [[1.58, 0.235], [1.58, 0.32]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "polyline": [[1.7, 0.235], [1.7, 0.32]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "polyline": [[1.82, 0.235], [1.82, 0.32]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "smooth": [[0.66, 0.278], [1.1, 0.28], [1.6, 0.27], [1.9, 0.275]]
+      },
+      "width": 0.01
+    },
+    {
+      "part": "crest",
+      "stroke": {
+        "polyline": [[0.2, 0.02], [0.27, 0.045], [0.34, 0.03], [0.41, 0.06], [0.48, 0.045], [0.55, 0.075], [0.62, 0.06]]
+      },
+      "width": 0.012
+    },
+    {
+      "part": "jaw",
+      "stroke": {
+        "smooth": [[2.14, 0.14], [2.4, 0.165], [2.66, 0.17]]
+      },
+      "width": [0.012, 0.006]
+    },
+    {
+      "part": "eye",
+      "circle": [2.05, 0.36, 0.042]
+    },
+    {
+      "part": "eye",
+      "circle": [2.05, 0.16, 0.042]
+    },
+    {
+      "part": "pupil",
+      "stroke": {
+        "polyline": [[2.05, 0.335], [2.05, 0.385]]
+      },
+      "width": 0.016
+    },
+    {
+      "part": "pupil",
+      "stroke": {
+        "polyline": [[2.05, 0.135], [2.05, 0.185]]
+      },
+      "width": 0.016
+    },
+    {
+      "part": "nostril",
+      "circle": [2.72, 0.17, 0.018]
+    }
+  ],
+  "colours": {
+    "armour": "shade",
+    "scutes": "cut",
+    "crest": "cut",
+    "jaw": "ink",
+    "eye": "paper",
+    "pupil": "ink",
+    "nostril": "ink"
+  },
+  "height": {
+    "dome": 0.35,
+    "parts": {
+      "armour": 0.3,
+      "scutes": 0.5,
+      "crest": 0.4,
+      "eye": 0.4
+    }
+  }
+}

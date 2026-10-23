@@ -60,6 +60,12 @@ checked and previewed by `uv run python -m tools.tiles`.
   mirror-symmetric bat (C3). The bat is the weakest silhouette: a C3 tile has 120° corners at
   its 3-fold points, so the wingtips there can't be sharp. A slim dolphin and a hedgehog were
   tried first and read as blobs in the regular hexagon frame.
+- **Reptiles** (7 new, none in C3): crocodile, gharial and monitor (TGTG, one morph set: V0 is
+  the tail tip, so each snout rests on the tail ahead), tortoise and softshell (C4 on the sea
+  turtle's edges, morphing with it), horned lizard (C4, polyline for its spikes) and chameleon
+  (TTTTTT in profile; legs on the side edges so the back stays an arched hump). In TGTG and
+  TTTTTT, legs on the belly dent the back, so the walking gait and the corners place them. An
+  iguana (TTTTTT, chameleon's edges) read as a bat: its long tail notched the shoulder. Dropped.
 - **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`; GPU shared with other agents):
   one species static p50 2–3 ms; `all` with morphs (bakes on the music) p50 9 ms, p99 13–14 ms,
   58.8 fps. Three renders per vsync still hold 58.8 fps: 2–5 ms per frame, bakes included.
