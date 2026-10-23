@@ -318,6 +318,25 @@
         { "id": "hatching", "type": "number", "label": "Hatching", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
         { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "high" }
       ]
+    },
+    {
+      "id": "tiled-sphere",
+      "name": "Tiled Sphere",
+      "description": "The interlocking woodcut tiling wrapped round a turning sphere, seen from outside or from within, pushing through its skin on phrase changes.",
+      "author": "Tidalviz",
+      "entry": "src/tiled-sphere.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/tiled-sphere.jpg",
+      "params": [
+        { "id": "view", "type": "select", "label": "View", "options": ["outside", "inside", "auto"], "default": "auto" },
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["ink", "dusk", "four-block", "ochre", "watercolour"], "default": "four-block" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 2, "step": 0.01, "default": 1 },
+        { "id": "morph", "type": "number", "label": "Morph", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
+        { "id": "ink", "type": "number", "label": "Ink", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "hatching", "type": "number", "label": "Hatching", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "high" }
+      ]
     }
   ]
 }
