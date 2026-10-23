@@ -3,6 +3,51 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tentacle Lattice (2026-10-22)
+
+A second builtin on Lattice's entry module and shader: `ctx.id` "tentacle-lattice" prepends
+`#define TENTACLE`, and every node becomes a Tentacube-style creature (rounded cube, six tapered
+tentacles reaching 30–48 % toward the neighbours). Lattice is untouched: its code path is the same
+text with the define absent, and before/after stills (default, each palette, background none,
+high quality + thick rods + fog 0.8, all on a beat frame) are byte-identical.
+
+- **Tentacles are procedural** (infinitely many; no verlet): a travelling sine sway perpendicular
+  to the strut, `amp × s^1.5` (0 at the root), phase and direction hashed per tentacle from its
+  absolute node (uint hash, so the origin rebasing never pops them), faster and wider with the
+  mids/highs (`createSway`). Taper: linear, ×1.35 flare as `(1 − s)^12` ≈ Tentacube's `e^(−12 s)`
+  (cheaper than `pow`/`exp`). Worst-case envelope 0.16 cell: the camera keeps ≥ 0.15 clear of it
+  and of a fully swollen cube (tested over 3 seeds × 60 s).
+- **The SDF:** per axis, the nearest node's tentacle on the point's side, the neighbour's reaching
+  back, and a lower bound for the node's other one; other lines of struts are bounded by
+  `1 − max|w| − envelopeMax`. Wrapped in an exact proxy (rods of radius `envelopeMax` + a bounding
+  sphere per cube): the bent tubes are evaluated only within 0.03 of it. An earlier along-axis bound
+  (`min(u, 1 − u)`) went to 0 on the node planes and drew thin fake discs on the cubes. Step × 0.8
+  near surfaces. Against a 0.5-step, 3× budget reference, 0.045 % of pixels differ (silhouette
+  specks), no holes.
+- **Beat (local):** the pulse's front makes each strut it reaches hand-shake — both tentacles reach
+  until their tips touch and straighten (`handshake`: smoothstep in over 0.45 cell of the front's
+  travel, ~70 ms at 120 BPM, hold, ease out over 0.85 cell), times the pulse's own eased amplitude.
+  The pulse's node twists a quarter turn (`createTwists`: target eased over 80 ms, Tentacube's
+  1.5 Hz spring, ζ 0.32 at Twitch 1); only the cube body turns. A settled quarter turn is
+  invisible because the faces' spectrogram is drawn as rings, the same on all six faces and
+  quarter-turn symmetric, so the slot is freed without a pop (the cube faces keep the history for
+  that reason). The bass swell goes only to the nodes nearest the camera (`swellWeight`).
+- **Materials:** Tentacube's `createMorph` at its "slow" pace (16 bars or a sustained energy shift,
+  1.5 s smoothstep crossfade): chrome reflects a procedural sky/panel environment, iridescent is a
+  thin-film cosine by view angle, emissive glows the axis colours, obsidian is near-black with sharp
+  highlights. The axis band light runs root → tip as an accent.
+- **Reduce motion:** sway ×0.3 (and its pace), Twitch 1 → 0.3 (Tentacube's effectiveMotion), the
+  twist turns slowly and critically damped, handshakes ×0.3, swell ×0.3, plus Lattice's.
+- **Cost:** 74–91 ms/frame at medium at first (handshake loops over all 8 pulse slots per strut, and
+  the exact field everywhere). Fixed by packing the live pulses (`live` / `liveCount`), the
+  proxy, the tight `envelopeMax` (0.24 → 0.16), one handshake per axis, and for this variant only:
+  render scale × 0.85, steps × 1.1, fog × 1.5 with the march stopping at 16 cells (fading out before
+  it), 3 AO samples. Harness (WebKit, 2560 × 1440, `sync=1`, `rep=4`; noisy, another app was using
+  the GPU at times): low p50 6.5–7.75 / p99 10 ms; **medium (default) p50 6–11 / p99 7–12.75 ms**;
+  high p50 16.5–17 / p99 20–23.5 ms (high misses 60 fps). Lattice in the same runs: 1.5–3 ms.
+- The dark cross on the screen's centre lines is real: the mid-planes between node layers are
+  empty (no tentacle reaches them), so rays in the planes through the camera see the fog.
+
 ## Lattice (2026-10-22)
 
 A new builtin `webgl2` visualizer: an endless cubic lattice (a rounded cube at every node, rods
