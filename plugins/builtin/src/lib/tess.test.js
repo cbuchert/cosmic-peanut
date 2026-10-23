@@ -36,7 +36,7 @@ function rng(seed) {
 const rot = (a, [x, y]) => [Math.cos(a) * x - Math.sin(a) * y, Math.sin(a) * x + Math.cos(a) * y];
 
 /** Random base amplitudes for every base term of a group. @param {ReturnType<typeof groupOf>} g */
-function randomAmps(g, seed) {
+function randomAmps(g, /** @type {number} */ seed) {
   const r = rng(seed);
   const a = new Float32Array(g.terms.length * 2);
   for (let i = 0; i < a.length; i++) a[i] = (r() - 0.5) * 0.02;
@@ -294,6 +294,7 @@ describe.each(["p4", "p3"])("motif families and the warp builder, %s", (name) =>
 
   it("different families give different fields; equal weights give equal sets", () => {
     const w = createWarp(g);
+    /** @type {number[][]} */
     const out = [];
     for (let f = 0; f < FAMILIES.length; f++) {
       const wt = FAMILIES.map((_, i) => (i === f ? 1 : 0));
