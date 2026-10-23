@@ -6,9 +6,10 @@
  *
  * The torus: major radius R = 1 about the y axis, tube radius r = k (the Thickness param).
  * θ = atan2(z, x) runs around the ring, φ around the tube (0 on the outer equator). The plane
- * point is p = (lx · (θ/2π + fu), ly · (t(φ) + fv)) with t the conformal fraction of the minor
- * circle (shaders/tess/torus.frag mirrors it): tiles are squares everywhere, larger on the outer
- * equator, and the tiling closes because lx and ly are periods of the warped, coloured tiling.
+ * point is p = (lx · (θ/2π + fu), ly · (t(φ) + fv + tw · θ/2π)) with t the conformal fraction of
+ * the minor circle (shaders/tess/torus.frag mirrors it): tiles are squares everywhere, larger on
+ * the outer equator, and the tiling closes because lx and ly are periods of the warped, coloured
+ * tiling (and the twist tw shifts t by a whole number of them per lap).
  */
 import { BLEND_PERIOD } from "./tess-music.js";
 
@@ -71,15 +72,26 @@ export function minorFraction(phi, k) {
 export const minorRate = (phi, k) => Math.sqrt(1 - k * k) / (2 * Math.PI * (1 + k * Math.cos(phi)));
 
 /**
- * The plane point of (θ, φ) with the flow offsets fu, fv (fractions of a turn).
+ * The plane point of (θ, φ) with the flow offsets fu (along the ring) and fv (the spin round the
+ * tube), fractions of a turn, and the twist tw (turns of t per lap, twistTurns).
  * @param {number} theta @param {number} phi @param {number} k
  * @param {{ lx: number, ly: number }} c @param {number} fu @param {number} fv @param {number[]} out
+ * @param {number} [tw]
  */
-export function planePoint(theta, phi, k, c, fu, fv, out) {
+export function planePoint(theta, phi, k, c, fu, fv, out, tw = 0) {
   out[0] = c.lx * (theta / (2 * Math.PI) + fu);
-  out[1] = c.ly * (minorFraction(phi, k) + fv);
+  out[1] = c.ly * (minorFraction(phi, k) + fv + (tw * theta) / (2 * Math.PI));
   return out;
 }
+
+/**
+ * Twist: the tiles' t shifts by `turns` × θ/2π, so they stream round the ring in a helix. The
+ * shift over a lap, ly × turns, must be a period of the tiling: whole BLEND_PERIOD steps of the y
+ * lattice vector, i.e. turns × nv a multiple of BLEND_PERIOD (p4 and p3 alike: ly = nv or nv √3).
+ * Snapped to the nearest such value, so the closure stays exact.
+ * @param {number} half Twist param, half-turns a lap @param {number} nv lattice steps round the tube
+ */
+export const twistTurns = (half, nv) => (Math.round((half / 2) * (nv / BLEND_PERIOD)) * BLEND_PERIOD) / nv;
 
 /** A camera pose: position, unit heading and up (perpendicular). */
 export const createPose = () => ({ pos: new Float64Array(3), fwd: new Float64Array(3), up: new Float64Array(3) });
@@ -296,9 +308,17 @@ const TAN_IN = 0.95;
 /** Radians of azimuth per unit of glide travel: inside (the fly speed along the ring), outside. */
 export const FLY = 0.2;
 export const ORBIT = 0.04;
-/** Tile flow, turns per unit of travel: along the ring (u) and around the tube (v, a slow twist). */
+/** Tile flow along the ring, turns per unit of travel. */
 export const FLOW_U = 0.004;
-export const FLOW_V = 0.006;
+/**
+ * Spin round the tube: turns of the conformal coordinate t per unit of travel, per unit of the
+ * Spin param (turns a minute at rest: travel runs at 1 a second, plus bass and the eased beat
+ * surge). Shifting t, not φ, keeps the tiles square (the map stays conformal) while they roll
+ * round the tube, growing on the outer equator and shrinking in the hole. Reduce motion:
+ * × REDUCED_SPIN on top of the glide's own slow-down.
+ */
+export const SPIN = 1 / 60;
+export const REDUCED_SPIN = 0.4;
 /** Outside tumble: elevation sway (rad) about EL0, on its own slow clock (rad/s). */
 const EL0 = 0.42;
 const EL_SWAY = 0.32;
@@ -347,7 +367,8 @@ export function createTorusCamera() {
     /**
      * @param {number} dt
      * @param {{ travel: number }} s lib/tess-music.js state (its glide travel)
-     * @param {{ view: string, thickness: number, stepped: boolean, reduceMotion: boolean }} o
+     * @param {{ view: string, thickness: number, stepped: boolean, reduceMotion: boolean, spin?: number }} o
+     *   spin: the Spin param, turns a minute at rest (signed)
      */
     step(dt, s, o) {
       const step = Number.isNaN(lastTravel) ? 0 : s.travel - lastTravel;
@@ -358,7 +379,7 @@ export function createTorusCamera() {
       c.mix = m;
       c.az += step * (ORBIT + (FLY - ORBIT) * m);
       c.fu = wrap1(c.fu + FLOW_U * step);
-      c.fv = wrap1(c.fv + FLOW_V * step);
+      c.fv = wrap1(c.fv + SPIN * (o.spin ?? 0) * step * (o.reduceMotion ? REDUCED_SPIN : 1));
       roll += ROLL * step;
       clock += dt * (o.reduceMotion ? REDUCED_CLOCK : 1);
       const el = EL0 + EL_SWAY * Math.sin(clock * EL_RATE + 0.4) - EL_SWAY * Math.sin(0.4);
@@ -382,6 +403,8 @@ export function createTorusCamera() {
 
 /** Thickness param: tube radius over ring radius. */
 export const THICKNESS = { min: 0.2, max: 0.5, default: 0.36 };
+/** Travel time param: seconds for a wave to roll a full lap round the tube. */
+export const TRAVEL = { min: 1, max: 8, default: 4 };
 const SYMS = ["p4", "p3"];
 /** @param {unknown} x @param {number} lo @param {number} hi @param {number} dflt */
 const num = (x, lo, hi, dflt) => {
@@ -406,5 +429,18 @@ export function mapParams(p, out) {
   o.morph = num(p.morph, 0, 1, 0.7);
   o.ink = num(p.ink, 0, 2, 1);
   o.hatching = num(p.hatching, 0, 1, 0.6);
+  o.wave = num(p.wave, 0, 1, 0.7);
+  o.travel = num(p.travel, TRAVEL.min, TRAVEL.max, TRAVEL.default);
+  o.detail = num(p.detail, 0, 1, 0.15);
+  o.spin = num(p.spin, -2, 2, 1);
+  o.twist = num(p.twist, 0, 2, 0);
   return out;
 }
+/**
+ * Render scale inside the tube per Quality: looking down it, nearly every wall is seen at a
+ * grazing angle, where the displaced march takes the most steps, so the inside prints at a lower
+ * scale than lib/tess-music.js renderScale's (1 / 0.75 / 0.5). The visualizer switches when the
+ * camera crosses the wall, under the full paper fade.
+ * @param {unknown} q Quality param
+ */
+export const insideScale = (q) => (q === "low" ? 0.45 : q === "medium" ? 0.6 : 0.8);

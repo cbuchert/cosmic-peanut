@@ -152,7 +152,8 @@ on the seam above (`shaders/tess/torus.frag`, `src/lib/torus.js`); the engine is
   tess-music, ≥ 20 s since the last change), or after 60 s without one. Drag orbits outside and
   turns the look inside; it eases back over 1.6 s (smoothstep) after release.
 - **Music:** all motion is the state's glide travel (bass + the eased beat surge): orbit 0.04
-  rad, fly 0.2 rad, tile flow 0.004 / 0.006 turns along / around the tube, per unit of travel.
+  rad, fly 0.2 rad, tile flow 0.004 turns along the ring per unit of travel (the spin round the
+  tube: see Spin and twist below).
   TESS_RING runs along the ring, 0 at the camera's azimuth to 1 half a turn away both ways, so
   figure/ground fronts and the spectrum rings travel around the torus from the viewer.
 - **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`, GPU shared with other agents:
@@ -162,6 +163,51 @@ on the seam above (`shaders/tess/torus.frag`, `src/lib/torus.js`); the engine is
   each); three drop to 18.5 fps. CPU < 0.1 ms. Flash check: 0 flashes/s at 2 % and 5 %, reduce
   flashing on and off. Untested on the M1 reference machine; Quality medium brings an
   inside render to about 5 ms (from 7.5).
+
+**Waves (2026-10-23).** The waveform deforms the torus: each ring is born at the hole and rolls a
+full lap round the tube (hole → top → outer equator → underneath → hole) at full height; just
+past the hole the finishing waves cross-fade into the newborn ones over BIRTH (0.2 lap), so the
+lap closes with no step and no dip. Rings close round θ by cross-fading the window's tail into
+its start (no taper). The beat stamp (1 + envelope; 80 ms rise, gone by 0.9 beat) and the bass are
+baked into the row being pushed: nothing on the surface changes size on a beat. Cost (WebKit,
+2560×1440, `sync=1`, interleaved with Metamorphosis under the same shared-GPU load): outside
+4 ms p50 / 5–6 ms p99, inside 6–7 / 7–8 ms, Metamorphosis 6–7 / 7–9; 58.8 fps everywhere.
+
+**Spin and twist (2026-10-23).** The tiles roll round the tube: the spin shifts the conformal t
+(not φ), so tiles stay square, growing over the outer equator and shrinking into the hole. Rate =
+`SPIN` (1/60) × Spin param × glide travel: Spin is turns a minute at rest (travel 1/s at Speed 1),
+signed, −2…2, default 1; bass and the eased beat surge speed it up (tested: never reverses, the
+per-frame rate change stays < 15 % of the base under kicks). Reduce motion: × 0.4 on top of the
+glide's × 0.25. Twist (0–2 half-turns a lap, default 0) adds tw · θ/2π to t, so the tiles stream
+round the ring in a helix; `twistTurns` snaps tw so ly · tw is a whole number of BLEND_PERIOD y
+periods (tested closed across θ = ±π for p4 and p3, with spin), and S gains its shear term. The
+waves stay on the geometry: `disp()` and torus-disp.frag never see `u_flow` / `u_twist` (a source
+test guards it), so the tiles slide over waves that keep rolling hole → top → outer equator.
+Inside, the whole wall turns round the camera. Cost unchanged (WebKit, 2560×1440, `sync=1`,
+interleaved, shared GPU): outside 4–5 / 5–6 ms p50 / p99, inside 6–6.5 / 7, Metamorphosis 6–6.5 / 7;
+58.8 fps; Twist 2 the same. Stills: scratchpad `shots/torus-spin-*.png` (outside, inside, spin 0
+vs 1 at the same frame, twist, p3 twist 2).
+
+**Handoff for the next agent (Tiled Torus):**
+- Wave history: `src/lib/torus-wave.js` `createWaveHistory` (trigger, auto-gain, `resampleLoop`
+  seamless θ, `smoothRing`, `SHAPE_BLEND`, `ROW_SLEW`, stamp/bass in `rowGain`); one R16F row per
+  push (COLS 128 × ROWS 72, LAP_ROWS 56 a lap). `dispAt` is the tested definition of the surface.
+- Displacement: `shaders/tess/torus-disp.frag` bakes it each frame into a 512×256 R16F map over
+  (θ/2π, age), REPEAT both ways; `torus.frag` `disp()` is one bilinear tap × `u_amp`. Needs
+  `EXT_color_buffer_float`; without it `amp` = 0 (smooth torus).
+- March: `torus.frag` main loop, exact shell skip (|sdTorus| − `u_dmax`) then over-relaxed
+  (ω 1.5) steps of f × `u_stepK`; `stepFactor` (JS, per frame) bounds |∇disp| from the history and
+  is tested against the real gradient; `liveDisp` sets the shell. Rays that run out of steps in the
+  shell are projected onto the surface.
+- Clearance: `maxDisp` ≤ 0.45 k (tested), so the inside camera (on the centre circle) is ≥ 0.55 k
+  from any wall. Uniforms: `u_dispMap`, `u_amp`, `u_dmax`, `u_stepK`, `u_flow` (fu, fv), `u_twist`, `u_side`.
+- Gotchas: the march cost is grazing walls inside the tube (hence `insideScale`, switched under
+  the paper fade, and the fog-scaled tolerance); row-to-row cliffs (beat stamps) shrink the step
+  factor 2–3×, hence the slew limit; zsh doesn't word-split `$var` in loops; the shared scratchpad
+  gets overwritten by other agents, keep scripts in your own folder.
+- Spin / twist: `SPIN`, `REDUCED_SPIN`, `twistTurns`, `planePoint(…, tw)` in `src/lib/torus.js`;
+  camera `fv` is the spin; uniform `u_twist`. Tiles only: keep the displacement free of them.
+- Left: adopting the relief engine once it's merged.
 
 ## Tessellations: Tiled Sphere (2026-10-22)
 
