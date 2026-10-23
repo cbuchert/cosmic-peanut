@@ -60,6 +60,12 @@ checked and previewed by `uv run python -m tools.tiles`.
   mirror-symmetric bat (C3). The bat is the weakest silhouette: a C3 tile has 120° corners at
   its 3-fold points, so the wingtips there can't be sharp. A slim dolphin and a hedgehog were
   tried first and read as blobs in the regular hexagon frame.
+- **Fish** (9 more): salmon, shark, swordfish, sturgeon and moray share the koi's TGTG counts
+  (e0 s9, e1 s4), so seven fish morph; gulper (TGTG, e1 s5: its slit mouth crosses snouts when
+  blended), anglerfish and manta (TTTTTT), stingray (C3). In TGTG the back is the belly's glide
+  image, so thickness at x and at W − x sum to 2h (deep head ⇔ thin tail) and a dorsal fin is a
+  belly slot. Dropped: angelfish (both swept fins become dents that eat the body) and a C4 skate
+  (C4 can't be mirror-symmetric; the pinwheel read as a blob).
 - **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`; GPU shared with other agents):
   one species static p50 2–3 ms; `all` with morphs (bakes on the music) p50 9 ms, p99 13–14 ms,
   58.8 fps. Three renders per vsync still hold 58.8 fps: 2–5 ms per frame, bakes included.
