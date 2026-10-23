@@ -21,6 +21,10 @@ void main() {
   int id;
   // Ran out of distance or steps: all fog (u_far sits where the fog is nearly opaque anyway).
   if (!march(ro, rd, t, id)) {
+#ifdef CINEMATIC
+    o = shadeMiss(ro, rd); // the fog and the light scattered in it (shade.glsl)
+    return;
+#endif
     o = vec4(u_bg * u_bgA, u_bgA);
     return;
   }

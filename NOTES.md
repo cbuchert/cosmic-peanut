@@ -3,6 +3,73 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Lattice shading: the cinematic look (2026-10-23)
+
+Lattice and Tentacle Lattice gain **Look**: `classic` (the default) or `cinematic`.
+`shaders/lattice/README.md` → "Shading" is the model; papers are cited there and in the shaders.
+
+- **Classic is byte-identical** to e3dcaca. Its shader text is unchanged: no define, and the
+  cinematic code sits under `#ifdef CINEMATIC`. 13 stills match the old build byte for byte at
+  the default Look and at an explicit `classic`, with an exact RGBA byte compare: Lattice
+  default, brass, ink and none over light, high + thick + fog 0.8, low; Tentacle Lattice default,
+  each material, ink over light, brass + high + long + fog 0.9.
+- **Cinematic:**
+  - One BRDF for every surface: GGX + height-correlated Smith + Burley, with Kulla–Conty
+    compensation via the analytic DFG fit.
+  - Palette materials: steel, brass, ink. Tentacle Lattice's four materials blend their
+    parameters through the same BRDF. Iridescent is a Belcour–Barla thin film.
+  - A split-sum procedural environment, a key light with a cone-traced soft shadow, and Evans AO
+    with specular occlusion.
+  - Beat pulses become packed tube lights (Karis representative point).
+  - Homogeneous fog with Sun et al.'s analytic in-scatter for the headlight and the pulses.
+  - Over-relaxed sphere tracing; a Jimenez bloom chain; Narkowicz's ACES fit.
+- **Default stays classic.** The stills don't clearly win. Cinematic is better on the steel and
+  brass lattices: real metal, depth, glow. But Tentacle Lattice's iridescent reads weaker than
+  classic's vivid (unphysical) hue cycle, because a physical film only colours the specular
+  reflection. Ink turns sepia: the paper fog is mixed in linear light and tone-mapped per channel.
+  Stills: `scratchpad/shots/lat-shading-*-{classic,cinematic,compare}.png`.
+- **Frame time** (WebKit harness, 2560 × 1440, `sync=1`, `rep=4`, Medium, interleaved in one
+  session, 3 rounds; the GPU was shared with other agents, and noisy runs were discarded):
+
+  | | Classic p50 / p99 | Cinematic p50 / p99 |
+  | --- | --- | --- |
+  | Lattice | 3.0 / 4.0–4.25 ms | 3.25 / 5.0–5.5 ms |
+  | Tentacle Lattice | 5.0 / 5.75 ms | 7.75 / 9.75 ms |
+
+  At Low, Tentacle Lattice is 3.25 → 4.25 ms; at High, 8.25 → 12.5 ms (p99 15.5). Lattice stays
+  near its 3 ms floor at every Quality. Shadows were the costliest addition (about +30 % of classic
+  on Tentacle Lattice), so Medium uses 12 shadow taps and 4 AO taps.
+- **Over-relaxation:** against a fine-step reference (0.6 × the step, 1500 steps), relaxed
+  stills differ in fewer pixels than plain ones at the same budget. Tentacle Lattice default:
+  177 k vs 283 k pixels off by more than 8/255. It recovers far detail, never skips a surface,
+  and its time difference was within the noise.
+- **Beat taste.** Exposure and the bloom mix are fixed: nothing global moves on the beat.
+  - Pulse light reaches only 1.8 cells around each front.
+  - The beat's mean-luminance swing (median over 0.25 s windows, Speed 0, Reduce flashing off)
+    is 0.14 in cinematic vs 0.07 in classic for Lattice, and 0.14 vs 0.05 for Tentacle Lattice.
+    The pulse is brighter and lights its neighbours, but it is still local to the pulse.
+  - Under Reduce flashing the pulse lights are × 0.2 more. The flash check under the 10 Hz
+    strobe gives 2 rises/s at 5 %, the same as classic, and 3–5 at 2 % (classic 3–4).
+- **The TPMS agent's note** (pale pulse bands on pale walls): pulse emission is HDR before the tone
+  curve, pulses light and glow, and the optional `STRUCT_WALL_TONE` define lets a wall-filling
+  structure darken its lit walls. `pulseLights` (JS, optional) defaults to a point light at the
+  source.
+- **Harness determinism fix.** Before, `still` mode's clock started at `performance.now()`, so
+  frame steps rounded differently per run. Lattice's beat decisions, and so its camera path,
+  flipped between two outcomes. The first page in a fresh WebKit also renders differently.
+  `still` now starts at 0, and identity runs discard a warm-up page.
+- **Tests:**
+  - `lattice-look.test.js`: Look mapping, tone-curve monotonicity and exact inverse, the alpha
+    rule, sample counts, palette materials.
+  - `lattice-lights.test.js`: the pack keeps the nearest lights with a fading window and no pop;
+    strut fronts match a brute-force walk; the point fallback; the gain.
+  - `lattice-bloom.test.js`: level sizing; levels allocated once per size change; no allocation
+    in `render`.
+  - `pulseLightsOf` and the manifests.
+- **Not test-first:** the GLSL (no JS copy of it) and the GL wiring in `lattice.js`. The harness
+  covers them: flipping every param, flipping the Look both ways at runtime, resize, dispose,
+  with no errors.
+
 ## Lattice camera: smooth, with turns on the beat (2026-10-22)
 
 The user, watching Tentacle Lattice: "It's jumpy." Diagnosis came first: 60 s at 120 BPM through

@@ -1,6 +1,14 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { NEAR_CLEARANCE, STRUCTURES, STRUCTURE_OPTIONS, assembleShader, structureFor } from "./structures.js";
+import { pointPulseLight, strutFrontLights } from "./lattice-lights.js";
+import {
+  NEAR_CLEARANCE,
+  STRUCTURES,
+  STRUCTURE_OPTIONS,
+  assembleShader,
+  pulseLightsOf,
+  structureFor,
+} from "./structures.js";
 
 describe("structureFor", () => {
   it("fixes Tentacle Lattice to its structure; Lattice takes the Structure param (unknown → cubic)", () => {
@@ -54,6 +62,14 @@ describe("STRUCTURES", () => {
       STRUCTURES[name].pulseSource(new Float64Array([2.4, -1.6, 7.5]), out);
       expect(Array.from(out)).toEqual([2, -2, 8]);
     }
+  });
+
+  it("pulse lights: the strut lattices light their fronts' struts; any other structure a point", () => {
+    expect(pulseLightsOf(STRUCTURES.cubic)).toBe(strutFrontLights);
+    expect(pulseLightsOf(STRUCTURES.tentacle)).toBe(strutFrontLights);
+    const { pulseLights: _, ...bare } = STRUCTURES.cubic;
+    expect(pulseLightsOf(bare)).toBe(pointPulseLight);
+    for (const s of Object.values(STRUCTURES)) expect(typeof pulseLightsOf(s)).toBe("function");
   });
 
   it("clearance is the worst case: it goes negative inside the geometry", () => {

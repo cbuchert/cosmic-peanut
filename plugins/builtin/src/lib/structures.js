@@ -20,8 +20,11 @@
  * - `scale`, `steps`, `fog`, `far`: multipliers on Quality's render scale and march budget, on the
  *   fog density, and the march's distance cap (cells).
  * - `runtime(ctx)`: per-frame state and uniforms (see StructureRuntime).
+ * - `pulseLights` (optional): the cinematic look's pulse-light topology, the tube lights a pulse's
+ *   front is drawn as (lib/lattice-lights.js; default `pointPulseLight`, see pulseLightsOf).
  */
 import { createCamera } from "./lattice-camera.js";
+import { pointPulseLight, strutFrontLights } from "./lattice-lights.js";
 import { nearestNode } from "./lattice-pulses.js";
 import { cubicClearance, cubicRuntime } from "./structure-cubic.js";
 import { tentacleClearance, tentacleRuntime } from "./structure-tentacle.js";
@@ -59,7 +62,10 @@ import { tentacleClearance, tentacleRuntime } from "./structure-tentacle.js";
  * @property {number} fog
  * @property {number} far
  * @property {(ctx: import('../../tidalviz').VisualizerContext) => StructureRuntime} runtime
+ * @property {PulseLights} [pulseLights]
  */
+
+/** @typedef {import('./lattice-lights.js').PulseLights} PulseLights */
 
 /** Least clearance (cells) a camera path must keep from its structure's worst-case geometry. */
 export const NEAR_CLEARANCE = 0.15;
@@ -77,6 +83,7 @@ export const STRUCTURES = {
     fog: 1,
     far: 36,
     runtime: cubicRuntime,
+    pulseLights: strutFrontLights,
   },
   tentacle: {
     shader: "structure-tentacle.glsl",
@@ -91,6 +98,7 @@ export const STRUCTURES = {
     fog: 1.5,
     far: 16,
     runtime: tentacleRuntime,
+    pulseLights: strutFrontLights,
   },
 };
 
@@ -118,4 +126,12 @@ export function assembleShader(main, parts, defines) {
   });
   if (defines.length === 0) return body;
   return body.replace(/^(#version[^\n]*\n)/, (v) => v + defines.map((d) => `#define ${d}\n`).join(""));
+}
+
+/**
+ * A structure's pulse-light topology for the cinematic look: its own `pulseLights`, else a point
+ * light at each pulse's source. @param {Omit<Structure, "pulseLights"> & { pulseLights?: PulseLights }} s
+ */
+export function pulseLightsOf(s) {
+  return s.pulseLights ?? pointPulseLight;
 }

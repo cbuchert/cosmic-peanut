@@ -33,11 +33,26 @@
  * swaying, tapered tentacles per node, materials crossfading (shade.glsl MATERIALS), handshakes
  * along each beat pulse, a quarter-turn twist at its node and a local bass swell.
  *
+ * Look (lib/lattice-look.js; shaders/lattice/README.md → "Shading"): classic is the original
+ * shading, byte for byte; cinematic compiles the scene with brdf.glsl and CINEMATIC (physically
+ * based materials, pulse tube lights packed by lib/lattice-lights.js, analytic fog in-scatter,
+ * soft shadows), then runs the bloom chain (lib/lattice-bloom.js) and tone-maps in post.frag.
+ *
  * Everything per frame writes into preallocated arrays: frame() allocates nothing.
  */
 import { createProgram, createTarget } from "./lib/gl.js";
 import { createBeat } from "./lib/lattice-beat.js";
+import { createBloom } from "./lib/lattice-bloom.js";
 import { createFaceHistory } from "./lib/lattice-history.js";
+import { REDUCED_LIGHT, createLightPack, packPulseLights } from "./lib/lattice-lights.js";
+import {
+  MATERIAL_FLOATS,
+  lookDefines,
+  lookOf,
+  paletteMaterial,
+  shadingSamples,
+  toneInverse,
+} from "./lib/lattice-look.js";
 import { createPulses } from "./lib/lattice-pulses.js";
 import {
   PALETTE_FLOATS,
@@ -48,7 +63,7 @@ import {
   paletteOf,
   qualityOf,
 } from "./lib/lattice.js";
-import { STRUCTURES, assembleShader, structureFor } from "./lib/structures.js";
+import { STRUCTURES, assembleShader, pulseLightsOf, structureFor } from "./lib/structures.js";
 
 /** Vertical field of view (radians). */
 const FOV = (68 * Math.PI) / 180;
@@ -63,32 +78,57 @@ const FOG_CUTOFF = 0.02;
 const PARTS = ["common", "march", "shade"];
 /** Path seed: the same flight every time the visualizer starts. */
 const SEED = 0x1a77;
+/** Cinematic: pulse lights are packed by distance from the point this far ahead of the camera. */
+const LIGHT_FOCUS = 1.5;
+/** Cinematic: the bloom mix (Jimenez 2014's small lerp), and its share on paper (ink). */
+const BLOOM_MIX = 0.06;
+const BLOOM_INK = 0.25;
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
   const gl = /** @type {WebGL2RenderingContext} */ (ctx.gl);
   const dir = "shaders/lattice/";
-  const [vs, main, cfs, ...parts] = await Promise.all(
-    ["fullscreen.vert", "lattice.frag", "post.frag", ...PARTS.map((n) => n + ".glsl")].map((f) =>
-      ctx.assets.text(dir + f),
+  const [vs, main, cfs, bfs, brdf, ...parts] = await Promise.all(
+    ["fullscreen.vert", "lattice.frag", "post.frag", "bloom.frag", "brdf.glsl", ...PARTS.map((n) => n + ".glsl")].map(
+      (f) => ctx.assets.text(dir + f),
     ),
   );
   /** @type {Record<string, string>} */
   const shared = {};
   PARTS.forEach((n, i) => (shared[n] = parts[i]));
 
-  /** Compile the scene program for a structure. @param {import('./lib/structures.js').Structure} st */
-  async function sceneProgram(st) {
+  /**
+   * Compile the scene program for a structure and Look (classic: the original text; cinematic:
+   * brdf.glsl ahead of shade.glsl, and CINEMATIC defined).
+   * @param {import('./lib/structures.js').Structure} st @param {string} lk
+   */
+  async function sceneProgram(st, lk) {
     const structure = await ctx.assets.text(dir + st.shader);
-    const src = assembleShader(main, { ...shared, structure }, st.defines);
+    const cine = lk === "cinematic";
+    const shade = cine ? brdf + "\n" + shared.shade : shared.shade;
+    const src = assembleShader(main, { ...shared, shade, structure }, [...st.defines, ...lookDefines(lk)]);
     return createProgram(gl, vs, src, dir + "lattice.frag + " + st.shader);
   }
 
   let structureName = structureFor(ctx.id, ctx.params.structure);
   let structure = STRUCTURES[structureName];
-  let prog = await sceneProgram(structure);
+  let look = lookOf(ctx.params.look);
+  let prog = await sceneProgram(structure, look);
   let runtime = structure.runtime(ctx);
   const comp = createProgram(gl, vs, cfs, dir + "post.frag");
+  /** The cinematic look's composite and bloom programs, compiled the first time it is used. */
+  /** @type {{ comp: ReturnType<typeof createProgram>, bloom: import('./lib/lattice-bloom.js').BloomPrograms } | null} */
+  let cine = null;
+  const cineProgs = () =>
+    (cine ??= {
+      comp: createProgram(gl, vs, assembleShader(cfs, {}, ["CINEMATIC"]), dir + "post.frag (cinematic)"),
+      bloom: {
+        karis: createProgram(gl, vs, assembleShader(bfs, {}, ["KARIS"]), dir + "bloom.frag (karis)"),
+        down: createProgram(gl, vs, bfs, dir + "bloom.frag"),
+        up: createProgram(gl, vs, assembleShader(bfs, {}, ["UP"]), dir + "bloom.frag (up)"),
+      },
+    });
+  const bloom = createBloom(gl);
   const vao = gl.createVertexArray();
   const scene = createTarget(gl);
 
@@ -107,20 +147,32 @@ export default async function create(ctx) {
   const axis = createAxisLight();
   const beatIn = { bpm: 0, beatPhase: 0, onset: false, onsetStrength: 0 };
   const pal = new Float32Array(PALETTE_FLOATS);
+  const mat = new Float32Array(MATERIAL_FLOATS);
+  const fogCol = new Float32Array(3);
+  const lights = createLightPack();
   const origin = new Float64Array(3);
   const source = new Float64Array(3);
   /** @type {import('./lib/structures.js').StructureFrame} */
   const sf = { react: 0, live: true, bpm: 0, origin, pulses };
   let clock = 0;
-  paletteOf(ctx.params.palette, pal);
+  /** The palette and its cinematic material, and the background as HDR (its tone inverse). */
+  function palette() {
+    paletteOf(ctx.params.palette, pal);
+    paletteMaterial(ctx.params.palette, mat);
+    for (let c = 0; c < 3; c++) fogCol[c] = toneInverse(pal[c]);
+  }
+  palette();
 
   function resize() {
     const s = qualityOf(ctx.params.quality).scale * structure.scale;
     const w = Math.max(1, Math.round(ctx.size.width * s));
     const h = Math.max(1, Math.round(ctx.size.height * s));
     if (w !== scene.width || h !== scene.height) scene.resize(w, h);
+    if (look === "cinematic") bloom.resize(scene.width, scene.height);
   }
   resize();
+  /** Scene-program rebuilds requested (params): a stale one is dropped when it lands. */
+  let building = 0;
 
   return {
     frame(audio, time) {
@@ -200,9 +252,47 @@ export default async function create(ctx) {
       sf.bpm = beatIn.bpm;
       runtime.step(audio, dt, sf);
       runtime.upload(gl, u, sf);
+      const cinematic = look === "cinematic";
+      if (cinematic) {
+        // The pulses' tube lights nearest the view, the palette's material, sample counts.
+        const f = cam.view.fwd;
+        const fx = cam.pos[0] - origin[0] + f[0] * LIGHT_FOCUS;
+        const fy = cam.pos[1] - origin[1] + f[1] * LIGHT_FOCUS;
+        const fz = cam.pos[2] - origin[2] + f[2] * LIGHT_FOCUS;
+        packPulseLights(lights, pulses, fx, fy, fz, pulseLightsOf(structure), ctx.reduceFlashing ? REDUCED_LIGHT : 1);
+        gl.uniform4fv(u.u_ltA, lights.a);
+        gl.uniform4fv(u.u_ltB, lights.b);
+        gl.uniform1i(u.u_nl, lights.count);
+        const n = shadingSamples(ctx.params.quality);
+        gl.uniform1i(u.u_shSteps, n.shadow);
+        gl.uniform1i(u.u_aoN, n.ao);
+        gl.uniform3f(u.u_fogCol, fogCol[0], fogCol[1], fogCol[2]);
+        gl.uniform3f(u.u_f0, mat[0], mat[1], mat[2]);
+        gl.uniform2f(u.u_rm, mat[3], mat[4]);
+      }
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-      // 2. Upsample onto the transparent canvas as premultiplied sRGB.
+      // 2. Upsample onto the transparent canvas as premultiplied sRGB (cinematic: bloom, then
+      // tone-map in the composite).
+      if (cinematic) {
+        const cp = cineProgs();
+        bloom.render(scene.tex, scene.width, scene.height, cp.bloom, /** @type {WebGLVertexArrayObject} */ (vao));
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, ctx.size.width, ctx.size.height);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.useProgram(cp.comp.program);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, bloom.tex);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, scene.tex);
+        gl.uniform1i(cp.comp.u.u_scene, 0);
+        gl.uniform1i(cp.comp.u.u_bloom, 1);
+        gl.uniform1f(cp.comp.u.u_bloomN, bloom.levels);
+        gl.uniform1f(cp.comp.u.u_bloomK, BLOOM_MIX * (1 - (1 - BLOOM_INK) * pal[18]));
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        return;
+      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, ctx.size.width, ctx.size.height);
       gl.clearColor(0, 0, 0, 0);
@@ -216,18 +306,26 @@ export default async function create(ctx) {
     resize,
 
     params(changed) {
-      if ("palette" in changed) paletteOf(ctx.params.palette, pal);
+      if ("palette" in changed) palette();
       runtime.params(changed);
       if ("quality" in changed) resize();
-      if ("structure" in changed && structureFor(ctx.id, ctx.params.structure) !== structureName) {
-        // Swap the scene program and runtime (the camera and pulses carry on).
-        const name = structureFor(ctx.id, ctx.params.structure);
-        sceneProgram(STRUCTURES[name]).then((next) => {
+      const name = structureFor(ctx.id, ctx.params.structure);
+      const lk = lookOf(ctx.params.look);
+      if (name !== structureName || lk !== look) {
+        // Swap the scene program (and, for a new structure, the runtime); the camera and pulses
+        // carry on. Only the latest request lands.
+        const gen = ++building;
+        sceneProgram(STRUCTURES[name], lk).then((next) => {
+          if (gen !== building) {
+            gl.deleteProgram(next.program);
+            return;
+          }
           gl.deleteProgram(prog.program);
           prog = next;
+          if (name !== structureName) runtime = STRUCTURES[name].runtime(ctx);
           structureName = name;
           structure = STRUCTURES[name];
-          runtime = structure.runtime(ctx);
+          look = lk;
           resize();
         }, (err) => ctx.log(String(err)));
       }
@@ -239,6 +337,10 @@ export default async function create(ctx) {
 
     dispose() {
       scene.dispose();
+      bloom.dispose();
+      if (cine) {
+        for (const p of [cine.comp, cine.bloom.karis, cine.bloom.down, cine.bloom.up]) gl.deleteProgram(p.program);
+      }
       gl.deleteTexture(histTex);
       gl.deleteVertexArray(vao);
       gl.deleteProgram(prog.program);

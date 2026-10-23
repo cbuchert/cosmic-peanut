@@ -2,8 +2,9 @@
 
 Lattice (`lattice`) and Tentacle Lattice (`tentacle-lattice`) share one entry module,
 `src/lattice.js`, and one raymarch. What the camera flies through is a **structure**. To add one,
-write one GLSL file, one JS module and one table entry. Shading work only touches `shade.glsl`
-and `post.frag`. You shouldn't need anything else from this repo's history.
+write one GLSL file, one JS module and one table entry. Shading work only touches `shade.glsl`,
+`brdf.glsl`, `post.frag` and `bloom.frag` (and their `lib/lattice-look.js`, `-lights.js` and
+`-bloom.js`). You shouldn't need anything else from this repo's history.
 
 ## File map
 
@@ -13,8 +14,13 @@ and `post.frag`. You shouldn't need anything else from this repo's history.
 | `shaders/lattice/common.glsl` | shared | Uniforms every part may read, `FACE_ROWS` / `NODE_ROWS`, and `sdRoundBox`. |
 | `shaders/lattice/structure-<name>.glsl` | structure | The structure-file interface below. |
 | `shaders/lattice/march.glsl` | shared | `sceneSDF(p)` wrapper, `calcNormal`, `march` (the sphere tracer). |
-| `shaders/lattice/shade.glsl` | shading | Light, `MATERIALS`, AO, history and running-light emission, pulse glow, ink, fog. |
-| `shaders/lattice/post.frag` | shading | Composite: upsample the scene pass to premultiplied sRGB, with dither. |
+| `shaders/lattice/shade.glsl` | shading | Light, `MATERIALS`, AO, history and running-light emission, pulse glow, ink, fog. Classic under `#else`, cinematic under `CINEMATIC`. |
+| `shaders/lattice/brdf.glsl` | shading | Cinematic only (prepended to `shade.glsl`): BRDF, split sum, thin film, in-scatter, tone inverse. |
+| `shaders/lattice/post.frag` | shading | Composite: upsample the scene pass to premultiplied sRGB, with dither (cinematic: bloom + tone curve). |
+| `shaders/lattice/bloom.frag` | shading | Cinematic bloom chain: 13-tap / Karis downsample, tent upsample. |
+| `src/lib/lattice-look.js` | shading | Look param, tone curve and inverse, alpha rule, sample counts, palette materials. |
+| `src/lib/lattice-lights.js` | shading | Pulse tube lights: `strutFrontLights`, `pointPulseLight`, the per-frame pack. |
+| `src/lib/lattice-bloom.js` | shading | Bloom level sizes and targets (allocated per resize), the chain's draws. |
 | `src/lattice.js` | shared | Entry: params, music, history texture, pulses, camera, uniforms, the two passes. |
 | `src/lib/structures.js` | shared | `STRUCTURES` table, `structureFor`, `assembleShader`, `NEAR_CLEARANCE`. |
 | `src/lib/structure-<name>.js` | structure | `<name>Runtime(ctx)` and `<name>Clearance(pos)`. |
@@ -99,6 +105,7 @@ STRUCTURES[name] = {
   scale, steps, fog,      // × Quality's render scale, × its march budget, × fog density
   far,                    // march cap (cells)
   runtime: (ctx) => StructureRuntime,
+  pulseLights,            // optional: the cinematic look's pulse-light topology (see "Shading")
 };
 ```
 
@@ -188,14 +195,100 @@ with an eased amplitude. The shader lights a surface point by how close
    Do **not** use `ImageChops.difference(...).getbbox()` on RGBA images: Pillow's `getbbox` looks
    at the alpha channel only, so any two opaque images look "identical". Check your comparer
    once against two different stills.
+4. Shoot several stills in one browser page, and throw away the first: the first page a fresh
+   WebKit renders can differ from later loads of the same URL. Before 2026-10-23 `still` mode's
+   clock also started at `performance.now()`. Its frame steps then rounded differently from run
+   to run, and Lattice's camera could fly two different paths. The clock now starts at 0.
 
 The scratchpad is shared between agents. Keep your helper scripts in a folder of your own.
+
+## Shading: the Look param
+
+Both visualizers have **Look**: `classic` (the default) or `cinematic`. `lib/lattice-look.js`
+`lookDefines` adds no define for classic, so its shader text is exactly the original (its stills
+are byte-identical to the build before the cinematic look). Cinematic compiles the scene with
+`brdf.glsl` prepended to `shade.glsl` and `#define CINEMATIC`, and runs the bloom chain and the
+tone curve in the composite.
+
+### The cinematic shading model
+
+Everything is HDR linear radiance until the composite.
+
+- **One BRDF for every surface.** GGX specular with Smith height-correlated visibility and
+  Burley's diffuse (Burley, SIGGRAPH 2012 course; Karis, "Real Shading in Unreal Engine 4",
+  SIGGRAPH 2013 course). Kulla–Conty multiple-scattering compensation (SIGGRAPH 2017 course) keeps
+  rough metals from darkening. Its analytic form uses the directional albedo of the same DFG fit
+  (Karis 2014).
+- **Materials.** Palettes map to materials (`paletteMaterial`): steel (iron's measured f0, a
+  little blued), brass, and ink, a matte black dielectric on paper. Tentacle Lattice's chrome,
+  iridescent, emissive and obsidian blend their parameters under `u_mat` and go through the same
+  BRDF. Iridescent is a Belcour–Barla thin film (SIGGRAPH 2017): a TiO₂-like film on a dark
+  high-index base, its thickness varying smoothly in world space. The film's Airy series is
+  integrated in closed form against Gaussian RGB sensitivities.
+- **Lights.**
+  - A key light with a cone-traced SDF soft shadow (Quilez 2010; Aaltonen, GDC 2018).
+  - A headlight at the camera, with a windowed inverse-square falloff.
+  - The beat pulses as tube lights (see below).
+  - A procedural environment through the split sum (Karis 2013), with an analytic DFG fit and no
+    LUT.
+  - AO from the distance field (Evans, SIGGRAPH 2006 course): geometric taps, each normalized by
+    its distance, plus specular occlusion (Lagarde & de Rousiers 2014).
+  - Shadow and AO tap counts follow Quality (`shadingSamples`).
+- **Pulses are lights.** `lib/lattice-lights.js` turns each live pulse's front into tube lights
+  and packs the 12 nearest a point 1.5 cells ahead of the camera. Each tube fades to zero 3.5 cells
+  from that point, so none pops out of the pack. The shader lights surfaces within 1.8 cells of
+  each tube with Karis's representative-point tube light (diffuse from the line integral,
+  specular from the point nearest the reflection ray). Under Reduce flashing the lights are
+  dimmed by `REDUCED_LIGHT`.
+- **Fog.** The fog is a homogeneous medium: transmittance e^(−βt), with β = Fog density × 0.85
+  (× 0.5 on paper). It scatters light from:
+  - the background, as HDR: the tone inverse of the palette's background, so the far fog lands
+    exactly on it;
+  - the key light, with a Henyey–Greenstein phase;
+  - the headlight and each pulse tube, through Sun et al.'s analytic single-scattering integral
+    (SIGGRAPH 2005). The paper's F(u, v) table is replaced by Gauss–Legendre quadrature.
+
+  The pulses therefore carry soft halos, and rays that hit nothing see lit haze (`shadeMiss`,
+  through an additive `CINEMATIC` branch in `lattice.frag`). The haze softens the dark cross on
+  the screen's centre lines.
+- **March.** `march.glsl` adds over-relaxed sphere tracing (Keinert et al., "Enhanced Sphere
+  Tracing", 2014) under `CINEMATIC`: ω = 1.4 times `structStep(d)`. A relaxed step is kept only if
+  the previous and current unbounding spheres overlap, so it still never passes a surface. On
+  overshoot it falls back to the plain step. Against a fine-step reference it misses fewer
+  far surfaces within the same step budget.
+- **Composite.** `post.frag` mixes in the Jimenez bloom chain (SIGGRAPH 2014): 6 levels from half
+  the scene size, 13-tap downsamples with the Karis average on the first, tent upsamples, and a
+  fixed 6 % mix (1.5 % on paper). It then applies Narkowicz's ACES fit (`tone`, exposure 0.8) and
+  encodes like classic. The canvas stays premultiplied:
+  alpha = max(coverage, brightest channel) (`compositeAlpha`). Light drawn where nothing covers
+  the pixel (haze, halos, bloom) adds over a light desktop, and surfaces keep classic's fog
+  coverage. Nothing on the beat touches exposure or the bloom mix.
+
+### What a new structure gets for free
+
+A structure that implements the interface above is shaded by both looks with no shading code:
+
+- Cinematic reads the hit only through `sceneSDF`, `structStep`, `structKind`, `structAxis`,
+  `structNodeFace`, `structStrut`, `pulseMetric` and the AO constants.
+- Shadows and AO march `sceneSDF` with the structure's own `structStep`.
+- The relaxed march relies on `structStep` being a true bound, as the distance guarantee
+  requires.
+
+Two optional, additive hooks are available:
+
+- **`pulseLights`** (JS, in the `STRUCTURES` entry): how a pulse's front becomes tube lights.
+  Strut lattices with the L1 metric use `strutFrontLights`. Without it, each pulse is a point light
+  at its source (`pointPulseLight`), which suits rings spreading over walls.
+- **`STRUCT_WALL_TONE`** (GLSL `#define` in the structure file, default 1.0): scales the lit
+  surface but not its emission. A structure whose walls fill the view (minimal surfaces,
+  fractals) can set it below 1 so pulses read against pale walls. Pulse emission is HDR before the
+  tone curve either way.
 
 ## Known quirks (not bugs)
 
 - **A dark cross on the screen's centre lines.** The camera flies on cell centres. The mid-planes
   between node layers hold nothing (no strut or tentacle reaches them), so rays in the planes
-  through the camera see straight into the fog.
+  through the camera see straight into the fog. In the cinematic look those rays see lit haze.
 - **A tentacle root peeks through a twisting cube** (Tentacle Lattice). Only the cube body turns
   a quarter turn, so mid-twist a tentacle's flared root shows through the rotated face. After the
   turn the cube is symmetric again, and the twist slot is released without a visible change.
