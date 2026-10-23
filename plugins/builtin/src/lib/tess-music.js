@@ -5,7 +5,7 @@
  * mapping they share. Every `step` allocates nothing. All audio effects are scaled by the
  * Reactivity param (0–2, 1 = default, 2 = strong).
  */
-import { classColor, createWarp, groupOf, MAX_TILE_COLORS, paletteOf } from "./tess.js";
+import { classColor, createWarp, groupOf, MAX_TILE_COLORS, paletteOf, reliefBound } from "./tess.js";
 
 /** Without a confident tempo, onsets at least this strong count as beats. */
 export const BEAT_STRENGTH = 0.6;
@@ -245,6 +245,231 @@ export function createGlide() {
   return g;
 }
 
+// ---- Relief: the music drives the carved block (lib/tess.js reliefHeight) ----------------------
+
+/** A lifted tile is back at rest this many seconds after its peak. */
+export const WAVE_SETTLE = 0.9;
+/** The settle is a spring released from rest at the peak: its frequency (Hz) and damping. */
+export const SPRING_HZ = 2.2;
+export const SPRING_ZETA = 0.6;
+const SPRING_A = SPRING_ZETA * 2 * Math.PI * SPRING_HZ;
+const SPRING_W = 2 * Math.PI * SPRING_HZ * Math.sqrt(1 - SPRING_ZETA * SPRING_ZETA);
+
+/**
+ * One tile's lift, t seconds after a wave's front reached it: a smoothstep up over RISE to 1,
+ * then a damped spring released from rest (zero slope at the peak, a small dip under rest),
+ * windowed to exactly 0 by WAVE_SETTLE after the peak. Smooth, with no slope jump anywhere.
+ * @param {number} t
+ */
+export function wavePulse(t) {
+  if (t <= 0) return 0;
+  if (t < RISE) return smooth(t / RISE);
+  const u = t - RISE;
+  if (u >= WAVE_SETTLE) return 0;
+  const y = Math.exp(-SPRING_A * u) * (Math.cos(SPRING_W * u) + (SPRING_A / SPRING_W) * Math.sin(SPRING_W * u));
+  return y * (1 - smooth((u - WAVE_SETTLE / 2) / (WAVE_SETTLE / 2)));
+}
+
+/** Ring bins the relief's lift is sampled in (`u_tLift`), ring 0 (centre/near) … 1 (edge/far). */
+export const LIFT_BINS = 32;
+/** A beat's front crosses from ring 0 to ring 1 in this many beats… */
+export const WAVE_BEATS = 1.5;
+/** …and at least this many seconds. */
+export const MIN_CROSS = 0.6;
+/** Waves in flight at once; a beat with none free is dropped (a wave is never cut short). */
+export const WAVE_SLOTS = 8;
+/** Peak lift of a bar's first beat at Reactivity 1, plane units at Relief 1 (a tile is 0.5). */
+export const LIFT_GAIN = 0.18;
+/** The other beats of the bar lift this fraction of it. */
+export const BEAT_ACCENT = 0.7;
+/** Reduce motion: lift this fraction, spread this many times slower. */
+export const REDUCED_LIFT = 0.4;
+export const REDUCED_SPREAD = 2;
+/** Overlapping waves add up, to at most this many peaks. */
+const LIFT_CAP = 1.5;
+
+/**
+ * @typedef {object} LiftInput
+ * @property {boolean} beat @property {boolean} tempo createBeat's
+ * @property {boolean} accent the beat starts a bar (tempo) @property {number} period createBeat's
+ * @property {number} strength the onset strength (scales onset beats without a tempo)
+ * @property {number} reactivity @property {boolean} reduceMotion
+ */
+
+/**
+ * The beat wave: every beat (tempo-locked when confident, strong onsets otherwise) sends a front
+ * out from ring 0 to ring 1; each ring's tiles lift with wavePulse as it passes, so a ripple of
+ * rising, settling tiles spreads from the ring origin. `lift` holds the lift per ring bin (plane
+ * units at Relief 1); `front` is the newest front's ring (−1 once it's out).
+ */
+export function createLiftWave() {
+  const age = new Float32Array(WAVE_SLOTS).fill(Infinity);
+  const amp = new Float32Array(WAVE_SLOTS);
+  const cross = new Float32Array(WAVE_SLOTS).fill(1);
+  let newest = -1;
+  const w = {
+    lift: new Float32Array(LIFT_BINS),
+    front: -1,
+    /** @param {number} dt @param {LiftInput} o */
+    step(dt, o) {
+      for (let i = 0; i < WAVE_SLOTS; i++) age[i] += dt;
+      const react = clamp(o.reactivity, 0, 2);
+      if (o.beat && react > 0) {
+        let free = -1;
+        for (let i = 0; i < WAVE_SLOTS; i++) if (age[i] > cross[i] + RISE + WAVE_SETTLE) free = i;
+        if (free >= 0) {
+          age[free] = 0;
+          amp[free] = o.tempo ? (o.accent ? 1 : BEAT_ACCENT) : clamp(o.strength, 0, 1);
+          cross[free] = Math.max(MIN_CROSS, WAVE_BEATS * o.period) * (o.reduceMotion ? REDUCED_SPREAD : 1);
+          newest = free;
+        }
+      }
+      const gain = LIFT_GAIN * react * (o.reduceMotion ? REDUCED_LIFT : 1);
+      for (let b = 0; b < LIFT_BINS; b++) {
+        const ring = b / (LIFT_BINS - 1);
+        let sum = 0;
+        for (let i = 0; i < WAVE_SLOTS; i++) if (age[i] < Infinity) sum += amp[i] * wavePulse(age[i] - ring * cross[i]);
+        w.lift[b] = gain * Math.min(LIFT_CAP, sum);
+      }
+      w.front = newest >= 0 && age[newest] <= cross[newest] ? age[newest] / cross[newest] : -1;
+      return w;
+    },
+  };
+  return w;
+}
+
+/** Peak heave of a ring at Reactivity 1, plane units at Relief 1. */
+export const HEAVE_GAIN = 0.07;
+/** Each ring eases up with this time constant and down with the slower one (s)… */
+const HEAVE_ATTACK = 0.1;
+const HEAVE_RELEASE = 0.3;
+/** …against its own recent peak (decaying over this many s), so quiet treble heaves as well. */
+const HEAVE_PEAK_TAU = 6;
+/** Levels under this never count as music (silence stays flat). */
+const HEAVE_FLOOR = 0.02;
+
+/**
+ * Spectrum heave: the 64 bands averaged into LIFT_BINS rings (bass inner, treble outer), each
+ * normalized by its own slowly decaying peak, eased in time (quick up, slower down) and blurred
+ * over neighbouring rings, × Reactivity. `step` returns the same array every frame.
+ */
+export function createHeave() {
+  const peak = new Float32Array(LIFT_BINS);
+  const level = new Float32Array(LIFT_BINS);
+  const out = new Float32Array(LIFT_BINS);
+  return {
+    /** @param {Float32Array} bands `audio.bands` @param {number} dt @param {number} reactivity */
+    step(bands, dt, reactivity) {
+      const per = bands.length / LIFT_BINS;
+      const up = 1 - Math.exp(-dt / HEAVE_ATTACK);
+      const down = 1 - Math.exp(-dt / HEAVE_RELEASE);
+      const decay = Math.exp(-dt / HEAVE_PEAK_TAU);
+      for (let b = 0; b < LIFT_BINS; b++) {
+        let sum = 0;
+        for (let i = Math.floor(b * per); i < Math.floor((b + 1) * per); i++) sum += bands[i];
+        const raw = sum / per;
+        peak[b] = Math.max(raw, peak[b] * decay);
+        const target = raw > HEAVE_FLOOR ? raw / Math.max(peak[b], HEAVE_FLOOR) : 0;
+        level[b] += (target - level[b]) * (target > level[b] ? up : down);
+      }
+      const gain = HEAVE_GAIN * clamp(reactivity, 0, 2);
+      for (let b = 0; b < LIFT_BINS; b++) {
+        const l = level[Math.max(0, b - 1)];
+        const r = level[Math.min(LIFT_BINS - 1, b + 1)];
+        out[b] = gain * (0.25 * l + 0.5 * level[b] + 0.25 * r);
+      }
+      return out;
+    },
+  };
+}
+
+/** Onsets at least this strong pop tiles (the beat wave already has the beats). */
+export const POP_STRENGTH = 0.3;
+/** A pop's height at Reactivity 1 and full strength (plane units at Relief 1)… */
+export const POP_GAIN = 0.06;
+/** …easing down over this many seconds after its RISE. */
+export const POP_FALL = 0.25;
+/** Pops in flight at once (`u_tPop`); an onset with none free is dropped. */
+export const POP_SLOTS = 3;
+const GOLDEN = 0.6180339887;
+
+/** One pop's height over time: smoothstep up over RISE, smoothstep down over POP_FALL. @param {number} t */
+const popPulse = (t) => (t <= 0 ? 0 : t < RISE ? smooth(t / RISE) : 1 - smooth((t - RISE) / POP_FALL));
+
+/**
+ * @typedef {object} PopInput
+ * @property {boolean} onset @property {number} strength @property {boolean} beat this frame's
+ * @property {number} front createLiftWave's `front` (−1: none)
+ * @property {number} reactivity @property {boolean} reduceMotion
+ */
+
+/**
+ * Onset pops: an onset (not a beat) makes a scatter of single tiles near the newest wave's front
+ * hop briefly. `pops` holds per slot: height (plane units at Relief 1), ring, seed (which tiles:
+ * tess.glsl hashes each tile's cell with it), 0.
+ */
+export function createPops() {
+  const age = new Float32Array(POP_SLOTS).fill(Infinity);
+  const amp = new Float32Array(POP_SLOTS);
+  let count = 0;
+  const p = {
+    pops: new Float32Array(POP_SLOTS * 4),
+    /** @param {number} dt @param {PopInput} o */
+    step(dt, o) {
+      const react = clamp(o.reactivity, 0, 2);
+      for (let k = 0; k < POP_SLOTS; k++) age[k] += dt;
+      if (o.onset && !o.beat && o.strength >= POP_STRENGTH && react > 0) {
+        let free = -1;
+        for (let k = 0; k < POP_SLOTS; k++) if (age[k] > RISE + POP_FALL) free = k;
+        if (free >= 0) {
+          count++;
+          age[free] = 0;
+          amp[free] = clamp(o.strength, 0, 1);
+          p.pops[free * 4 + 1] = o.front >= 0 ? o.front : (count * GOLDEN) % 1;
+          p.pops[free * 4 + 2] = ((count * GOLDEN * 97) % 1) * 100;
+        }
+      }
+      const gain = POP_GAIN * react * (o.reduceMotion ? REDUCED_LIFT : 1);
+      for (let k = 0; k < POP_SLOTS; k++) p.pops[k * 4] = gain * amp[k] * popPulse(age[k]);
+      return p;
+    },
+  };
+  return p;
+}
+
+/** A card's extra rise mid-turn (plane units), and Reduce flashing's. */
+export const FLIP_HOP = 0.08;
+export const REDUCED_FLIP_HOP = 0.02;
+/** @param {boolean} reduceFlashing */
+export const flipHop = (reduceFlashing) => (reduceFlashing ? REDUCED_FLIP_HOP : FLIP_HOP);
+
+/** Relief param default (0–1): how deep the block is carved and how far tiles lift. */
+export const RELIEF_DEFAULT = 0.6;
+/** The block's profile, 0 bevelled … 1 domed (lib/tess.js reliefProfile). */
+export const RELIEF_PROFILE = 0.35;
+/** Each tile lifts 1 ± this much of its ring's lift (tess.glsl hashes the cell), so a ring isn't a rigid hoop. */
+export const LIFT_VARY = 0.3;
+/** @param {unknown} v the Relief param → 0–1, 0 if not a number */
+export const reliefParam = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? clamp(n, 0, 1) : 0;
+};
+/** The raking light's elevation above the block (rad), and the Light param's default (degrees). */
+export const LIGHT_ELEVATION = 0.56;
+export const LIGHT_DEFAULT = 135;
+/**
+ * Unit direction towards the light: `deg` round the view (0 from the right, counter-clockwise,
+ * y up), LIGHT_ELEVATION above the plane. @param {number} deg @param {Float32Array} out length 3
+ */
+export function lightDir(deg, out) {
+  const a = (Number(deg) * Math.PI) / 180;
+  const c = Math.cos(LIGHT_ELEVATION);
+  out[0] = c * Math.cos(a);
+  out[1] = c * Math.sin(a);
+  out[2] = Math.sin(LIGHT_ELEVATION);
+  return out;
+}
+
 /** Tempo beats in a phrase (8 bars): the figure/ground inversion comes on phrase changes… */
 export const PHRASE_BEATS = 32;
 /** …or on an onset at least this strong. */
@@ -265,6 +490,13 @@ export const REDUCED_FRONT_WIDTH = 0.2;
  * @param {number} front @param {number} width @param {number} ring 0–1
  */
 export const tileFade = (front, width, ring) => smooth(clamp((front - ring) / width + 0.5, 0, 1));
+
+/**
+ * A tile's turn (rad) as the figure/ground front passes it, in relief: the cross-fade becomes a
+ * card turning over, 0 → π, showing its back (the next colour) once past edge-on (mirrors
+ * tess.glsl tessPlate). @param {number} front @param {number} width @param {number} ring 0–1
+ */
+export const flipAngle = (front, width, ring) => Math.PI * tileFade(front, width, ring);
 
 /**
  * @typedef {object} InversionInput
@@ -427,6 +659,7 @@ const toLinear = (c) => Math.pow(c, 2.2);
  * @property {number} ink outline weight @property {number} hatching 0–1
  * @property {number} height canvas height (px), for print weights
  * @property {boolean} reduceMotion @property {boolean} reduceFlashing
+ * @property {number} [relief] 0–1, surfaces that carve the block (tess.glsl TESS_RELIEF); 0 = flat
  */
 
 /**
@@ -448,6 +681,10 @@ export function createTessState() {
   const glide = createGlide();
   const inversion = createInversion();
   const rings = createRings();
+  const wave = createLiftWave();
+  const heave = createHeave();
+  const pops = createPops();
+  const quiet = new Float32Array(64);
   /** @type {Record<string, ReturnType<typeof createWarp>>} */
   const warps = { p4: createWarp(groupOf("p4")), p3: createWarp(groupOf("p3")) };
   const pal = new Float32Array(6 + MAX_TILE_COLORS * 3);
@@ -461,6 +698,8 @@ export function createTessState() {
   const morphIn = { beat: false, tempo: false, period: 0.5, onset: false, onsetStrength: 0, centroid: 0, morph: 1, reduceMotion: false };
   const glideIn = { bassAtt: 1, env: 0, reactivity: 1, speed: 1, reduceMotion: false };
   const invIn = { beat: false, tempo: false, onset: false, onsetStrength: 0, reactivity: 1, reduceFlashing: false };
+  const waveIn = { beat: false, tempo: false, accent: false, period: 0.5, strength: 0, reactivity: 1, reduceMotion: false };
+  const popIn = { onset: false, strength: 0, beat: false, front: -1, reactivity: 1, reduceMotion: false };
   const s = {
     group: groupOf("p4"),
     /** Colour classes: 2 (p4) or 3 (p3). */
@@ -498,6 +737,15 @@ export function createTessState() {
     stepped: false,
     family: START_FAMILY,
     shift: 0,
+    /** Relief (TESS_RELIEF surfaces): depth 0–1, profile, lift per ring bin and pops (plane units
+     * at Relief 1; `u_tLift`, `u_tPop`), a card's hop, whether cards are turning, the height bound. */
+    relief: 0,
+    profile: RELIEF_PROFILE,
+    lift: new Float32Array(LIFT_BINS),
+    pops: pops.pops,
+    flipHop: FLIP_HOP,
+    flipping: false,
+    reliefMax: 0,
     /** @param {TessAudio} audio @param {number} dt @param {TessOptions} o */
     step(audio, dt, o) {
       const live = !audio.silent;
@@ -582,6 +830,34 @@ export function createTessState() {
       s.reg[0] = (REG_PX[0] * o.height) / 1440;
       s.reg[1] = (REG_PX[1] * o.height) / 1440;
       s.bands.set(rings.step(audio.bands, dt, live ? o.reactivity : 0));
+
+      waveIn.beat = beat.beat;
+      waveIn.tempo = beat.tempo;
+      waveIn.accent = morph.stepped;
+      waveIn.period = beat.period;
+      waveIn.strength = beatIn.onsetStrength;
+      waveIn.reactivity = o.reactivity;
+      waveIn.reduceMotion = o.reduceMotion;
+      wave.step(dt, waveIn);
+      const hv = heave.step(live ? audio.bands : quiet, dt, o.reactivity);
+      let top = 0;
+      for (let b = 0; b < LIFT_BINS; b++) {
+        s.lift[b] = wave.lift[b] + hv[b];
+        top = Math.max(top, s.lift[b]);
+      }
+      popIn.onset = beatIn.onset;
+      popIn.strength = beatIn.onsetStrength;
+      popIn.beat = beat.beat;
+      popIn.front = wave.front;
+      popIn.reactivity = o.reactivity;
+      popIn.reduceMotion = o.reduceMotion;
+      pops.step(dt, popIn);
+      let pop = 0;
+      for (let k = 0; k < POP_SLOTS; k++) pop += pops.pops[k * 4];
+      s.relief = reliefParam(o.relief ?? 0);
+      s.flipHop = flipHop(o.reduceFlashing);
+      s.flipping = inversion.active;
+      s.reliefMax = s.relief > 0 ? reliefBound(s.relief, top * (1 + LIFT_VARY), pop, s.flipping, s.flipHop) : 0;
       return s;
     },
   };
