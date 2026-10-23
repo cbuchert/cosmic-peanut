@@ -9,7 +9,9 @@
 // a constant print weight in pixels however the map stretches the plane. Optional hook: define
 // TESS_RING(c) before the include to give each tile its ring (0 near/centre … 1 far/edge, used
 // by the figure/ground front and the spectrum rings); the default is the distance of the tile's
-// centre c from u_tRing.xy over u_tRing.z.
+// centre c from u_tRing.xy over u_tRing.z. Optional hook: define TESS_CLASS(cls, c) to recolour a
+// tile from its regular class and centre (0–2, an index into u_tCls; e.g. a surface whose charts
+// meet with a turn that swaps the classes); the default keeps cls.
 //
 // Mirrors src/lib/tess.js (tested there): the symmetric displacement field (tessField ↔
 // fieldAt), the regular tile test (tessTile ↔ tileAt). Plane units: the lattice (p4: unit
@@ -175,6 +177,9 @@ float tessRing(vec2 c) { return clamp(length(c - u_tRing.xy) / u_tRing.z, 0.0, 1
 #ifndef TESS_RING
 #define TESS_RING(c) tessRing(c)
 #endif
+#ifndef TESS_CLASS
+#define TESS_CLASS(cls, c) (cls)
+#endif
 
 // Tile features in tile-local uv (they turn with the tile): a ringed eye, an arched spine,
 // fin or feather strokes, a five-point rosette. uvPx = uv units per target px; fpx = target px
@@ -222,7 +227,8 @@ vec4 tessShade(vec2 p, mat2 S) {
   // front sweeps across the rings, each tile easing between its colours.
   Tile tf = tessTile(q + M * (u_tReg * u_tPxScale));
   float fade = smoothstep(0.0, 1.0, clamp((u_tInvert.x - TESS_RING(tf.centre)) / u_tInvert.y + 0.5, 0.0, 1.0));
-  vec3 fill = mix(u_tCls[tf.cls], u_tClsNext[tf.cls], fade);
+  int fc = TESS_CLASS(tf.cls, tf.centre);
+  vec3 fill = mix(u_tCls[fc], u_tClsNext[fc], fade);
   bool dark = dot(fill, vec3(0.2126, 0.7152, 0.0722)) < 0.18;
   vec3 cut = dark ? u_tPaper : u_tInk;             // what a gouge or a feature shows
   float bandv = u_tBands[int(clamp(TESS_RING(t.centre) * 16.0, 0.0, 15.0))];
