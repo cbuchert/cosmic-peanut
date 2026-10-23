@@ -36,20 +36,67 @@ describe("createBeat", () => {
     expect([b.env, b.swing, b.count, b.beat]).toEqual([0, 0, 0, false]);
   });
 
-  it("with a confident tempo, counts a beat on each beatPhase wrap and peaks at ~0.8 just after it", () => {
+  it("with a confident tempo, counts a beat on each beatPhase wrap and peaks at 1 just after it", () => {
     for (const hz of [60, 120]) {
       let peak = 0;
       let beforeNext = 0;
       const b = run(hz, 4, { bpm: 120, onsets: false }, (b, t) => {
         const ph = (t * 2) % 1;
-        if (t > 1 && ph < 0.25) peak = Math.max(peak, b.env);
+        if (t > 1 && ph < 0.3) peak = Math.max(peak, b.env);
         if (t > 1 && ph > 1 - 2 / hz) beforeNext = Math.max(beforeNext, b.env);
       });
       expect(b.count, `${hz} Hz`).toBe(7); // wraps at 0.5, 1.0 … 3.5 s
-      expect(peak, `${hz} Hz peak`).toBeGreaterThan(0.75);
+      expect(peak, `${hz} Hz peak`).toBeGreaterThan(0.98);
       expect(peak, `${hz} Hz peak`).toBeLessThanOrEqual(1);
-      expect(beforeNext, `${hz} Hz tail`).toBeLessThan(0.1); // decays over about a beat
+      expect(beforeNext, `${hz} Hz tail`).toBeLessThan(0.02); // decays over about a beat
     }
+  });
+
+  it("eases in: no jump on the beat, peaks at 1 some 60–100 ms later", () => {
+    for (const hz of [60, 120, 240]) {
+      let t0 = -1;
+      let peak = 0;
+      let peakAt = 0;
+      let maxStep = 0;
+      let prev = 0;
+      run(hz, 1.5, { bpm: 120, onsets: false }, (b, t) => {
+        if (b.beat && t0 < 0 && t > 0.9) t0 = t;
+        if (t0 >= 0 && t - t0 < 0.4) {
+          if (b.env > peak) [peak, peakAt] = [b.env, t - t0];
+          maxStep = Math.max(maxStep, (Math.abs(b.env - prev) * hz) / 60); // per 1/60 s
+        }
+        prev = b.env;
+      });
+      expect(peak, `${hz} Hz peak`).toBeGreaterThan(0.98);
+      expect(peakAt, `${hz} Hz peak time`).toBeGreaterThanOrEqual(0.06 - 1 / hz);
+      expect(peakAt, `${hz} Hz peak time`).toBeLessThanOrEqual(0.1 + 1 / hz);
+      // An 80 ms smoothstep moves at most 1.5 × (1/60) / 0.08 = 0.31 per 1/60 s at its steepest;
+      // a jump (the first cut's one-pole attack) moved ~0.67 in the first 1/60 s.
+      expect(maxStep, `${hz} Hz steepest`).toBeLessThan(0.35);
+    }
+  });
+
+  it("starts and ends its rise with zero slope (no click at either end)", () => {
+    /** @type {number[]} */
+    const v = [];
+    let t0 = -1;
+    run(240, 1.5, { bpm: 120, onsets: false }, (b, t) => {
+      if (b.beat && t0 < 0 && t > 0.9) t0 = t;
+      if (t0 >= 0) v.push(b.env);
+    });
+    // Second differences stay small everywhere: the velocity never jumps (a smoothstep's 6/RISE²
+    // curvature is ~0.016 per (1/240 s)²; a jump in slope, as in a one-pole attack, is ~0.2).
+    let maxJerk = 0;
+    for (let k = 2; k < 100; k++) maxJerk = Math.max(maxJerk, Math.abs(v[k] - 2 * v[k - 1] + v[k - 2]));
+    expect(maxJerk).toBeLessThan(0.03);
+  });
+
+  it("fades smoothly to nothing before the next beat", () => {
+    let beforeNext = 1;
+    run(120, 3, { bpm: 120, onsets: false }, (b, t) => {
+      if (t > 1 && (t * 2) % 1 > 0.95) beforeNext = Math.min(beforeNext, 1 - b.env);
+    });
+    expect(1 - beforeNext).toBeLessThan(0.02);
   });
 
   it("flags `beat` on exactly the frame of each beat", () => {
@@ -105,7 +152,7 @@ describe("createBeat", () => {
     let peak = 0;
     const b = run(60, 4, { strength: 0.9 }, (b) => (peak = Math.max(peak, b.env)));
     expect(b.count).toBe(8); // 0, 0.5 … 3.5 s
-    expect(peak).toBeGreaterThan(0.65); // 0.9-strength onsets: ~0.9 × 0.8
+    expect(peak).toBeCloseTo(0.9, 2); // 0.9-strength onsets peak at their strength
 
     // Weak onsets are not beats.
     expect(run(60, 4, { strength: BEAT_STRENGTH * 0.8 }, () => {}).count).toBe(0);
@@ -133,7 +180,6 @@ describe("createBeat", () => {
       });
     });
     expect(at[0].length).toBe(at[1].length);
-    // Within a frame's worth of attack (the beat frame's own dt differs): a dt-naive attack is ~0.08 off.
     for (let k = 0; k < at[0].length; k++) expect(Math.abs(at[1][k] - at[0][k]), `sample ${k}`).toBeLessThan(0.025);
   });
 
@@ -143,7 +189,7 @@ describe("createBeat", () => {
     for (let f = 0; f < 120; f++) {
       const t = f / 60;
       a.beatPhase = (t * 2) % 1;
-      a.onset = f === 118; // late in the 3rd beat (count 3: +), once the kick has faded below the accent
+      a.onset = f === 112; // late in the 3rd beat (count 3: +), once the envelope has faded below the accent
       a.onsetStrength = a.onset ? 1 : 0;
       b.step(a, 1 / 60);
     }
@@ -167,16 +213,22 @@ describe("createBeat", () => {
 });
 
 describe("wring, breath and glow", () => {
-  it("wrings by up to WRING radians at full swing and Beat 1 (0.3–0.6 rad), alternating sides", () => {
-    expect(WRING).toBeGreaterThanOrEqual(0.3);
-    expect(WRING).toBeLessThanOrEqual(0.6);
+  it("wrings gently at Beat 1 (0.15–0.25 rad) and about as hard as before at Beat 2", () => {
+    expect(WRING).toBeGreaterThanOrEqual(0.15);
+    expect(WRING).toBeLessThanOrEqual(0.25);
     expect(wring(1, 1)).toBeCloseTo(WRING, 12);
     expect(wring(-0.5, 2)).toBeCloseTo(-WRING, 12);
+    expect(wring(1, 2)).toBeGreaterThan(0.33); // the first cut peaked at 0.45 × 0.8 = 0.36 rad
   });
 
-  it("breathes the strip width by up to 15% at Beat 1", () => {
-    expect(breath(1, 1)).toBeCloseTo(1.15, 12);
-    expect(breath(0.5, 2)).toBeCloseTo(1.15, 12);
+  it("breathes the strip width by about 7% at Beat 1, about 14% at Beat 2", () => {
+    expect(breath(1, 1)).toBeCloseTo(1.07, 12);
+    expect(breath(1, 2)).toBeCloseTo(1.14, 12);
+  });
+
+  it("keeps the glow subtle at Beat 1", () => {
+    expect(GLOW).toBeLessThanOrEqual(0.25);
+    expect(2 * GLOW).toBeGreaterThan(0.45); // Beat 2 ≈ the first cut's 0.6 × 0.8
   });
 
   it("does nothing at Beat 0, which is what the sphere gets (no beat param)", () => {
