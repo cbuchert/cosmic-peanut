@@ -21,6 +21,8 @@ export const LIGHT_REACH = 3.5;
 /** How far ahead of the front a lit strut's tube reaches, and how far behind (its wake), cells. */
 export const FRONT_LEAD = 0.15;
 export const FRONT_WAKE = 0.45;
+/** Under Reduce flashing the pulse lights are scaled by this too (on top of the pulses' own dimming). */
+export const REDUCED_LIGHT = 0.2;
 
 /** @typedef {{ add: (ax: number, ay: number, az: number, bx: number, by: number, bz: number, power: number) => void }} LightSink */
 /**
@@ -171,11 +173,12 @@ export function pointPulseLight(data, i, amp, sink) {
  * @param {ReturnType<typeof createLightPack>} pack
  * @param {{ data: Float32Array, amp: Float32Array }} pulses lib/lattice-pulses.js (after `step`)
  * @param {number} fx @param {number} fy @param {number} fz @param {PulseLights} lights
+ * @param {number} [gain] scale on every light's power (REDUCED_LIGHT under Reduce flashing)
  */
-export function packPulseLights(pack, pulses, fx, fy, fz, lights) {
+export function packPulseLights(pack, pulses, fx, fy, fz, lights, gain = 1) {
   pack.begin(fx, fy, fz);
   for (let i = 0; i < pulses.amp.length; i++) {
-    if (pulses.amp[i] > 0) lights(pulses.data, i, pulses.amp[i], pack);
+    if (pulses.amp[i] > 0) lights(pulses.data, i, pulses.amp[i] * gain, pack);
   }
   pack.end();
 }

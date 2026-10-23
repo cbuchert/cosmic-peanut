@@ -5,6 +5,7 @@ import {
   FRONT_WAKE,
   LIGHT_CAP,
   LIGHT_REACH,
+  REDUCED_LIGHT,
   createLightPack,
   packPulseLights,
   pointPulseLight,
@@ -122,5 +123,17 @@ describe("packPulseLights", () => {
     expect(pack.count).toBe(6);
     packPulseLights(pack, pulses, 0, 0, 0, pointPulseLight);
     expect(pack.count).toBe(1);
+  });
+
+  it("scales every light's power by `gain` (Reduce flashing dims the pulse lights)", () => {
+    const pack = createLightPack();
+    const pulses = { data: new Float32Array(8 * 4), amp: new Float32Array(8) };
+    pulses.data.set([0, 0, 0, 0.3], 0);
+    pulses.amp[0] = 1.5;
+    packPulseLights(pack, pulses, 0, 0, 0, pointPulseLight);
+    const full = pack.b[3];
+    packPulseLights(pack, pulses, 0, 0, 0, pointPulseLight, REDUCED_LIGHT);
+    expect(pack.b[3]).toBeCloseTo(full * REDUCED_LIGHT, 6);
+    expect(REDUCED_LIGHT).toBeLessThan(0.5);
   });
 });
