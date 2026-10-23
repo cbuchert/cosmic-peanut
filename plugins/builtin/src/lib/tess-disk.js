@@ -20,6 +20,7 @@
  */
 
 import { FOLD_ITERATIONS, tiling } from "./hyperbolic.js";
+import { WARP_LIMIT } from "./tess.js";
 
 export const TILINGS = ["{7,3}", "{5,4}", "{4,5}", "{6,4}"];
 
@@ -444,9 +445,128 @@ export function createDiskTiler(name) {
   };
 }
 
-/** Stub. @param {Float32Array} amps @param {number} s @param {number} t @param {number[]} out */
+// ---- The creature warp ---------------------------------------------------------------------
+//
+// In each diamond's square chart a displacement field d(s, t) = W(s, t) Σ A_j S_n(s) S_m(t),
+// S_n(x) = sin(nπ(x + 1)/2), W = cos²(πs/2) cos²(πt/2): zero, with zero slope, on the square's
+// rim (the lines O–V, which run through the middle of the kites, so the warp is smooth there),
+// and odd under the half-turn about M, (s, t) ↦ (−s, −t), when n + m is odd — the half-turn is
+// the only rotation that maps a diamond to itself, so the warp then commutes with the whole
+// rotation group and every kite stays congruent. While a step's Lipschitz bound is under 1,
+// p ↦ p + d(p) is a homeomorphism of the square that fixes its rim, so the warped kites still
+// tile exactly. DISK_STEPS steps compose, as the engine's do, into overhangs and hooks.
+
+/** Modes (n, m), n + m odd. disk.frag has the same list. */
+export const DISK_MODES = [
+  [1, 2],
+  [2, 1],
+  [2, 3],
+  [3, 2],
+  [1, 4],
+  [4, 1],
+  [3, 4],
+  [4, 3],
+];
+/** Composed steps (disk.frag DISK_STEPS). */
+export const DISK_STEPS = 4;
+const HALF_PI = Math.PI / 2;
+
+/**
+ * One step's displacement at chart point (s, t) (mirrors disk.frag diskField).
+ * @param {ArrayLike<number>} amps per mode: Ax, Ay @param {number} s @param {number} t @param {number[]} out
+ */
+export function diskFieldAt(amps, s, t, out) {
+  const cs = Math.cos(HALF_PI * s);
+  const ct = Math.cos(HALF_PI * t);
+  const w = cs * cs * ct * ct;
+  let dx = 0;
+  let dy = 0;
+  for (let j = 0; j < DISK_MODES.length; j++) {
+    const [n, m] = DISK_MODES[j];
+    const f = Math.sin(n * HALF_PI * (s + 1)) * Math.sin(m * HALF_PI * (t + 1));
+    dx += amps[2 * j] * f;
+    dy += amps[2 * j + 1] * f;
+  }
+  out[0] = w * dx;
+  out[1] = w * dy;
+  return out;
+}
+
+/**
+ * Largest |∇(W S_n S_m)| per mode (π for the low modes, 2π for the others, at the square's
+ * centre; from a fine grid, plus 2 %). The test checks a step's real slope against the bound.
+ */
+const MODE_SLOPE = DISK_MODES.map(([n, m]) => (Math.max(n, m) < 4 ? Math.PI : 2 * Math.PI) * 1.02);
+
+/**
+ * Lipschitz bound of one step: J = Σ A_j ⊗ ∇(W S_n S_m), so |J| ≤ Σ |A_j| max |∇(W S_n S_m)|.
+ * @param {ArrayLike<number>} amps
+ */
+export function diskBound(amps) {
+  let l = 0;
+  for (let j = 0; j < DISK_MODES.length; j++) l += Math.hypot(amps[2 * j], amps[2 * j + 1]) * MODE_SLOPE[j];
+  return l;
+}
+
+/** The composed warp of a chart point (mirrors disk.frag diskWarp). @param {ArrayLike<number>} amps @param {number} s @param {number} t @param {number[]} out */
 export function diskWarp(amps, s, t, out) {
+  for (let i = 0; i < DISK_STEPS; i++) {
+    diskFieldAt(amps, s, t, out);
+    s += out[0];
+    t += out[1];
+  }
   out[0] = s;
   out[1] = t;
   return out;
+}
+
+/**
+ * Per family (lib/tess.js FAMILIES: lobed, finned, star, hooked), per mode, the displacement
+ * (Ax, Ay) in the chart. Original shapes, tuned by eye: the diagonals are the kite edges, so
+ * (1, −1) pushes the O–M edge across, (1, 1) the M–V edge. Lobed: low modes across both edges
+ * (round heads and bellies); finned: higher ripples across them; star: the highest modes
+ * (points); hooked: low modes along the edges (shear), which the composed steps curl into hooks.
+ * Each is normalized to a bound of 1.
+ */
+const DISK_PRESETS = [
+  [0.7, -0.7, 0.55, 0.55, 0.1, -0.1, 0.1, 0.1, 0, 0, 0, 0, 0, 0, 0, 0],
+  [0.25, -0.25, 0.2, 0.2, 0.5, -0.5, 0.45, 0.45, 0.25, 0.25, 0.25, -0.25, 0, 0, 0, 0],
+  [0.15, -0.15, 0.15, 0.15, 0, 0, 0, 0, 0.2, -0.2, 0.2, 0.2, 0.55, -0.55, 0.5, 0.5],
+  [0.7, 0.7, 0.55, -0.55, 0.25, 0.25, 0.2, -0.2, 0, 0, 0, 0, 0, 0, 0, 0],
+].map((a) => {
+  const k = 1 / diskBound(a);
+  return a.map((v) => v * k);
+});
+
+/**
+ * The per-frame warp from the music's morph (tess state `morphW`, `theta`): the family mix,
+ * turned by theta (turning every A by the same angle keeps the symmetry and the bound), then
+ * scaled to `strength` × WARP_LIMIT. `amps` is uniform2fv-ready; `set` allocates nothing.
+ */
+export function createDiskWarp() {
+  const base = new Float32Array(DISK_MODES.length * 2);
+  const w = {
+    amps: new Float32Array(DISK_MODES.length * 2),
+    /** Scale applied by the last fit. */
+    scale: 0,
+    /** @param {ArrayLike<number>} wts family weights @param {number} theta radians @param {number} [strength] 0–1 */
+    set(wts, theta, strength = 1) {
+      base.fill(0);
+      for (let f = 0; f < DISK_PRESETS.length; f++) for (let i = 0; i < base.length; i++) base[i] += wts[f] * DISK_PRESETS[f][i];
+      const c = Math.cos(theta);
+      const s = Math.sin(theta);
+      for (let j = 0; j < DISK_MODES.length; j++) {
+        const x = base[2 * j];
+        const y = base[2 * j + 1];
+        base[2 * j] = c * x - s * y;
+        base[2 * j + 1] = s * x + c * y;
+      }
+      const b = diskBound(base);
+      const k = b > 1e-9 ? ((Math.max(0, Math.min(1, strength)) * WARP_LIMIT) / b) * (1 - 1e-6) : 0;
+      for (let i = 0; i < base.length; i++) w.amps[i] = base[i] * k;
+      w.scale = k;
+      return w;
+    },
+  };
+  return w;
 }

@@ -1,7 +1,23 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
 import { mobiusApply, mobiusCompose } from "./hyperbolic.js";
-import { createDiskTiler, createTile, diskGeometry, diskGroup, matIndex, matMul, TILINGS, tilingPQ } from "./tess-disk.js";
+import { WARP_LIMIT } from "./tess.js";
+import {
+  createDiskTiler,
+  createDiskWarp,
+  createTile,
+  DISK_MODES,
+  DISK_STEPS,
+  diskBound,
+  diskFieldAt,
+  diskGeometry,
+  diskGroup,
+  diskWarp,
+  matIndex,
+  matMul,
+  TILINGS,
+  tilingPQ,
+} from "./tess-disk.js";
 
 /** Small seeded PRNG for repeatable random points. @param {number} seed */
 function rng(seed) {
@@ -221,6 +237,202 @@ describe.each(TILINGS)("the %s tiling in the plane (mirror of disk.frag)", (name
       tiler.tileAt(x0 + hi * Math.cos(d), y0 + hi * Math.sin(d), null, b);
       if (a.kite === b.kite) continue;
       expect(b.cls).not.toBe(a.cls);
+      crossings++;
+    }
+    expect(crossings).toBeGreaterThan(500);
+  });
+});
+
+describe("the creature warp (a field in the diamond round each edge midpoint)", () => {
+  const out = [0, 0];
+  const out2 = [0, 0];
+  const FAMS = [
+    [1, 0, 0, 0],
+    [0, 1, 0, 0],
+    [0, 0, 1, 0],
+    [0, 0, 0, 1],
+    [0.4, 0.1, 0.2, 0.3],
+  ];
+
+  it("uses only modes that are odd under the half-turn about the edge midpoint", () => {
+    expect(DISK_MODES.length).toBeGreaterThanOrEqual(6);
+    for (const [n, m] of DISK_MODES) expect((n + m) % 2).toBe(1);
+    expect(DISK_STEPS).toBeGreaterThanOrEqual(3);
+  });
+
+  it("commutes with the half-turn: d(−s, −t) = −d(s, t)", () => {
+    const r = rng(21);
+    const amps = Float32Array.from({ length: DISK_MODES.length * 2 }, () => r() - 0.5);
+    for (let i = 0; i < 200; i++) {
+      const s = 2 * r() - 1;
+      const t = 2 * r() - 1;
+      diskFieldAt(amps, s, t, out);
+      diskFieldAt(amps, -s, -t, out2);
+      expect(Math.hypot(out[0], out[1])).toBeGreaterThan(0);
+      expect(out2[0]).toBeCloseTo(-out[0], 9);
+      expect(out2[1]).toBeCloseTo(-out[1], 9);
+    }
+  });
+
+  it("is still (value and slope) on the diamond's edges, so the warp is smooth across them", () => {
+    const amps = Float32Array.from({ length: DISK_MODES.length * 2 }, (_, i) => Math.sin(i + 1));
+    const h = 1e-4;
+    for (let i = 0; i <= 20; i++) {
+      const a = -1 + i / 10;
+      for (const [s, t] of [[a, 1], [a, -1], [1, a], [-1, a]]) {
+        diskFieldAt(amps, s, t, out);
+        expect(Math.hypot(out[0], out[1])).toBeLessThan(1e-9);
+        // One step in, the field is second order: tiny.
+        diskFieldAt(amps, s - Math.sign(s) * h * (Math.abs(s) === 1 ? 1 : 0), t - Math.sign(t) * h * (Math.abs(t) === 1 ? 1 : 0), out);
+        expect(Math.hypot(out[0], out[1])).toBeLessThan(1e-5);
+      }
+    }
+  });
+
+  it("bounds each mode's slope from above (the bound is honest)", () => {
+    for (let j = 0; j < DISK_MODES.length; j++) {
+      const amps = new Float32Array(DISK_MODES.length * 2);
+      amps[2 * j] = 1;
+      const bound = diskBound(amps);
+      let worst = 0;
+      const h = 1e-5;
+      for (let i = 0; i <= 200; i++) {
+        for (let k = 0; k <= 200; k++) {
+          const s = -1 + i / 100;
+          const t = -1 + k / 100;
+          diskFieldAt(amps, s, t, out);
+          diskFieldAt(amps, s + h, t, out2);
+          const gs = (out2[0] - out[0]) / h;
+          diskFieldAt(amps, s, t + h, out2);
+          const gt = (out2[0] - out[0]) / h;
+          worst = Math.max(worst, Math.hypot(gs, gt));
+        }
+      }
+      expect(worst).toBeLessThanOrEqual(bound);
+      expect(worst).toBeGreaterThan(0.9 * bound);
+    }
+  });
+
+  it.each(FAMS)("fits each step under the invertibility bound (weights %s), at any turn", (...w) => {
+    const warp = createDiskWarp();
+    for (const theta of [0, 0.3, -0.35]) {
+      warp.set(w, theta);
+      expect(diskBound(warp.amps)).toBeCloseTo(WARP_LIMIT, 4);
+      // The analytic bound holds numerically: largest |J| of one step on a fine grid.
+      let worst = 0;
+      const h = 1e-4;
+      for (let i = 0; i <= 60; i++) {
+        for (let j = 0; j <= 60; j++) {
+          const s = -1 + (2 * i) / 60;
+          const t = -1 + (2 * j) / 60;
+          diskFieldAt(warp.amps, s, t, out);
+          diskFieldAt(warp.amps, s + h, t, out2);
+          const a = (out2[0] - out[0]) / h;
+          const c = (out2[1] - out[1]) / h;
+          diskFieldAt(warp.amps, s, t + h, out2);
+          const b = (out2[0] - out[0]) / h;
+          const d = (out2[1] - out[1]) / h;
+          // Operator 2-norm of [[a, b], [c, d]].
+          const f = a * a + b * b + c * c + d * d;
+          const g = Math.sqrt(Math.max(0, f * f - 4 * (a * d - b * c) ** 2));
+          worst = Math.max(worst, Math.sqrt((f + g) / 2));
+        }
+      }
+      expect(worst).toBeLessThanOrEqual(WARP_LIMIT + 1e-3);
+      expect(worst).toBeGreaterThan(0.2); // and it really deforms
+    }
+  });
+
+  it("composes into a warp that moves the edges a good way but keeps the diamond's rim fixed", () => {
+    const warp = createDiskWarp().set([0, 0, 0, 1], 0.2);
+    let most = 0;
+    for (let i = 1; i < 40; i++) {
+      const a = -1 + i / 20;
+      diskWarp(warp.amps, a, a, out);
+      most = Math.max(most, Math.hypot(out[0] - a, out[1] - a));
+      diskWarp(warp.amps, a, 1, out);
+      expect(out[0]).toBeCloseTo(a, 9);
+      expect(out[1]).toBeCloseTo(1, 9);
+    }
+    expect(most).toBeGreaterThan(0.08);
+  });
+
+  it("set() refills the same array; strength 0 is the bare kites; families differ", () => {
+    const warp = createDiskWarp();
+    const amps = warp.amps;
+    expect(warp.set([1, 0, 0, 0], 0).amps).toBe(amps);
+    const lobed = Array.from(amps);
+    warp.set([0, 0, 0, 1], 0);
+    expect(Array.from(amps)).not.toEqual(lobed);
+    warp.set([1, 0, 0, 0], 0, 0);
+    expect(Array.from(amps).every((v) => v === 0)).toBe(true);
+  });
+});
+
+describe.each(TILINGS)("the warped %s tiling", (name) => {
+  const geo = diskGeometry(name);
+  const tiler = createDiskTiler(name);
+  const [ma, mb, mc] = mirrors(geo.tiling);
+  const amps = createDiskWarp().set([0.2, 0.2, 0.2, 0.4], 0.25).amps;
+  const a = createTile();
+  const b = createTile();
+  const z = new Float64Array(2);
+
+  it("is still congruent under the rotation group (the warp respects the symmetry)", () => {
+    const r = rng(13);
+    let n = 0;
+    let moved = 0;
+    const c = createTile();
+    while (n < 300) {
+      const g = Float64Array.from([1, 0, 0, 0, 0, 0, 1, 0, 0]);
+      const len = 2 * (1 + Math.floor(r() * 4));
+      for (let i = 0; i < len; i++) mobiusCompose(g, [ma, mb, mc][Math.floor(r() * 3)], g);
+      const rad = 0.7 * Math.sqrt(r());
+      const ang = r() * 2 * Math.PI;
+      const x = rad * Math.cos(ang);
+      const y = rad * Math.sin(ang);
+      mobiusApply(g, x, y, z);
+      if (Math.hypot(z[0], z[1]) > 0.9) continue;
+      tiler.tileAt(x, y, amps, a);
+      tiler.tileAt(z[0], z[1], amps, b);
+      if (Math.min(a.u, a.v, 1 - a.u, 1 - a.v) < 1e-4) continue;
+      expect(b.u).toBeCloseTo(a.u, 4);
+      expect(b.v).toBeCloseTo(a.v, 4);
+      tiler.tileAt(x, y, null, c);
+      if (Math.hypot(c.u - a.u, c.v - a.v) > 0.01) moved++;
+      n++;
+    }
+    expect(moved).toBeGreaterThan(100); // the warp did change the kites
+  });
+
+  it("is still properly coloured across every (now curved) edge", () => {
+    const r = rng(17);
+    let crossings = 0;
+    for (let i = 0; i < 3000; i++) {
+      const rad = 0.85 * Math.sqrt(r());
+      const ang = r() * 2 * Math.PI;
+      const x0 = rad * Math.cos(ang);
+      const y0 = rad * Math.sin(ang);
+      const d = r() * 2 * Math.PI;
+      let lo = 0;
+      let hi = 0.08;
+      tiler.tileAt(x0, y0, amps, a);
+      const k0 = a.kite;
+      tiler.tileAt(x0 + hi * Math.cos(d), y0 + hi * Math.sin(d), amps, b);
+      if (b.kite === k0) continue;
+      for (let it = 0; it < 40; it++) {
+        const mid = (lo + hi) / 2;
+        tiler.tileAt(x0 + mid * Math.cos(d), y0 + mid * Math.sin(d), amps, b);
+        if (b.kite === k0) lo = mid;
+        else hi = mid;
+      }
+      tiler.tileAt(x0 + lo * Math.cos(d), y0 + lo * Math.sin(d), amps, a);
+      tiler.tileAt(x0 + hi * Math.cos(d), y0 + hi * Math.sin(d), amps, b);
+      if (a.kite === b.kite) continue;
+      expect(b.cls).not.toBe(a.cls);
+      // Both sides of an edge sit on the edge of their kite's uv square.
+      expect(Math.min(a.u, a.v, 1 - a.u, 1 - a.v)).toBeLessThan(1e-3);
+      expect(Math.min(b.u, b.v, 1 - b.u, 1 - b.v)).toBeLessThan(1e-3);
       crossings++;
     }
     expect(crossings).toBeGreaterThan(500);
