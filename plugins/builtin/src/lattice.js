@@ -25,6 +25,13 @@
  * axis light and spaces pulses ≥ 1/3 s apart; Reduce motion slows the flight (at the default
  * Speed), drops the surge, slows the rods' running light and shortens the pulses' travel.
  *
+ * Tentacle Lattice (`ctx.id` "tentacle-lattice", lib/tentacle-lattice.js) is the same module with
+ * TENTACLE defined in the shader: the rods become six swaying, tapered tentacles per node
+ * (Tentacube's creature, procedural instead of verlet), materials crossfade (createMaterials),
+ * each beat pulse makes the tentacles it passes reach and touch tips (the handshake), the pulse's
+ * node twists a quarter turn (createTwists) and the nodes nearest the camera swell with the bass
+ * (createSwell). Lattice itself renders exactly as before.
+ *
  * Everything per frame writes into preallocated arrays: frame() allocates nothing.
  */
 import { createProgram, createTarget } from "./lib/gl.js";
@@ -42,6 +49,16 @@ import {
   paletteOf,
   qualityOf,
 } from "./lib/lattice.js";
+import {
+  createMaterials,
+  createSwell,
+  createSway,
+  createTwists,
+  envelopeMax,
+  isTentacle,
+  motionParams,
+  tentacleGeometry,
+} from "./lib/tentacle-lattice.js";
 
 /** Vertical field of view (radians). */
 const FOV = (68 * Math.PI) / 180;
@@ -53,6 +70,13 @@ const HIST_N = 256;
 /** The march stops where the fog leaves under this much of a surface, or at MAX_FAR cells. */
 const FOG_CUTOFF = 0.02;
 const MAX_FAR = 36;
+/** Tentacle Lattice's march budget, × Quality's steps. */
+const TENTACLE_STEPS = 1.1;
+/** Tentacle Lattice's render scale, × Quality's (it costs several times Lattice per pixel). */
+const TENTACLE_SCALE = 0.85;
+/** Tentacle Lattice: fog density × this, and the march stops by this many cells. */
+const TENTACLE_FOG = 1.5;
+const TENTACLE_FAR = 16;
 /** Path seed: the same flight every time the visualizer starts. */
 const SEED = 0x1a77;
 
@@ -63,7 +87,9 @@ export default async function create(ctx) {
   const [vs, fs, cfs] = await Promise.all(
     ["fullscreen.vert", "lattice.frag", "composite.frag"].map((f) => ctx.assets.text(dir + f)),
   );
-  const prog = createProgram(gl, vs, fs, dir + "lattice.frag");
+  const tentacle = isTentacle(ctx.id);
+  const src = tentacle ? fs.replace("#version 300 es\n", "#version 300 es\n#define TENTACLE\n") : fs;
+  const prog = createProgram(gl, vs, src, dir + "lattice.frag");
   const comp = createProgram(gl, vs, cfs, dir + "composite.frag");
   const u = prog.u;
   const vao = gl.createVertexArray();
@@ -88,11 +114,18 @@ export default async function create(ctx) {
   const origin = new Float64Array(3);
   const source = new Float64Array(3);
   let clock = 0;
+  // Tentacle Lattice only.
+  const sway = createSway();
+  const swell = createSwell();
+  const twists = createTwists(SEED);
+  const materials = createMaterials();
+  const motion = { sway: 1, twitch: 1 };
+  let tg = tentacleGeometry(Number(ctx.params.length));
   paletteOf(ctx.params.palette, pal);
   geometry(Number(ctx.params.thickness), geo);
 
   function resize() {
-    const s = qualityOf(ctx.params.quality).scale;
+    const s = qualityOf(ctx.params.quality).scale * (tentacle ? TENTACLE_SCALE : 1);
     const w = Math.max(1, Math.round(ctx.size.width * s));
     const h = Math.max(1, Math.round(ctx.size.height * s));
     if (w !== scene.width || h !== scene.height) scene.resize(w, h);
@@ -117,6 +150,7 @@ export default async function create(ctx) {
         const period = beatIn.bpm > 0 ? 60 / beatIn.bpm : 0.5;
         cam.ahead(SOURCE_AHEAD, source);
         pulses.launch(source, level * react, ctx.reduceFlashing, period, motionScale(ctx.reduceMotion));
+        if (tentacle) twists.kick(source, motionParams(ctx.params, ctx.reduceMotion, motion).twitch, ctx.reduceMotion);
       }
       for (let c = 0; c < 3; c++) origin[c] = Math.floor(cam.pos[c]);
       pulses.step(dt, origin);
@@ -130,7 +164,9 @@ export default async function create(ctx) {
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, row, HIST_W, 1, gl.RGBA, gl.UNSIGNED_BYTE, hist.row);
 
       const q = qualityOf(ctx.params.quality);
-      const fog = fogDensity(Number(ctx.params.fog));
+      // The creatures fill the view far more than rods: thicker fog keeps it legible (and the
+      // march short).
+      const fog = fogDensity(Number(ctx.params.fog)) * (tentacle ? TENTACLE_FOG : 1);
       const v = cam.view;
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
@@ -148,8 +184,9 @@ export default async function create(ctx) {
       gl.uniform1f(u.u_tanHalf, Math.tan(FOV / 2));
       gl.uniform3f(u.u_geo, geo[0], geo[1], geo[2]);
       gl.uniform1f(u.u_fog, fog);
-      gl.uniform1f(u.u_far, Math.min(MAX_FAR, -Math.log(FOG_CUTOFF) / fog));
-      gl.uniform1i(u.u_steps, q.steps);
+      gl.uniform1f(u.u_far, Math.min(tentacle ? TENTACLE_FAR : MAX_FAR, -Math.log(FOG_CUTOFF) / fog));
+      // The tentacles leave narrower channels than the rods, so rays take smaller steps.
+      gl.uniform1i(u.u_steps, tentacle ? Math.round(q.steps * TENTACLE_STEPS) : q.steps);
       gl.uniform3f(u.u_bg, pal[0], pal[1], pal[2]);
       gl.uniform3f(u.u_surf, pal[3], pal[4], pal[5]);
       gl.uniform3f(u.u_ax, pal[6], pal[7], pal[8]);
@@ -165,6 +202,27 @@ export default async function create(ctx) {
       gl.uniform1i(u.u_hist, 0);
       gl.uniform1f(u.u_head, hist.head);
       gl.uniform1f(u.u_rows, HIST_N);
+      if (tentacle) {
+        motionParams(ctx.params, ctx.reduceMotion, motion);
+        sway.step(audio.bands, dt, motion.sway, react, ctx.reduceMotion);
+        swell.step(live ? audio.bassAtt : 1, dt, react, ctx.reduceMotion);
+        twists.step(dt, origin);
+        const w = materials.step(dt, ctx.params.material, live ? audio.rms : 0, beatIn.bpm);
+        const g = tg;
+        gl.uniform4f(u.u_tg, g.reach, g.root, g.tip, g.half);
+        gl.uniform3f(u.u_sway, sway.amp, sway.clock, sway.ripple);
+        // Bound on how far any tentacle surface gets from its strut's axis.
+        gl.uniform1f(u.u_env, envelopeMax(g, sway.amp));
+        gl.uniform1f(u.u_swell, swell.value);
+        gl.uniform4fv(u.u_twist, twists.data);
+        gl.uniform1fv(u.u_taxis, twists.axis);
+        gl.uniform4f(u.u_mat, w[0], w[1], w[2], w[3]);
+        gl.uniform3f(u.u_origin, origin[0], origin[1], origin[2]);
+        gl.uniform1f(u.u_shake, motionScale(ctx.reduceMotion));
+        gl.uniform4fv(u.u_live, pulses.live);
+        gl.uniform1fv(u.u_liveAmp, pulses.liveAmp);
+        gl.uniform1i(u.u_np, pulses.liveCount);
+      }
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
       // 2. Upsample onto the transparent canvas as premultiplied sRGB.
@@ -183,6 +241,7 @@ export default async function create(ctx) {
     params(changed) {
       if ("palette" in changed) paletteOf(ctx.params.palette, pal);
       if ("thickness" in changed) geometry(Number(ctx.params.thickness), geo);
+      if ("length" in changed) tg = tentacleGeometry(Number(ctx.params.length));
       if ("quality" in changed) resize();
     },
 

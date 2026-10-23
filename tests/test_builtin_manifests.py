@@ -50,6 +50,7 @@ def test_builtin_renderers():
         "laminar": ("webgl2", []),
         "tetraballs": ("webgl2", []),
         "lattice": ("webgl2", []),
+        "tentacle-lattice": ("webgl2", []),
     }
 
 
@@ -706,3 +707,54 @@ def test_lattice_manifest():
     assert params["quality"]["default"] == "medium"
     for f in ("fullscreen.vert", "lattice.frag", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/lattice" / f).is_file(), f
+
+
+def test_tentacle_lattice_manifest():
+    vs = {v["id"]: v for v in _manifest("builtin")["visualizers"]}
+    v, lattice = vs["tentacle-lattice"], vs["lattice"]
+    # Lattice's entry module and shaders; the variant is picked by ctx.id (lib/tentacle-lattice.js).
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Tentacle Lattice",
+        "src/lattice.js",
+        "webgl2",
+        "thumbs/tentacle-lattice.jpg",
+    )
+    assert v["description"] and "\n" not in v["description"]
+    assert "escher" not in json.dumps(v).lower()
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "speed",
+        "reactivity",
+        "length",
+        "sway",
+        "twitch",
+        "material",
+        "fog",
+        "palette",
+        "background",
+        "quality",
+    ]
+    # Lattice's params, less Rod thickness, unchanged.
+    shared = {p["id"]: p for p in lattice["params"] if p["id"] != "thickness"}
+    for pid, spec in shared.items():
+        assert params[pid] == spec, pid
+    # lib/tentacle-lattice.js LENGTH, and Sway / Twitch 0–2 (Reduce motion calms Twitch at 1).
+    length = params["length"]
+    assert (length["label"], length["min"], length["max"], length["default"]) == (
+        "Tentacle length",
+        0.3,
+        0.48,
+        0.42,
+    )
+    for pid, label in (("sway", "Sway"), ("twitch", "Twitch")):
+        p = params[pid]
+        assert (p["label"], p["type"], p["min"], p["max"], p["default"]) == (
+            label,
+            "number",
+            0,
+            2,
+            1,
+        )
+    # lib/tentacle-lattice.js MATERIALS (Tentacube's presets after "auto").
+    assert params["material"]["options"] == ["auto", "chrome", "iridescent", "emissive", "obsidian"]
+    assert params["material"]["default"] == "auto"

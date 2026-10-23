@@ -31,6 +31,7 @@ VIZ = {
     "laminar": "builtin",
     "tetraballs": "builtin",
     "lattice": "builtin",
+    "tentacle-lattice": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
     "mobius": "cosmic-peanut",
