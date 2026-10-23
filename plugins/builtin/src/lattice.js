@@ -102,15 +102,15 @@ export default async function create(ctx) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
 
   const beat = createBeat();
-  const cam = structure.camera(SEED);
-  const pulses = createPulses(structure.pulseSource);
+  let cam = structure.camera(SEED);
+  let pulses = createPulses(structure.pulseSource);
   const axis = createAxisLight();
   const beatIn = { bpm: 0, beatPhase: 0, onset: false, onsetStrength: 0 };
   const pal = new Float32Array(PALETTE_FLOATS);
   const origin = new Float64Array(3);
   const source = new Float64Array(3);
   /** @type {import('./lib/structures.js').StructureFrame} */
-  const sf = { react: 0, live: true, bpm: 0, origin, pulses };
+  const sf = { react: 0, live: true, bpm: 0, origin, pulses, cam };
   let clock = 0;
   paletteOf(ctx.params.palette, pal);
 
@@ -226,6 +226,11 @@ export default async function create(ctx) {
           gl.deleteProgram(prog.program);
           prog = next;
           structureName = name;
+          // A structure with its own free space brings its own camera path and pulse topology.
+          if (STRUCTURES[name].camera !== structure.camera) sf.cam = cam = STRUCTURES[name].camera(SEED);
+          if (STRUCTURES[name].pulseSource !== structure.pulseSource) {
+            sf.pulses = pulses = createPulses(STRUCTURES[name].pulseSource);
+          }
           structure = STRUCTURES[name];
           runtime = structure.runtime(ctx);
           resize();
