@@ -12,6 +12,7 @@ import {
   paletteOf,
   cardHeight,
   CARD_HALF,
+  CARD_RISE,
   drosteAlpha,
   drosteAt,
   expandAmps,
@@ -402,7 +403,7 @@ describe("relief: the carved block's height field (mirrors tess.glsl tessRelief)
         for (let x = -CARD_HALF; x <= CARD_HALF + 1e-9; x += CARD_HALF / 20) {
           const h = cardHeight(x, th, hop);
           expect(h).toBeGreaterThanOrEqual(-1e-12);
-          expect(h).toBeLessThanOrEqual((2 * CARD_HALF + hop) * Math.sin(th) + 1e-9);
+          expect(h).toBeLessThanOrEqual(CARD_RISE * (2 * CARD_HALF + hop) * Math.sin(th) + 1e-9);
         }
       }
       for (const x of [-CARD_HALF, 0.1, CARD_HALF]) {
@@ -410,9 +411,11 @@ describe("relief: the carved block's height field (mirrors tess.glsl tessRelief)
         expect(cardHeight(x, Math.PI, hop)).toBeCloseTo(0, 9);
       }
     }
-    // Edge-on, one edge stands up the full card width; the axis is half way.
-    expect(cardHeight(CARD_HALF, Math.PI / 2, 0) + cardHeight(-CARD_HALF, Math.PI / 2, 0)).toBeCloseTo(2 * CARD_HALF, 9);
-    expect(cardHeight(0, Math.PI / 2, 0)).toBeCloseTo(CARD_HALF, 9);
+    // Edge-on, one edge stands up the card's (shallowed) width; the axis is half way. The rise is
+    // shallowed so a card never stands as a wall far taller than the carving.
+    expect(cardHeight(CARD_HALF, Math.PI / 2, 0) + cardHeight(-CARD_HALF, Math.PI / 2, 0)).toBeCloseTo(2 * CARD_RISE * CARD_HALF, 9);
+    expect(cardHeight(0, Math.PI / 2, 0)).toBeCloseTo(CARD_RISE * CARD_HALF, 9);
+    expect(CARD_RISE).toBeLessThanOrEqual(0.4);
   });
 
   it("reliefBound covers every height the field can take (the march starts there)", () => {

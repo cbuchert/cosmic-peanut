@@ -497,6 +497,9 @@ export const RELIEF_BEVEL = 0.05;
 export const RELIEF_DOME = 0.25;
 /** Half a card's width across its turning axis (plane units): longer tips are flattened. */
 export const CARD_HALF = 0.36;
+/** A turning card rises this fraction of a rigid card's height: its squeeze across the axis is
+ * true, its height shallow, so it never stands as a wall far above the carving. */
+export const CARD_RISE = 0.3;
 
 /** @param {number} x @param {number} w ease-out ramp 0 → 1 over w, flat at the top */
 const ramp = (x, w) => {
@@ -518,15 +521,15 @@ export const reliefSlope = (d, profile) =>
 
 /**
  * Height of a card (a tile turning over about its own axis, θ 0 → π) above its bed, at card
- * coordinate x across the axis. The axis rises to CARD_HALF + hop with sin θ so no edge dips
- * under the surface; the card is drawn unmirrored on its back (the tile seen at π is the tile
+ * coordinate x across the axis, × CARD_RISE. The axis rises to CARD_HALF + hop with sin θ so no
+ * edge dips under the surface; the card is drawn unmirrored on its back (the tile seen at π is the tile
  * itself in its new colour), so the slope's sign turns over edge-on.
  * @param {number} x @param {number} theta @param {number} hop extra rise mid-turn
  */
 export function cardHeight(x, theta, hop) {
   const s = Math.sin(theta);
   const xc = Math.max(-CARD_HALF, Math.min(CARD_HALF, x));
-  return s * (CARD_HALF + hop) + xc * s * (Math.cos(theta) >= 0 ? 1 : -1);
+  return CARD_RISE * (s * (CARD_HALF + hop) + xc * s * (Math.cos(theta) >= 0 ? 1 : -1));
 }
 
 /**
@@ -552,4 +555,4 @@ export function reliefHeight(relief, t) {
  * @param {boolean} flipping a card is turning @param {number} hop
  */
 export const reliefBound = (relief, liftMax, popMax, flipping, hop) =>
-  relief * (RELIEF_BLOCK + Math.max(0, liftMax) + Math.max(0, popMax)) + (flipping ? 2 * CARD_HALF + hop : 0);
+  relief * (RELIEF_BLOCK + Math.max(0, liftMax) + Math.max(0, popMax)) + (flipping ? CARD_RISE * (2 * CARD_HALF + hop) : 0);

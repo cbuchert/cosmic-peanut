@@ -285,6 +285,8 @@ export const BEAT_ACCENT = 0.7;
 /** Reduce motion: lift this fraction, spread this many times slower. */
 export const REDUCED_LIFT = 0.4;
 export const REDUCED_SPREAD = 2;
+/** Reduce flashing: lifts and pops this much lower (their shadows pulse the mean light less). */
+export const REDUCED_FLASH_LIFT = 0.4;
 /** Overlapping waves add up, to at most this many peaks. */
 const LIFT_CAP = 1.5;
 
@@ -840,9 +842,10 @@ export function createTessState() {
       waveIn.reduceMotion = o.reduceMotion;
       wave.step(dt, waveIn);
       const hv = heave.step(live ? audio.bands : quiet, dt, o.reactivity);
+      const calm = o.reduceFlashing ? REDUCED_FLASH_LIFT : 1;
       let top = 0;
       for (let b = 0; b < LIFT_BINS; b++) {
-        s.lift[b] = wave.lift[b] + hv[b];
+        s.lift[b] = calm * (wave.lift[b] + hv[b]);
         top = Math.max(top, s.lift[b]);
       }
       popIn.onset = beatIn.onset;
@@ -853,7 +856,10 @@ export function createTessState() {
       popIn.reduceMotion = o.reduceMotion;
       pops.step(dt, popIn);
       let pop = 0;
-      for (let k = 0; k < POP_SLOTS; k++) pop += pops.pops[k * 4];
+      for (let k = 0; k < POP_SLOTS; k++) {
+        pops.pops[k * 4] *= calm;
+        pop += pops.pops[k * 4];
+      }
       s.relief = reliefParam(o.relief ?? 0);
       s.flipHop = flipHop(o.reduceFlashing);
       s.flipping = inversion.active;

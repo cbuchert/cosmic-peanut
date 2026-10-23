@@ -1,6 +1,7 @@
 // @ts-check
 // The music that drives the carved relief (lib/tess-music.js): beat waves of lifting tiles,
 // the spectrum's heave by ring, onset pops and the card-flip wave.
+// @ts-expect-error -- a Node builtin (tests run in Node); the web tsconfig has no @types/node.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
@@ -15,6 +16,7 @@ import {
   LIFT_VARY,
   lightDir,
   RELIEF_DEFAULT,
+  REDUCED_FLASH_LIFT,
   reliefParam,
   flipAngle,
   flipHop,
@@ -36,7 +38,7 @@ import {
   WAVE_SETTLE,
   wavePulse,
 } from "./tess-music.js";
-import { CARD_HALF, RELIEF_BEVEL, RELIEF_BLOCK, RELIEF_DOME } from "./tess.js";
+import { CARD_HALF, CARD_RISE, RELIEF_BEVEL, RELIEF_BLOCK, RELIEF_DOME } from "./tess.js";
 
 const DT = 1 / 60;
 
@@ -402,7 +404,7 @@ describe("tess state with relief", () => {
       for (const v of s.lift) top = Math.max(top, v);
       let pop = 0;
       for (let k = 0; k < POP_SLOTS; k++) pop += s.pops[k * 4];
-      const h = s.relief * (RELIEF_BLOCK + top * 1.3 + pop) + (s.flipping ? 2 * CARD_HALF + s.flipHop : 0);
+      const h = s.relief * (RELIEF_BLOCK + top * 1.3 + pop) + (s.flipping ? CARD_RISE * (2 * CARD_HALF + s.flipHop) : 0);
       expect(s.reliefMax).toBeGreaterThanOrEqual(h - 1e-9);
     }
     expect(flipped).toBe(true);
@@ -417,6 +419,17 @@ describe("tess state with relief", () => {
       peak = Math.max(peak, s.relief * s.lift[0]);
     }
     expect(peak).toBeGreaterThanOrEqual(0.1); // tiles are 0.5 across
+  });
+
+  it("Reduce flashing lowers the lifts (their shadows pulse the light less)", () => {
+    const peak = (/** @type {boolean} */ rf) => {
+      const st = createTessState();
+      let m = 0;
+      for (let i = 0; i < 240; i++) m = Math.max(m, st.step(drums(i), DT, opts({ relief: 0.6, reduceFlashing: rf })).lift[0]);
+      return m;
+    };
+    expect(REDUCED_FLASH_LIFT).toBeLessThanOrEqual(0.5);
+    expect(peak(true)).toBeCloseTo(REDUCED_FLASH_LIFT * peak(false), 5);
   });
 
   it("silence settles the relief flat", () => {
@@ -438,6 +451,7 @@ describe("tess.glsl relief section", () => {
     expect(def("RELIEF_BEVEL")).toBe(RELIEF_BEVEL);
     expect(def("RELIEF_DOME")).toBe(RELIEF_DOME);
     expect(def("CARD_HALF")).toBe(CARD_HALF);
+    expect(def("CARD_RISE")).toBe(CARD_RISE);
     expect(def("LIFT_VARY")).toBe(LIFT_VARY);
     expect(def("TESS_LIFT_BINS")).toBe(LIFT_BINS);
     expect(def("TESS_POP_SLOTS")).toBe(POP_SLOTS);

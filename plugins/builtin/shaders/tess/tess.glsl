@@ -287,6 +287,7 @@ vec4 tessShade(vec2 p, float px) { return tessShade(p, mat2(px)); }
 #define RELIEF_BEVEL 0.05
 #define RELIEF_DOME 0.25
 #define CARD_HALF 0.36
+#define CARD_RISE 0.3
 #define LIFT_VARY 0.3
 #define POP_BAND 0.08
 #define POP_DENSITY 0.3
@@ -385,8 +386,8 @@ TessPlate tessPlate(vec2 p) {
     }
     r.t = t2;
     float sg = cs >= 0.0 ? 1.0 : -1.0;
-    h += sn * (CARD_HALF + u_tRelief.w) + clamp(xc, -CARD_HALF, CARD_HALF) * sn * sg;
-    gq = abs(xc) < CARD_HALF ? (sn * sg / ac) * b : vec2(0.0);
+    h += CARD_RISE * (sn * (CARD_HALF + u_tRelief.w) + clamp(xc, -CARD_HALF, CARD_HALF) * sn * sg);
+    gq = abs(xc) < CARD_HALF ? (CARD_RISE * sn * sg / ac) * b : vec2(0.0);
     C = mat2(1.0) + outerProduct(b, b) * (1.0 / ac - 1.0);
     r.J = C * J0;
   }
