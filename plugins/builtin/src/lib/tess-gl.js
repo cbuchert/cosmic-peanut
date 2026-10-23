@@ -13,12 +13,23 @@
  *   tess.render(s, (gl, u, w, h) => { gl.uniform2f(u.u_O, x, y); gl.uniform3f(u.u_tRing, …); });
  *
  * The pipeline sets `u_res` (the print target's size) itself. Nothing is allocated per frame.
+ *
+ * Relief (`{ relief: true }`): the surface is compiled twice more with `#define TESS_RELIEF`, once
+ * with `TESS_HEIGHT_PASS` too. While the state's `relief` is above 0 each frame first renders the
+ * height pass into a HEIGHT_SCALE target (the surface writes tessRelief's height / u_tRelief.z to
+ * red), then the relief program into the print target with that bound as `u_tHeight` (texel size
+ * `u_tHeightTexel`); at relief 0 the plain program runs exactly as without relief.
  */
 import { createProgram, createTarget } from "./gl.js";
 
 const DIR = "shaders/tess/";
 /** Paper texture strength in the composite. */
 const GRAIN = 1;
+/** Height pass resolution, relative to the print target (heights are smooth; the march samples it). */
+export const HEIGHT_SCALE = 0.35;
+
+/** Insert `#define`s after a shader's `#version` line. @param {string} src @param {string[]} names */
+export const withDefines = (src, names) => src.replace(/^(#version[^\n]*\n)/, (v) => v + names.map((n) => `#define ${n}\n`).join(""));
 
 /**
  * @typedef {ReturnType<typeof import('./tess-music.js').createTessState>} TessState
@@ -29,12 +40,20 @@ const GRAIN = 1;
  * @param {import('../../tidalviz').VisualizerContext} ctx
  * @param {string} surface path of the surface fragment shader (it contains `// #include tess`)
  */
-export async function createTessPipeline(ctx, surface) {
+export async function createTessPipeline(ctx, surface, { relief = false } = {}) {
   const gl = /** @type {WebGL2RenderingContext} */ (ctx.gl);
   const [vs, engine, paperFs, surfFs] = await Promise.all(
     [DIR + "fullscreen.vert", DIR + "tess.glsl", DIR + "paper.frag", surface].map((f) => ctx.assets.text(f)),
   );
-  const prog = createProgram(gl, vs, surfFs.replace("// #include tess", engine), surface);
+  const src = surfFs.replace("// #include tess", engine);
+  const prog = createProgram(gl, vs, src, surface);
+  const rel = relief
+    ? {
+        main: createProgram(gl, vs, withDefines(src, ["TESS_RELIEF"]), `${surface} (relief)`),
+        height: createProgram(gl, vs, withDefines(src, ["TESS_RELIEF", "TESS_HEIGHT_PASS"]), `${surface} (relief height)`),
+        target: createTarget(gl),
+      }
+    : null;
   const paper = createProgram(gl, vs, paperFs, DIR + "paper.frag");
   const u = prog.u;
   const vao = gl.createVertexArray();
@@ -44,6 +63,39 @@ export async function createTessPipeline(ctx, surface) {
   function resize(/** @type {number} */ s = scale) {
     scale = s;
     target.resize(Math.max(1, Math.round(ctx.size.width * scale)), Math.max(1, Math.round(ctx.size.height * scale)));
+    rel?.target.resize(Math.max(1, Math.round(target.width * HEIGHT_SCALE)), Math.max(1, Math.round(target.height * HEIGHT_SCALE)));
+  }
+
+  /**
+   * Every engine uniform of a program, from the state.
+   * @param {Record<string, WebGLUniformLocation | null>} u @param {TessState} s @param {number} w canvas width
+   */
+  function upload(u, s, w) {
+    gl.uniform1i(u.u_tGroup, s.group.name === "p3" ? 1 : 0);
+    gl.uniform1i(u.u_tN, s.nTerms);
+    gl.uniform4fv(u.u_tK, s.k);
+    gl.uniform4fv(u.u_tAB, s.ab);
+    gl.uniform3fv(u.u_tBlend, s.blend);
+    gl.uniform3fv(u.u_tPaper, s.paper);
+    gl.uniform3fv(u.u_tInk, s.ink);
+    gl.uniform3fv(u.u_tCls, s.cls);
+    gl.uniform3fv(u.u_tClsNext, s.clsNext);
+    gl.uniform3fv(u.u_tAvg, s.avg);
+    gl.uniform3fv(u.u_tInvert, s.invert);
+    gl.uniform1f(u.u_tInkW, s.inkW);
+    gl.uniform1f(u.u_tHatch, s.hatch);
+    gl.uniform2fv(u.u_tReg, s.reg);
+    gl.uniform1fv(u.u_tBands, s.bands);
+    gl.uniform4fv(u.u_tFeatA, s.featA);
+    gl.uniform4fv(u.u_tFeatB, s.featB);
+    gl.uniform1f(u.u_tPxScale, target.width / Math.max(1, w));
+  }
+
+  /** The relief uniforms. @param {Record<string, WebGLUniformLocation | null>} u @param {TessState} s */
+  function uploadRelief(u, s) {
+    gl.uniform4f(u.u_tRelief, s.relief, s.profile, s.reliefMax, s.flipHop);
+    gl.uniform1fv(u.u_tLift, s.lift);
+    gl.uniform4fv(u.u_tPop, s.pops);
   }
   resize();
 
@@ -60,30 +112,39 @@ export async function createTessPipeline(ctx, surface) {
       gl.disable(gl.BLEND);
       gl.bindVertexArray(vao);
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
-      gl.viewport(0, 0, target.width, target.height);
-      gl.useProgram(prog.program);
-      gl.uniform2f(u.u_res, target.width, target.height);
-      gl.uniform1i(u.u_tGroup, s.group.name === "p3" ? 1 : 0);
-      gl.uniform1i(u.u_tN, s.nTerms);
-      gl.uniform4fv(u.u_tK, s.k);
-      gl.uniform4fv(u.u_tAB, s.ab);
-      gl.uniform3fv(u.u_tBlend, s.blend);
-      gl.uniform3fv(u.u_tPaper, s.paper);
-      gl.uniform3fv(u.u_tInk, s.ink);
-      gl.uniform3fv(u.u_tCls, s.cls);
-      gl.uniform3fv(u.u_tClsNext, s.clsNext);
-      gl.uniform3fv(u.u_tAvg, s.avg);
-      gl.uniform3fv(u.u_tInvert, s.invert);
-      gl.uniform1f(u.u_tInkW, s.inkW);
-      gl.uniform1f(u.u_tHatch, s.hatch);
-      gl.uniform2fv(u.u_tReg, s.reg);
-      gl.uniform1fv(u.u_tBands, s.bands);
-      gl.uniform4fv(u.u_tFeatA, s.featA);
-      gl.uniform4fv(u.u_tFeatB, s.featB);
-      gl.uniform1f(u.u_tPxScale, target.width / Math.max(1, w));
-      setSurface(gl, u, target.width, target.height);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      if (rel && s.relief > 0) {
+        const hu = rel.height.u;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, rel.target.fbo);
+        gl.viewport(0, 0, rel.target.width, rel.target.height);
+        gl.useProgram(rel.height.program);
+        gl.uniform2f(hu.u_res, rel.target.width, rel.target.height);
+        upload(hu, s, w);
+        uploadRelief(hu, s);
+        setSurface(gl, hu, rel.target.width, rel.target.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+        const ru = rel.main.u;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+        gl.viewport(0, 0, target.width, target.height);
+        gl.useProgram(rel.main.program);
+        gl.uniform2f(ru.u_res, target.width, target.height);
+        upload(ru, s, w);
+        uploadRelief(ru, s);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, rel.target.tex);
+        gl.uniform1i(ru.u_tHeight, 1);
+        gl.uniform2f(ru.u_tHeightTexel, 1 / rel.target.width, 1 / rel.target.height);
+        setSurface(gl, ru, target.width, target.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      } else {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+        gl.viewport(0, 0, target.width, target.height);
+        gl.useProgram(prog.program);
+        gl.uniform2f(u.u_res, target.width, target.height);
+        upload(u, s, w);
+        setSurface(gl, u, target.width, target.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, w, h);
@@ -97,6 +158,11 @@ export async function createTessPipeline(ctx, surface) {
     },
     dispose() {
       target.dispose();
+      if (rel) {
+        rel.target.dispose();
+        gl.deleteProgram(rel.main.program);
+        gl.deleteProgram(rel.height.program);
+      }
       gl.deleteVertexArray(vao);
       gl.deleteProgram(prog.program);
       gl.deleteProgram(paper.program);
