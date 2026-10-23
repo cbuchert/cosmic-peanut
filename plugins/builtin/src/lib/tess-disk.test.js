@@ -49,9 +49,12 @@ describe("params", () => {
   const ctx = { size: { height: 1440 }, reduceMotion: true, reduceFlashing: false };
   it("reads the visualizer's params into the tess state's options, in place", () => {
     const o = createDiskOptions();
-    const p = { tiling: "{4,5}", palette: "ochre", reactivity: 1.5, speed: 0.5, morph: 0.3, ink: 1.2, hatching: 0.4, quality: "low" };
+    const p = { tiling: "{4,5}", palette: "ochre", reactivity: 1.5, speed: 0.5, morph: 0.3, ink: 1.2, hatching: 0.4, quality: "low", scene: "flat", camera: "still", spin: 1.6 };
     expect(readDiskParams(p, ctx, o)).toBe(o);
     expect(o).toEqual({
+      scene: "flat",
+      camera: "still",
+      spin: 1.6,
       tiling: "{4,5}",
       // Three colour classes: the engine's "p3" (the flat warp it also selects isn't drawn here).
       symmetry: "p3",
@@ -69,6 +72,7 @@ describe("params", () => {
   it("falls back to the defaults for unknown or missing values", () => {
     const o = readDiskParams({ tiling: "{9,9}" }, ctx, createDiskOptions());
     expect(o.tiling).toBe("{7,3}");
+    expect([o.scene, o.camera, o.spin]).toEqual(["sphere", "auto", 1]);
     expect([o.reactivity, o.speed, o.morph, o.ink, o.hatching]).toEqual([1, 1, 0.7, 1, 0.6]);
     expect(o.palette).toBe("four-block");
   });
