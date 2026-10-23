@@ -28,6 +28,8 @@ write one GLSL file, one JS module and one table entry. Shading work only touche
 | `src/lib/lattice-pulses.js` | shared | `createPulses(snap)`: the beat-pulse pool. |
 | `src/lib/lattice-beat.js`, `lattice-history.js`, `lattice.js` | shared | Beat envelope, history ring, params, palettes, axis light. |
 | `src/lib/tentacle-lattice.js` | tentacle | Pure tested logic mirrored by `structure-tentacle.glsl`. |
+| `src/lib/strut-camera.js` | strut lattices | `createChannelCamera(seed, walk)`: the cubic camera's motion over any channel walk. |
+| `src/lib/structure-{octet,diamond,bitruncated}.js` | strut lattices | Runtime, clearance, walk, and tested JS mirrors of the shader's distance and pulse metric. |
 
 The scene shader is assembled as `assembleShader(lattice.frag, { common, structure, march, shade },
 entry.defines)`. Each `// #include <name>` line is replaced by that part. Each define becomes
@@ -179,6 +181,35 @@ with an eased amplitude. The shader lights a surface point by how close
   - For a fractal: snap the source to the current zoom centre and measure Euclidean distance.
 
   Fronts are then rings spreading over the walls instead of lights running along struts.
+
+## Strut lattices: octet, diamond, bitruncated
+
+Three more options of Lattice's Structure param, all period 2 (the shader adds `mod(u_origin, 2)`
+back so the integer origin can move freely), exact SDFs (`structStep(d) = d`), and no beat
+reaction besides the pulses.
+
+| | Octet truss | Diamond | Bitruncated cubic honeycomb |
+| --- | --- | --- | --- |
+| Nodes | FCC (even coordinate sum), rounded cubes | A = FCC, B = A + ½: atoms (spheres) | truncated-octahedron vertices: small balls |
+| Struts | 12 per node, face diagonals, length √2 | 4 per atom, ⟨111⟩, length √3/2 | 4 per vertex, the cells' edges, length √2/2 |
+| Distance | 6 line families, 2 roundings each | nearest A and B atoms, their 8 bonds | fold into a chamber: 2 edges, 1 vertex |
+| Axis bands | by the coordinate plane a strut lies in | 3 bond directions → x/y/z; ⟨111⟩ bonds by layer | by the plane of the edge's face |
+| Pulse metric | exact (FCC hops, nearer strut end) | exact (Σ\|d·vⱼ + σ/4\|) | estimated at vertices (sodalite net) |
+| Camera channels | ⟨110⟩, 0.37 from strut axes | ⟨110⟩, 0.61 | ⟨100⟩ 0.35, ⟨111⟩ 0.61, via cell centres |
+| Worst clearance flown | 0.19 | 0.49 | 0.28 |
+
+- **Camera:** `lib/strut-camera.js` is `lattice-camera.js` with the walk handed in as a
+  `ChannelWalk` (`start`, `next(turn, rand, out)` → 1 turned, 0 straight at a junction, −1 no
+  junction here). Same B-spline, beat-decided turns, speed and view springs and substeps.
+  `stepWalk(steps, start, dir, every)` covers walks whose junctions repeat every `every` points
+  (octet, bitruncated); diamond walks the dual network's bond midpoints, where every point is a
+  junction of three channels. Turns are at most 90° (60° for octet and diamond).
+- **Tests:** `strut-structures.test.js` checks each JS mirror against brute force over explicit
+  nodes and struts (distance exact, march-safe, nearest-node pulse source, graph distance by BFS),
+  and flies each walk with a beat every half second at the worst-case geometry.
+  `strut-camera.test.js` holds each camera to the cubic smoothness bounds.
+- **Cost** (1440p, medium, GPU synced): p50 / p99 per frame octet 4.75 / 6.25 ms, diamond
+  8 / 9.5, bitruncated 4.5 / 6.25 (cubic 1.5 / 2). Diamond is the dearest: 8 bonds a step.
 
 ## Identity stills (proving a refactor changes no pixels)
 
