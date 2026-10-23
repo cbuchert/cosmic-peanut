@@ -3,6 +3,39 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Lattice camera: smooth, with turns on the beat (2026-10-22)
+
+The user, watching Tentacle Lattice: "It's jumpy." Diagnosis came first: 60 s at 120 BPM through
+the real chain (beat envelope → `flySpeed` → `update`), at 60 Hz and with 33–50 ms hitches.
+
+| | Before | After |
+| --- | --- | --- |
+| Acceleration along the path (cells/s²) | 10.4 (12.3 with hitches), 50 ms after each beat | 0.32 |
+| Jerk (cells/s³) | 327 (655 with hitches), 83 ms after each beat | 17.8 |
+| View angular velocity (rad/s) | 1.97 | 1.45 |
+| View angular acceleration (rad/s²) | 13.0 | 3.1 |
+
+- **Root cause: the beat speed surge.** Each beat added +50 % speed through the beat envelope's
+  80 ms smoothstep, so acceleration reached about 10 cells/s². A smoothstep's second derivative
+  jumps, so jerk spiked at both ends of the rise. That is a lurch at 2 Hz. The view was locked to
+  the path's look-ahead chord, so its turn rate scaled with speed and every surge on a curve
+  whipped it. The path itself was smooth (jerk 9 at constant speed). Hitches doubled the spikes
+  because each frame took the surge's step whole. The B-spline's local support already kept new
+  control points from moving the curve near the camera; turns were seeded, not on the beat.
+- **Fix (`lib/lattice-camera.js`):**
+  - The speed goes through two critically damped stages.
+  - The view turns through a critically damped angular spring toward the look-ahead point, and
+    banks up to 0.18 rad.
+  - Everything runs in substeps of 1/240 s or less.
+  - `beat()` decides the next turn, placed at the next control point appended, about four cells
+    ahead, so it never touches the visible path. In silence it turns every 8 cells.
+  - The remaining sideways acceleration (≤ 4.2) is the channel corners' centripetal floor.
+- **Tests** (`lattice-camera.test.js`): the 60 s beat run's bounds; frame-rate independence
+  (hitched versus 60 Hz: exact for steady input, ≤ 0.02 cell and 0.03 rad with beats, which the
+  hitch can delay by two frames); beat-decided turns, with idle turns only in silence. Channel
+  clearance (rods, and Tentacle Lattice's worst-case tentacle envelope) still holds per structure.
+  Stills of both visualizers change, as expected.
+
 ## Lattice structure seam (2026-10-22)
 
 The Lattice family is split so structures and shading can change independently:

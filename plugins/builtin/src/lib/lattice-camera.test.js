@@ -1,6 +1,8 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
+import { createBeat } from "./lattice-beat.js";
 import { LOOK_PITCH, LOOK_RATE, createCamera } from "./lattice-camera.js";
+import { flySpeed } from "./lattice.js";
 
 const HZ = 240;
 
@@ -154,5 +156,116 @@ describe("createCamera look-around", () => {
     expect(firstStep).toBeLessThan(Math.abs(yaw0) * 0.001);
     expect(Math.abs(cam.lookYaw)).toBeLessThan(Math.abs(yaw0) * 0.03);
     expect(Math.abs(cam.lookPitch)).toBeLessThan(Math.abs(pitch0) * 0.03);
+  });
+});
+
+/**
+ * Fly 60 s through the entry's chain at 120 BPM — beat envelope → flySpeed (Speed 1,
+ * Reactivity `react`) → update, with a beat call on every beat. With `uneven`, every 37 frames
+ * one 50 ms frame stands in for three and, 37 frames on, one 33 ms frame for two, so its clock
+ * meets the 60 Hz clock again after each hitch. Records the worst acceleration (along the path
+ * and across it), jerk, angular velocity and angular acceleration of the view direction, and
+ * the position and view direction at every 60 Hz tick both clocks share.
+ * @param {{ uneven?: boolean, react?: number, bpm?: number }} o
+ */
+function beatRun(o) {
+  const cam = createCamera(0x1a77);
+  const beat = createBeat();
+  const bpm = o.bpm ?? 120;
+  const a = { bpm, beatPhase: 0, onset: false, onsetStrength: 0 };
+  let tick = 0; // 60 Hz ticks elapsed
+  let frame = 0;
+  /** @type {number[] | null} */ let pv = null;
+  /** @type {number[] | null} */ let ac0 = null;
+  /** @type {number[]} */ let p0 = Array.from(cam.pos);
+  /** @type {number[]} */ let f0 = Array.from(cam.view.fwd);
+  let w0 = -1;
+  let dt0 = 1 / 60;
+  const worst = { along: 0, across: 0, jerk: 0, w: 0, wacc: 0 };
+  /** @type {Map<number, number[]>} */
+  const at = new Map();
+  while (tick < 3600) {
+    const n = o.uneven && frame % 37 === 13 ? (frame % 74 === 13 ? 3 : 2) : 1;
+    const dt = n / 60;
+    tick += n;
+    frame++;
+    const t = tick / 60;
+    a.beatPhase = bpm > 0 ? ((t * bpm) / 60) % 1 : 0;
+    beat.step(a, dt);
+    if (beat.beat) cam.beat();
+    cam.update(dt, flySpeed(1, beat.env, o.react ?? 1, false));
+    const p = Array.from(cam.pos);
+    const f = Array.from(cam.view.fwd);
+    at.set(tick, [...p, ...f]);
+    const v = p.map((x, i) => (x - p0[i]) / dt);
+    const speed = Math.hypot(...v);
+    if (pv) {
+      const ac = v.map((x, i) => (x - /** @type {number[]} */ (pv)[i]) / ((dt + dt0) / 2));
+      const along = (ac[0] * v[0] + ac[1] * v[1] + ac[2] * v[2]) / speed;
+      worst.along = Math.max(worst.along, Math.abs(along));
+      worst.across = Math.max(worst.across, Math.hypot(...ac.map((x, i) => x - (along * v[i]) / speed)));
+      if (ac0) worst.jerk = Math.max(worst.jerk, Math.hypot(...ac.map((x, i) => (x - /** @type {number[]} */ (ac0)[i]) / dt)));
+      ac0 = ac;
+    }
+    pv = v;
+    const w = Math.acos(Math.min(1, f[0] * f0[0] + f[1] * f0[1] + f[2] * f0[2])) / dt;
+    worst.w = Math.max(worst.w, w);
+    if (w0 >= 0) worst.wacc = Math.max(worst.wacc, Math.abs(w - w0) / dt);
+    w0 = w;
+    p0 = p;
+    f0 = f;
+    dt0 = dt;
+  }
+  return { worst, cam, at };
+}
+
+describe("createCamera smoothness over a beat run", () => {
+  it("surges smoothly: small acceleration along the path, small jerk and angular acceleration", () => {
+    const { worst } = beatRun({});
+    // Before: 10 cells/s² of acceleration just after each beat (the surge's 80 ms smoothstep,
+    // taken whole), jerk 327 cells/s³, angular velocity 1.97 rad/s, angular acceleration 13 rad/s².
+    expect(worst.along).toBeLessThan(1);
+    // Across the path it's the corners' centripetal acceleration (curvature ≈ 2.9 at ~1.2
+    // cells/s): the channel's floor, not a lurch.
+    expect(worst.across).toBeLessThan(5);
+    expect(worst.jerk).toBeLessThan(25);
+    expect(worst.w).toBeLessThan(1.6);
+    expect(worst.wacc).toBeLessThan(4);
+  });
+
+  it("is frame-rate independent: hitches in dt don't move it off the 60 Hz flight", () => {
+    /** Worst position and view-direction gap at the ticks both runs share. */
+    const gap = (/** @type {Map<number, number[]>} */ even, /** @type {Map<number, number[]>} */ hitchy) => {
+      let dp = 0;
+      let df = 0;
+      let shared = 0;
+      for (const [tick, q] of hitchy) {
+        const r = even.get(tick);
+        if (!r) continue;
+        shared++;
+        dp = Math.max(dp, Math.hypot(q[0] - r[0], q[1] - r[1], q[2] - r[2]));
+        df = Math.max(df, Math.acos(Math.min(1, q[3] * r[3] + q[4] * r[4] + q[5] * r[5])));
+      }
+      expect(shared).toBeGreaterThan(3000);
+      return { dp, df };
+    };
+    // Steady input: the substepped integration lands on the same flight.
+    const steady = gap(beatRun({ bpm: 0, react: 0 }).at, beatRun({ bpm: 0, react: 0, uneven: true }).at);
+    expect(steady.dp).toBeLessThan(1e-3);
+    expect(steady.df).toBeLessThan(1e-3);
+    // With beats, a hitch holds one target speed for its whole frame and can delay a beat by up to
+    // two frames; that's all that differs.
+    const beats = gap(beatRun({}).at, beatRun({ uneven: true }).at);
+    expect(beats.dp).toBeLessThan(0.02);
+    expect(beats.df).toBeLessThan(0.03);
+  });
+
+  it("decides turns on beats; in silence it still turns now and then", () => {
+    const beats = beatRun({}).cam;
+    expect(beats.beatTurns).toBeGreaterThanOrEqual(8);
+    expect(beats.idleTurns).toBe(0);
+    const silent = beatRun({ bpm: 0, react: 0 }).cam;
+    expect(silent.beatTurns).toBe(0);
+    expect(silent.idleTurns).toBeGreaterThanOrEqual(3);
   });
 });

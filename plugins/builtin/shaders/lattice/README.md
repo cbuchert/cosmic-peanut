@@ -125,16 +125,34 @@ is tested as soon as it's in the table.
 
 `camera(seed)` returns an object with:
 - `pos`: Float64Array(3), world cells.
-- `view`: `{ fwd, up, right }`, unit and orthogonal, with the drag look-around applied. These are
-  what the shader gets.
-- `fwd`, `up`, `right`: the path's own basis.
-- `update(dt, speed)`: fly `speed × dt` cells along the path.
+- `view`: `{ fwd, up, right }`, unit and orthogonal, with the bank and the drag look-around
+  applied. These are what the shader gets.
+- `fwd`, `up`, `right`: the camera's own basis, unbanked.
+- `update(dt, speed)`: fly on for `dt` seconds toward the target `speed` (cells/s). It must be
+  smooth on its own: the beat surge arrives as an 80 ms step in the target, and frames can hitch
+  to 50 ms. Integrate in substeps and filter the speed and the view (see below).
+- `beat()`: called on every beat. Use it to decide the next turn, placed beyond the view.
 - `ahead(dist, out)`: the path point `dist` cells ahead (beat pulses launch 1.6 cells ahead).
 - `pointer(e)`: drag to look around; it eases back on release.
 
 `createCamera` (cubic channels) walks cell centre to cell centre through the free channels between
-the struts. Any structure with a different free space needs its own provider, e.g. the tunnel
-centre line of a minimal surface, or a zoom path for a fractal. It must keep `clearance` positive.
+the struts, smoothed by a C2 cubic B-spline. Its smoothness design, which any new provider should
+copy:
+- **Turns are decided on the beat.** A turn is placed at the next control point appended, about
+  four cells ahead. A B-spline segment depends only on its four points, so nothing the camera is on
+  or looking at moves.
+- **Speed** goes through two critically damped stages (rate 5/s), so the beat surge is a push, not
+  a lurch.
+- **The view** turns toward the point 1.2 cells ahead through a critically damped angular spring
+  (6/s), banks up to 0.18 rad, and carries `up` by parallel transport.
+- **Substeps:** everything runs in steps of 1/240 s or less.
+
+`src/lib/lattice-camera.test.js` has the smoothness tests to reuse: a 60 s, 120 BPM run bounding
+acceleration along the path (< 1 cell/s²), jerk (< 25), angular velocity (< 1.6 rad/s) and angular
+acceleration (< 4 rad/s²); frame-rate independence; and beat-decided turns.
+
+Any structure with a different free space needs its own provider, e.g. the tunnel centre line of a
+minimal surface, or a zoom path for a fractal. It must keep `clearance` positive.
 
 ## Pulse topology
 

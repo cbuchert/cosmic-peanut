@@ -9,9 +9,10 @@
  * fog to the palette's background (or to transparent, Background "none"). A full-resolution
  * composite (post.frag) upsamples it to premultiplied sRGB.
  *
- * Motion (lib/lattice-camera.js): the camera flies a seeded walk through the free channels between
- * the rods (cell centre to cell centre, turning at intersections), smoothed by a cubic B-spline and
- * flown by arc length, looking a little ahead so turns are eased. Drag to look around; it eases
+ * Motion (lib/lattice-camera.js): the camera flies a walk through the free channels between the
+ * rods (cell centre to cell centre), whose turns are decided on beats and placed ahead of the view,
+ * smoothed by a cubic B-spline; the speed and the view turn through critically damped springs
+ * (integrated in short substeps), so beats push and steer it gently. Drag to look around; it eases
  * back on release.
  *
  * Music: the beat envelope (lib/lattice-beat.js: tempo-locked when confident, strong onsets
@@ -133,6 +134,8 @@ export default async function create(ctx) {
       beatIn.onsetStrength = audio.onsetStrength;
       beat.step(beatIn, dt);
 
+      // The beat picks the next turn (placed beyond the view, so the path stays smooth).
+      if (beat.beat) cam.beat();
       cam.update(dt, flySpeed(Number(ctx.params.speed), beat.env, react, ctx.reduceMotion));
       if (beat.beat && react > 0) {
         const level = beatIn.bpm > 0 ? 1 : Math.min(1, audio.onsetStrength);

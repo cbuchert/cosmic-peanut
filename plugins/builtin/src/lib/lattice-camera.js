@@ -1,19 +1,29 @@
 // @ts-check
 /**
- * Lattice's camera: flies forward through the empty channels of the cubic lattice.
+ * Lattice's camera — the cubic structure's camera path provider: flies forward through the empty
+ * channels of the cubic lattice, smoothly.
  *
- * World units are cells: nodes (cubes) sit at integer points and rods run along the axes between
- * them, so the cell centres (all three coordinates half-integers) are the points farthest from
- * any geometry and the lines through them, parallel to an axis, are free channels. The path is a
- * seeded walk from cell centre to adjacent cell centre (a run of 2–5 cells, then a turn to one of
- * the four perpendicular axes, never back), smoothed by a uniform cubic B-spline over those
- * points. The spline is C2 (no jerk), passes within 1/6 cell of each control point, and cuts each
- * corner by under 0.25 cell, so it stays ≥ 0.47 cell from every rod axis. The camera moves along
- * it by arc length, so its speed is exactly the speed asked for. It looks at the path point
- * LOOK_AHEAD cells on, so the view starts turning before the corner and turns about half as fast
- * as the path; `up` is carried along by parallel transport (no roll of its own, never degenerate
- * when the path climbs straight up). Dragging turns the view about that heading (the scene follows
- * the pointer); on release a critically damped spring eases it back, Möbius Field's `fly.js` rule.
+ * World units are cells: nodes sit at integer points and struts run along the axes between them,
+ * so the cell centres (all three coordinates half-integers) are the points farthest from any
+ * geometry and the lines through them, parallel to an axis, are free channels.
+ *
+ * Path: a walk from cell centre to adjacent cell centre, smoothed by a uniform cubic B-spline over
+ * those points (C2: no jerk from the path), which passes within 1/6 cell of each control point and
+ * cuts each corner by under 0.25 cell, so it stays ≥ 0.47 cell from every strut axis. Turns are
+ * decided on the beat: `beat()` asks for one, and the next control point appended — about four
+ * cells ahead, beyond everything the camera is on or looking at (a B-spline segment depends only
+ * on its four points) — turns to one of the four perpendicular axes once the run is long enough
+ * (a seeded 2–5 cells). So the beat picks the next turn; it never moves the current one. In
+ * silence it turns every RUN_IDLE cells.
+ *
+ * Motion: the speed asked for goes through two critically damped stages, so a beat surge is a
+ * smooth push (continuous acceleration and jerk), and the camera moves along the path by arc
+ * length. The view turns toward the path point LOOK_AHEAD cells on through a critically damped
+ * angular spring (turns are seen coming, and a surge never whips the view), banks a little into
+ * turns, and carries `up` by parallel transport (never degenerate when the path climbs straight
+ * up). Everything is integrated in substeps of at most 1/240 s, so frame hitches change nothing
+ * but how often it's drawn. Dragging turns the view about that heading (the scene follows the
+ * pointer); on release a critically damped spring eases it back, Möbius Field's `fly.js` rule.
  *
  * Nothing is allocated per update.
  */
@@ -21,9 +31,10 @@ import { prng } from "./tiedye.js";
 
 /** Control points kept: the current segment uses the first four, the rest serve look-ahead. */
 const RING = 8;
-/** Cells in a straight run between turns. */
+/** A turn may come once a run is this long (seeded per run), and comes anyway after RUN_IDLE. */
 const RUN_MIN = 2;
 const RUN_MAX = 5;
+export const RUN_IDLE = 8;
 /** The view looks at the path this far ahead (cells): turns are seen coming and spread out. */
 export const LOOK_AHEAD = 1.2;
 /** Substeps of the look-ahead march (equal-sized, so the target moves smoothly with the camera). */
@@ -34,8 +45,15 @@ export const LOOK_RATE = 0.004;
 export const LOOK_PITCH = 1.1;
 /** The release spring's rate (1/s): critically damped, so it starts from rest and never overshoots. */
 const RETURN = 2.5;
-/** Longest arc-length step per substep (cells), so fast frames stay on the curve. */
-const MAX_STEP = 0.05;
+/** Longest substep (s): motion is integrated in steps this short whatever the frame time. */
+const H = 1 / 240;
+/** Speed smoothing: two critically damped stages at this rate (1/s). */
+const SPEED_RATE = 5;
+/** View turning: a critically damped angular spring at this rate (1/s). */
+const VIEW_RATE = 6;
+/** Bank into turns: radians of roll per rad/s of yaw, at most BANK_MAX. */
+const BANK = 0.12;
+const BANK_MAX = 0.18;
 
 /** The six axis directions: +x, −x, +y, −y, +z, −z. */
 const DIRS = [
@@ -86,29 +104,32 @@ export function createCamera(seed) {
   const pts = new Float64Array(RING * 3);
   let first = 0;
   let dir = 4; // +z
-  let run = RUN_MIN;
+  let run = 0; // cells since the last turn
+  let runTarget = RUN_IDLE; // the first stretch runs straight
+  let asked = false; // a beat asked for a turn since the last point was appended
   const w = new Float64Array(8);
   /** The current segment (between control points 1 and 2 of the ring) and the place along it. */
   let u = 0;
 
   /** Append the next walk point after point `prev` (ring index) into ring slot `slot`. */
   function walk(/** @type {number} */ prev, /** @type {number} */ slot) {
-    if (--run <= 0) {
+    run++;
+    const onBeat = asked && run >= runTarget;
+    if (onBeat || run >= RUN_IDLE) {
+      if (onBeat) cam.beatTurns++;
+      else cam.idleTurns++;
       const axis = dir >> 1;
       // One of the four directions on the other two axes.
       const k = Math.floor(rand() * 4);
       const other = (axis + 1 + (k >> 1)) % 3;
       dir = other * 2 + (k & 1);
-      run = RUN_MIN + Math.floor(rand() * (RUN_MAX - RUN_MIN + 1));
+      run = 0;
+      runTarget = RUN_MIN + Math.floor(rand() * (RUN_MAX - RUN_MIN + 1));
     }
+    asked = false;
     const d = DIRS[dir];
     for (let c = 0; c < 3; c++) pts[slot * 3 + c] = pts[prev * 3 + c] + d[c];
   }
-
-  // Start in a channel, the first points straight ahead.
-  for (let c = 0; c < 3; c++) pts[c] = 0.5;
-  run = RUN_MAX + 1;
-  for (let i = 1; i < RING; i++) walk(i - 1, i);
 
   /**
    * Evaluate segment `seg` (0 = the current one) at `t` into `out` (position) and `tan`
@@ -157,23 +178,95 @@ export function createCamera(seed) {
     return out;
   }
 
+  /** Move `ds` cells along the path (a midpoint step in the spline parameter). */
+  function advance(/** @type {number} */ ds) {
+    evaluate(0, u, tmp, tan);
+    const half = Math.min(1, u + (0.5 * ds) / Math.max(1e-6, Math.hypot(tan[0], tan[1], tan[2])));
+    evaluate(0, half, tmp, tan);
+    u += ds / Math.max(1e-6, Math.hypot(tan[0], tan[1], tan[2]));
+    while (u >= 1) {
+      u -= 1;
+      // Drop the oldest point; walk one further.
+      const last = (first + RING - 1) % RING;
+      walk(last, first);
+      first = (first + 1) % RING;
+    }
+    evaluate(0, u, cam.pos, tan);
+  }
+
   const target = new Float64Array(3);
-  /** Point the view at the look-ahead target; carry `up` along, then complete the basis. */
-  function orient() {
+  const desired = new Float64Array(3);
+  /** The view's angular velocity (rad/s, as a world rotation vector). */
+  const omega = new Float64Array(3);
+  let speed = Number.NaN; // after both smoothing stages
+  let speedMid = 0;
+  let accel = 0; // d speed / dt
+  let accelMid = 0;
+  let roll = 0;
+
+  /** The unit direction from the camera to the look-ahead point, into `desired`. */
+  function lookDirection() {
     ahead(LOOK_AHEAD, target);
+    for (let c = 0; c < 3; c++) desired[c] = target[c] - cam.pos[c];
+    const l = Math.hypot(desired[0], desired[1], desired[2]);
+    for (let c = 0; c < 3; c++) desired[c] /= l;
+  }
+
+  /** Turn the view toward `desired` through the angular spring over h, carrying `up` along. */
+  function turnView(/** @type {number} */ h) {
     const f = cam.fwd;
-    for (let c = 0; c < 3; c++) f[c] = target[c] - cam.pos[c];
+    // Error: the rotation taking f to `desired`, as a rotation vector.
+    let ex = f[1] * desired[2] - f[2] * desired[1];
+    let ey = f[2] * desired[0] - f[0] * desired[2];
+    let ez = f[0] * desired[1] - f[1] * desired[0];
+    const s = Math.hypot(ex, ey, ez);
+    const ang = Math.atan2(s, f[0] * desired[0] + f[1] * desired[1] + f[2] * desired[2]);
+    const k = s > 1e-12 ? ang / s : 1;
+    ex *= k;
+    ey *= k;
+    ez *= k;
+    const kk = VIEW_RATE * VIEW_RATE;
+    const cc = 2 * VIEW_RATE;
+    omega[0] += (kk * ex - cc * omega[0]) * h;
+    omega[1] += (kk * ey - cc * omega[1]) * h;
+    omega[2] += (kk * ez - cc * omega[2]) * h;
+    // Rotate f by omega × h (Rodrigues), then renormalize.
+    const ax = omega[0] * h;
+    const ay = omega[1] * h;
+    const az = omega[2] * h;
+    const th = Math.hypot(ax, ay, az);
+    if (th > 1e-12) {
+      const nx = ax / th;
+      const ny = ay / th;
+      const nz = az / th;
+      const co = Math.cos(th);
+      const si = Math.sin(th);
+      const d = nx * f[0] + ny * f[1] + nz * f[2];
+      const cx = ny * f[2] - nz * f[1];
+      const cy = nz * f[0] - nx * f[2];
+      const cz = nx * f[1] - ny * f[0];
+      const f0 = f[0] * co + cx * si + nx * d * (1 - co);
+      const f1 = f[1] * co + cy * si + ny * d * (1 - co);
+      const f2 = f[2] * co + cz * si + nz * d * (1 - co);
+      f[0] = f0;
+      f[1] = f1;
+      f[2] = f2;
+    }
     const fl = Math.hypot(f[0], f[1], f[2]);
     for (let c = 0; c < 3; c++) f[c] /= fl;
+    // Parallel transport of up, then the right-handed basis.
     const up = cam.up;
-    const d = up[0] * f[0] + up[1] * f[1] + up[2] * f[2];
-    for (let c = 0; c < 3; c++) up[c] -= d * f[c];
+    const du = up[0] * f[0] + up[1] * f[1] + up[2] * f[2];
+    for (let c = 0; c < 3; c++) up[c] -= du * f[c];
     const ul = Math.hypot(up[0], up[1], up[2]);
     for (let c = 0; c < 3; c++) up[c] /= ul;
     const r = cam.right;
     r[0] = f[1] * up[2] - f[2] * up[1];
     r[1] = f[2] * up[0] - f[0] * up[2];
     r[2] = f[0] * up[1] - f[1] * up[0];
+    // Bank: roll with the yaw rate, within BANK_MAX (omega is smooth, so the roll is too).
+    const yaw = omega[0] * up[0] + omega[1] * up[1] + omega[2] * up[2];
+    roll = Math.max(-BANK_MAX, Math.min(BANK_MAX, BANK * yaw));
   }
 
   let dragging = false;
@@ -184,28 +277,39 @@ export function createCamera(seed) {
   let vYaw = 0;
   let vPitch = 0;
 
-  /** The path basis turned by the look-around into `cam.view`. */
+  /** The view basis, banked, then turned by the look-around, into `cam.view`. */
   function look() {
+    const cb = Math.cos(roll);
+    const sb = Math.sin(roll);
     const cy = Math.cos(cam.lookYaw);
     const sy = Math.sin(cam.lookYaw);
     const cp = Math.cos(cam.lookPitch);
     const sp = Math.sin(cam.lookPitch);
-    const { fwd: f, up: u, right: r } = cam;
+    const { fwd: f, up: u0, right: r0 } = cam;
     const v = cam.view;
     for (let c = 0; c < 3; c++) {
-      const h = cy * f[c] + sy * r[c];
-      v.fwd[c] = cp * h + sp * u[c];
-      v.up[c] = cp * u[c] - sp * h;
-      v.right[c] = cy * r[c] - sy * f[c];
+      const uc = cb * u0[c] + sb * r0[c];
+      const rc = cb * r0[c] - sb * u0[c];
+      const h = cy * f[c] + sy * rc;
+      v.fwd[c] = cp * h + sp * uc;
+      v.up[c] = cp * uc - sp * h;
+      v.right[c] = cy * rc - sy * f[c];
     }
   }
 
   const cam = {
+    /** Turns taken because a beat asked, and in silence (after RUN_IDLE cells). */
+    beatTurns: 0,
+    idleTurns: 0,
     /** Drag look-around, radians on top of the path's heading (+yaw toward `right`, +pitch up). */
     lookYaw: 0,
     lookPitch: 0,
-    /** The view basis with the look-around applied: what the shader gets. */
+    /** The view basis with the bank and the look-around applied: what the shader gets. */
     view: { fwd: new Float64Array(3), up: new Float64Array(3), right: new Float64Array(3) },
+    /** A beat: the next control point appended may turn (if the run is long enough). */
+    beat() {
+      asked = true;
+    },
     /**
      * The path point `dist` cells ahead (up to about 3), into `out`.
      * @param {number} dist @param {Float64Array} out
@@ -231,33 +335,33 @@ export function createCamera(seed) {
         dragging = false;
       }
     },
-    /** The path's view basis (unit, orthogonal): forward, up, right. */
+    /** The view's own basis (unit, orthogonal; unbanked): forward, up, right. */
     fwd: new Float64Array([0, 0, 1]),
     up: new Float64Array([0, 1, 0]),
     right: new Float64Array([-1, 0, 0]),
     /** Camera position, cells (float64: it flies forever). */
     pos: new Float64Array(3),
     /**
-     * Fly on by `speed × dt` cells along the path.
-     * @param {number} dt seconds @param {number} speed cells per second
+     * Fly on for `dt` seconds, smoothly approaching `targetSpeed` cells per second.
+     * @param {number} dt seconds @param {number} targetSpeed cells per second
      */
-    update(dt, speed) {
-      let left = Math.max(0, speed * dt);
-      while (left > 0) {
-        const ds = Math.min(MAX_STEP, left);
-        left -= ds;
-        evaluate(0, u, cam.pos, tan);
-        u += ds / Math.max(1e-6, Math.hypot(tan[0], tan[1], tan[2]));
-        while (u >= 1) {
-          u -= 1;
-          // Drop the oldest point; walk one further.
-          const last = (first + RING - 1) % RING;
-          walk(last, first);
-          first = (first + 1) % RING;
-        }
+    update(dt, targetSpeed) {
+      const goal = Math.max(0, targetSpeed);
+      if (Number.isNaN(speed)) speed = speedMid = goal;
+      const n = Math.max(1, Math.ceil(dt / H - 1e-9));
+      const h = dt / n;
+      const k = SPEED_RATE * SPEED_RATE;
+      const c = 2 * SPEED_RATE;
+      for (let i = 0; i < n; i++) {
+        // Two critically damped stages: goal → speedMid → speed.
+        accelMid += (k * (goal - speedMid) - c * accelMid) * h;
+        speedMid += accelMid * h;
+        accel += (k * (speedMid - speed) - c * accel) * h;
+        speed += accel * h;
+        advance(Math.max(0, speed) * h);
+        lookDirection();
+        turnView(h);
       }
-      evaluate(0, u, cam.pos, tan);
-      orient();
       if (!dragging) {
         settle(cam.lookYaw, vYaw, dt);
         cam.lookYaw = spring[0];
@@ -269,8 +373,14 @@ export function createCamera(seed) {
       look();
     },
   };
+
+  // Start in a channel, the first points straight ahead.
+  for (let c = 0; c < 3; c++) pts[c] = 0.5;
+  for (let i = 1; i < RING; i++) walk(i - 1, i);
   evaluate(0, u, cam.pos, tan);
-  orient();
+  lookDirection();
+  cam.fwd.set(desired);
+  turnView(0);
   look();
   return cam;
 }
