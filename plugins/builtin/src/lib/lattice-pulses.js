@@ -37,6 +37,10 @@ export function createPulses() {
     data: new Float32Array(PULSE_CAP * 4),
     /** Per pulse: brightness, 0–2 (0 = idle). */
     amp: new Float32Array(PULSE_CAP),
+    /** The live pulses' `data` and `amp`, packed first, and how many there are. */
+    live: new Float32Array(PULSE_CAP * 4),
+    liveAmp: new Float32Array(PULSE_CAP),
+    liveCount: 0,
     /**
      * Launch a pulse from the node nearest `point` (cells).
      * @param {ArrayLike<number>} point @param {number} lvl brightness (beat level × Reactivity, 0–2)
@@ -71,6 +75,13 @@ export function createPulses() {
         p.data[i * 4 + 3] = (reach[i] * Math.min(a, L)) / L;
         p.amp[i] = !(a < L) ? 0 : a < RISE ? level[i] * smooth(a / RISE) : level[i] * (1 - smooth((a - RISE) / (L - RISE)));
       }
+      let n = 0;
+      for (let i = 0; i < PULSE_CAP; i++) {
+        if (!(p.amp[i] > 0)) continue;
+        for (let c = 0; c < 4; c++) p.live[n * 4 + c] = p.data[i * 4 + c];
+        p.liveAmp[n++] = p.amp[i];
+      }
+      p.liveCount = n;
       return p;
     },
   };

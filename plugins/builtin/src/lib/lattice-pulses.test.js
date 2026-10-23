@@ -82,4 +82,18 @@ describe("createPulses", () => {
     for (let f = 0; f < 240 * 0.45; f++) p.step(1 / 240, origin);
     expect(p.data[3]).toBeCloseTo(0.3 * REACH, 1);
   });
+
+  it("also lists the live pulses first (`live`, `liveCount`), for shaders that loop only over those", () => {
+    const p = createPulses();
+    const origin = new Float64Array([1, 0, 0]);
+    expect(p.step(0.01, origin).liveCount).toBe(0);
+    p.launch(new Float64Array([3, 0, 0]), 1, false, 0.5); // slot 0, dies at 0.45 s
+    p.step(0.3, origin);
+    p.launch(new Float64Array([5, 1, 0]), 0.5, false, 4); // slot 1
+    p.step(0.2, origin); // slot 0 now dead
+    expect(p.liveCount).toBe(1);
+    expect(Array.from(p.live.subarray(0, 4))).toEqual(Array.from(p.data.subarray(4, 8)));
+    expect(p.liveAmp[0]).toBe(p.amp[1]);
+    expect(p.liveAmp[0]).toBeGreaterThan(0);
+  });
 });
