@@ -3,6 +3,58 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tessellations: Poincaré Disk, the hyperbolic surface (2026-10-22)
+
+**Poincaré Disk** (`poincare-disk`, webgl2) prints interlocking creatures tiling the hyperbolic
+plane in the Poincaré disk. The tiles shrink towards the rim forever. It uses the engine's print look, palettes and music state
+on a {7,3}, {5,4}, {4,5} or {6,4} tiling (`src/lib/tess-disk.js`, `shaders/tess/disk.frag`).
+
+- **The tiles are kites, not p-gons.** A p-gon of {p,q} has p-fold symmetry, so it can only
+  deform into a rosette. The kite O, M, V, M′ (the fundamental triangle and its mirror across
+  O–V) is a fundamental domain of the rotation group, as the engine's p4 half-squares are for
+  (2,4,4). So an asymmetric creature (eye, spine, fins) repeats in every kite, turning with it.
+  uv: O, M, V, M′ → (0,0), (1,0), (1,1), (0,1), as the engine's p4 tile.
+- **The warp, and why it still tiles:** every point of the fundamental triangle lies in the
+  diamond round its edge midpoint M. That is four triangles, one corner of each of the four
+  kites meeting there. In a square chart of the diamond (M to 0, Klein, scaled) the kite edges are the
+  diagonals. The field `W Σ A sin(nπ(s+1)/2) sin(mπ(t+1)/2)` with n + m odd is odd under
+  the half-turn about M, which is the diamond's only rotation. So the warp commutes with the
+  whole rotation group, and every kite stays congruent. W = cos²cos² makes the field and its
+  slope vanish on the diamond's rim (the O–V lines run through the middle of the kites), so it
+  is smooth there. Each step is fitted under a Lipschitz bound of 0.85 (per-mode slope max π or
+  2π, checked on a grid), and 4 steps are composed, as in the engine. The tests check
+  congruence under random rotations of the tiling, with and without the warp.
+- **Colouring:** the fold reads its word of mirrors back to front, so a colour can't be
+  carried along. The shader tracks the word in a finite quotient of the triangle group:
+  2×2 matrices mod r (PGL(2, r): {7,3} r = 7, {5,4} and {4,5} r = 5, {6,4} r = 7), one integer
+  matrix product per fold step. It then reads one texel of an r² × r² table holding the classes
+  of the four kites round M. The table comes from a DSATUR 3-colouring of the quotient's kite
+  graph (168, 120, 120 and 336 kites), evened out. Edge neighbours differ by ρ±1 or τ±1, never
+  trivial in the quotient, so the colouring is proper in the whole plane. Tested in the group
+  and across bisected edges in the plane. 3 classes is what the engine's u_tCls holds;
+  {7,3} needs at least 3 (a vertex has 3 kites round it), and its 3 are exactly balanced (56 each).
+- **View:** drifts `DISK_DRIFT` 0.12 hyperbolic units per unit of glide travel (bass plus the
+  eased beat surge), along a slowly wandering flow. A drag carries the plane with the pointer
+  and eases the flow round to the drag's direction (τ 0.35 s). Rebased every frame, but **not
+  with `createDrift`**: its rebase can apply a mirror (which would flip the creatures), and its
+  matrix degrades until T(0) leaves the disk after about 6,000 frames at this speed. That is a
+  latent bug for Tentacube too (not fixed here). The view rebases by rotations only, re-projects
+  T to translate ∘ rotate each frame, and records the quotient element of each rebase (`e0`, the
+  fold's starting matrix) so the colours on screen don't change.
+- **Rings and rim:** a tile's ring is its hyperbolic distance from the screen centre (the
+  centre's image is folded alongside), reaching 1 where kites are 3 px. Fronts and spectrum
+  rings spread from the centre to the rim. One tile size per pixel row, from the disk metric,
+  drives the print's fades (`tessPrint` takes it): the true per-pixel size varies 0.45–3.6×
+  across a kite. Kites under ~1 px print as ink (no fold there), then the edge is antialiased
+  into paper.
+- **Engine changes (backward-compatible):** `tessShade`'s body is now `tessPrint(t, tf, pxq,
+  tileSize, dpx, m, q)`, and `tessShade` keeps its signature (Metamorphosis stills, p4 and
+  p3/watercolour, byte-identical before and after). The tess state exposes `morphW` and `theta`.
+- **Cost:** WebKit harness, 2560×1440, Quality high, `sync=1`: one frame per vsync 62.5 fps,
+  p50 12–15 ms, p99 22–24 ms. 10 frames per vsync: 11.7 ms per frame (medium: 4.1 ms). CPU
+  < 0.1 ms. The GPU was shared with other agents (Metamorphosis measured p50 9–22 ms in the same
+  runs, against 6–8 ms in its own notes), so these numbers are noisy.
+
 ## Tessellations: the engine and Metamorphosis (2026-10-22)
 
 **Metamorphosis** (`metamorphosis`, webgl2) is the first of a series of interlocking-tiling
