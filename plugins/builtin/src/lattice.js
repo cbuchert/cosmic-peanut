@@ -31,7 +31,10 @@
  * pulse topology, a clearance check and a small runtime. "cubic" is Lattice's (the Structure
  * param picks it); Tentacle Lattice (`ctx.id` "tentacle-lattice") is fixed to "tentacle": six
  * swaying, tapered tentacles per node, materials crossfading (shade.glsl MATERIALS), handshakes
- * along each beat pulse, a quarter-turn twist at its node and a local bass swell.
+ * along each beat pulse, a quarter-turn twist at its node and a local bass swell. "gyroid",
+ * "schwarz-p" and "schwarz-d" are triply periodic minimal surfaces (lib/tpms.js) with their own
+ * camera through one labyrinth (lib/net-camera.js); switching to a structure with a different
+ * camera provider restarts the flight there.
  *
  * Everything per frame writes into preallocated arrays: frame() allocates nothing.
  */
@@ -102,8 +105,9 @@ export default async function create(ctx) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
 
   const beat = createBeat();
-  const cam = structure.camera(SEED);
-  const pulses = createPulses(structure.pulseSource);
+  let cam = structure.camera(SEED);
+  // The current structure's pulse topology (it can change with the Structure param).
+  const pulses = createPulses((point, out) => structure.pulseSource(point, out));
   const axis = createAxisLight();
   const beatIn = { bpm: 0, beatPhase: 0, onset: false, onsetStrength: 0 };
   const pal = new Float32Array(PALETTE_FLOATS);
@@ -220,12 +224,14 @@ export default async function create(ctx) {
       runtime.params(changed);
       if ("quality" in changed) resize();
       if ("structure" in changed && structureFor(ctx.id, ctx.params.structure) !== structureName) {
-        // Swap the scene program and runtime (the camera and pulses carry on).
+        // Swap the scene program and runtime. The camera and pulses carry on, unless the new
+        // structure flies a different free space (its own camera provider): then it starts there.
         const name = structureFor(ctx.id, ctx.params.structure);
         sceneProgram(STRUCTURES[name]).then((next) => {
           gl.deleteProgram(prog.program);
           prog = next;
           structureName = name;
+          if (STRUCTURES[name].camera !== structure.camera) cam = STRUCTURES[name].camera(SEED);
           structure = STRUCTURES[name];
           runtime = structure.runtime(ctx);
           resize();

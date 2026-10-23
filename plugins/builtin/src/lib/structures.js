@@ -25,6 +25,7 @@ import { createCamera } from "./lattice-camera.js";
 import { nearestNode } from "./lattice-pulses.js";
 import { cubicClearance, cubicRuntime } from "./structure-cubic.js";
 import { tentacleClearance, tentacleRuntime } from "./structure-tentacle.js";
+import { tpmsStructure } from "./structure-tpms.js";
 
 /**
  * What a structure's runtime sees each frame.
@@ -92,10 +93,14 @@ export const STRUCTURES = {
     far: 16,
     runtime: tentacleRuntime,
   },
+  // Triply periodic minimal surfaces (lib/tpms.js): one shader, a define per surface.
+  gyroid: { shader: "structure-tpms.glsl", defines: ["TPMS_GYROID"], ...tpmsStructure("gyroid"), scale: 1, steps: 1.4, fog: 2.2, far: 24 },
+  "schwarz-p": { shader: "structure-tpms.glsl", defines: ["TPMS_P"], ...tpmsStructure("schwarz-p"), scale: 1, steps: 1.4, fog: 2.2, far: 24 },
+  "schwarz-d": { shader: "structure-tpms.glsl", defines: ["TPMS_D"], ...tpmsStructure("schwarz-d"), scale: 1, steps: 1.4, fog: 2.2, far: 24 },
 };
 
 /** Lattice's Structure param options (Tentacle Lattice is its own visualizer, fixed to "tentacle"). */
-export const STRUCTURE_OPTIONS = ["cubic"];
+export const STRUCTURE_OPTIONS = ["cubic", "gyroid", "schwarz-p", "schwarz-d"];
 
 /**
  * The structure to render: Tentacle Lattice's own, else Lattice's Structure param (unknown → cubic).
