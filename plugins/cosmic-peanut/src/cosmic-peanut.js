@@ -21,6 +21,7 @@ import { GENTLE, gentle } from "./lib/motion.js";
 import { densityRings, paletteIndex, paramDefault, renderPath, ringGain } from "./lib/params.js";
 import { createPulse, swell } from "./lib/pulse.js";
 import { shapeFor } from "./lib/shapes.js";
+import { createSoftTarget } from "./lib/soft.js";
 import { createSnake, headSpeed } from "./lib/snake.js";
 import { TRACKS, TRACK_SAMPLES, buildTrack, trackIndex } from "./lib/track.js";
 
@@ -45,11 +46,9 @@ export default async function create(ctx) {
   const beatDefault = paramDefault(m, ctx.id, "beat"); // NaN for the sphere
 
   const rings = createProgram(gl, ringVs, ringFs, "shaders/rings");
-  const blit = createProgram(gl, blitVs, blitFs, "shaders/blit");
   const U = rings.u;
 
   const vao = /** @type {WebGLVertexArrayObject} */ (gl.createVertexArray());
-  const blitVao = /** @type {WebGLVertexArrayObject} */ (gl.createVertexArray());
   const vbo = gl.createBuffer();
   const ibo = gl.createBuffer();
   const hist = gl.createTexture();
@@ -124,42 +123,7 @@ export default async function create(ctx) {
   allocate();
   if (shape.track) loadTrack();
 
-  // Soft lines: rings go to a 1× (CSS-pixel) multisampled RGBA8 buffer (the prototype's canvas had
-  // antialias on; the host's doesn't), resolve into a texture, then upscale linearly to the canvas.
-  // 2× MSAA matches the prototype's smoothness side by side at ~20% less GPU time than 4×.
-  // RGBA8 end to end: the rings' premultiplied alpha survives the resolve and the blit.
-  const samples = Math.min(2, gl.getParameter(gl.MAX_SAMPLES));
-  const msaaRb = gl.createRenderbuffer();
-  const msaaFbo = gl.createFramebuffer();
-  const softTex = gl.createTexture();
-  const softFbo = gl.createFramebuffer();
-  let softW = 0;
-  let softH = 0;
-  let msaaOn = false;
-  function resizeSoft() {
-    const w = Math.max(1, Math.min(ctx.size.width, Math.round(ctx.size.cssWidth)));
-    const h = Math.max(1, Math.min(ctx.size.height, Math.round(ctx.size.cssHeight)));
-    const wantMsaa = renderPath(ctx.params.lines, ctx.params.antialias) === "msaa";
-    if (w === softW && h === softH && wantMsaa === msaaOn) return;
-    softW = w;
-    softH = h;
-    msaaOn = wantMsaa;
-    gl.bindTexture(gl.TEXTURE_2D, softTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, softFbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, softTex, 0);
-    gl.bindRenderbuffer(gl.RENDERBUFFER, msaaRb);
-    // Antialias off (or fine lines): keep only a 1×1 placeholder so the MSAA memory is freed.
-    gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, gl.RGBA8, msaaOn ? w : 1, msaaOn ? h : 1);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, msaaFbo);
-    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, msaaRb);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  }
-  resizeSoft();
+  const soft = createSoftTarget(gl, ctx, blitVs, blitFs);
 
   return {
     frame(audio, time) {
@@ -220,15 +184,7 @@ export default async function create(ctx) {
       }
       camera.writeMatrices(aspect, dist);
 
-      if (fine) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.viewport(0, 0, width, height);
-      } else {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, path === "msaa" ? msaaFbo : softFbo);
-        gl.viewport(0, 0, softW, softH);
-      }
-      gl.clearColor(0, 0, 0, 0); // transparent canvas: the shell supplies black or the desktop
-      gl.clear(gl.COLOR_BUFFER_BIT);
+      soft.begin(path);
       gl.disable(gl.DEPTH_TEST);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE); // additive: overlapping rings glow
@@ -264,29 +220,16 @@ export default async function create(ctx) {
       gl.drawElements(gl.LINE_STRIP, indexCount, gl.UNSIGNED_INT, 0);
       gl.disable(gl.BLEND);
 
-      if (!fine) {
-        if (path === "msaa") {
-          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, msaaFbo);
-          gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, softFbo);
-          gl.blitFramebuffer(0, 0, softW, softH, 0, 0, softW, softH, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-        }
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.viewport(0, 0, width, height);
-        gl.useProgram(blit.program);
-        gl.bindTexture(gl.TEXTURE_2D, softTex);
-        gl.uniform1i(blit.u.uSrc, 0);
-        gl.bindVertexArray(blitVao);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
-      }
+      soft.end(path);
       gl.bindVertexArray(null);
     },
 
     resize() {
-      resizeSoft();
+      soft.resize();
     },
 
     params(changed) {
-      if ("antialias" in changed || "lines" in changed) resizeSoft();
+      if ("antialias" in changed || "lines" in changed) soft.resize();
       if ("density" in changed && history.setDensity(densityRings(changed.density))) allocate();
       if ("track" in changed && shape.track) loadTrack();
     },
@@ -301,14 +244,9 @@ export default async function create(ctx) {
       gl.deleteTexture(hist);
       gl.deleteTexture(trackTex);
       gl.deleteTexture(posTex);
-      gl.deleteTexture(softTex);
-      gl.deleteFramebuffer(softFbo);
-      gl.deleteFramebuffer(msaaFbo);
-      gl.deleteRenderbuffer(msaaRb);
       gl.deleteVertexArray(vao);
-      gl.deleteVertexArray(blitVao);
       gl.deleteProgram(rings.program);
-      gl.deleteProgram(blit.program);
+      soft.dispose();
     },
   };
 }
