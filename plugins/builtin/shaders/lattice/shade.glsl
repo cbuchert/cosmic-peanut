@@ -57,8 +57,9 @@ const float HEAD_I = 0.7;       // headlight intensity
 const float HEAD_RANGE = 10.0;  // its window (cells)
 const float PULSE_I = 0.9;      // pulse tube intensity per cell of tube, per unit amplitude
 const float PULSE_RANGE = 1.8;  // a pulse light's window (cells)
-const float HALO_RANGE = 1.6;   // in-scatter: tubes farther than this from the ray are skipped
-const float HALO_K = 0.12;      // pulse in-scatter weight (the haze's scattering albedo)
+const float HALO_RANGE = 0.7;   // in-scatter: tubes farther than this from the ray are skipped
+const float HALO_I = 1.0;       // a pulse's in-scatter intensity per cell of tube (its fronts' glow,
+                                // brighter than the light they cast on the scene)
 const float TUBE_R = 0.06;      // a tube's radius (cells): the highlight's widening
 const float ENV_I = 0.7;        // environment brightness
 const float KEY_FOG = 0.12;     // share of the key reaching the medium (the lattice shadows the rest)
@@ -66,6 +67,7 @@ const float HEAD_FOG = 0.5;     // headlight in-scatter weight (back-scatter pha
 const float HEAD_SIZE = 0.6;    // its in-scatter size (cells): a lamp above the eye, not at it
 const float EMIT_GAIN = 1.4;    // classic emission → HDR...
 const float PULSE_EMIT = 0.45;  // ...but the pulse fronts less: their light also reaches the scene
+const float EMISSIVE_GAIN = 0.5; // Tentacle Lattice's emissive material
 const float FOG_K = 0.85;       // u_fog (classic's display-space density) → extinction β...
 const float FOG_INK = 0.5;      // ...less this share on paper (a light fog mixed in linear light
                                 // reads far thicker than in display space, where classic mixes it)
@@ -250,10 +252,10 @@ vec3 inscatter(vec3 ro, vec3 rd, float t, float T, float beta) {
     u = C > 1e-6 ? clamp(dot(ab, w + rd * s) / C, 0.0, 1.0) : 0.0;
     vec3 q = a + ab * u;
     float hq = length(ro + rd * s - q);
-    float I = u_ltB[i].w * PULSE_I * max(sqrt(C), 0.5);
+    float I = u_ltB[i].w * HALO_I * max(sqrt(C), 0.5);
     if (hq > HALO_RANGE || I <= 0.0) continue;
     float fade = 1.0 - smoothstep(0.6 * HALO_RANGE, HALO_RANGE, hq);
-    L += (lit * fade * HALO_K) * airlight(ro, rd, t, q, I * u_glow, beta, 0.15);
+    L += (lit * fade) * airlight(ro, rd, t, q, I * u_glow, beta, 0.1);
   }
   return L;
 }
@@ -345,11 +347,11 @@ vec4 shade(vec3 ro, vec3 rd, float t, int id) {
     e += axisCol * axisLight * (0.03 + STRUCT_RUN_GAIN * run);
     e += u_glow * pulses(pulseAt) * (STRUCT_PULSE_GAIN * PULSE_EMIT);
   }
+  e *= EMIT_GAIN;
 #ifdef MATERIALS
   // Tentacube's emissive material glows its axis colour (the node faces: the pulse colour).
-  e += u_mat.z * (kind == 0 ? u_glow : axisCol) * (0.55 + 0.35 * NoV) * (1.0 - 0.7 * u_ink);
+  e += u_mat.z * (kind == 0 ? u_glow : axisCol) * ((0.55 + 0.35 * NoV) * (1.0 - 0.7 * u_ink) * EMISSIVE_GAIN);
 #endif
-  e *= EMIT_GAIN;
 
   // Light adds; on paper, ink mixes toward its colour (as classic, its colour mapped back to HDR).
   float amount = clamp(max(e.r, max(e.g, e.b)) * (0.6 / EMIT_GAIN), 0.0, 0.9);
