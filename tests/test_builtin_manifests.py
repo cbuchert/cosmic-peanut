@@ -52,6 +52,7 @@ def test_builtin_renderers():
         "metamorphosis": ("webgl2", []),
         "tile-horizon": ("webgl2", []),
         "endless-zoom": ("webgl2", []),
+        "tiled-sphere": ("webgl2", []),
     }
 
 
@@ -695,4 +696,42 @@ def test_endless_zoom_manifest():
     for word in ("escher", "droste", "print gallery"):
         assert word not in text, word
     for name in ("shaders/tess/endless-zoom.frag", "shaders/tess/tess.glsl"):
+        assert (REPOS["builtin"] / name).is_file(), name
+
+
+def test_tiled_sphere_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "tiled-sphere"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Tiled Sphere",
+        "src/tiled-sphere.js",
+        "webgl2",
+        "thumbs/tiled-sphere.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    # p4 only (the cube-sphere's edges are quarter turns), so no Symmetry param.
+    assert list(params) == [
+        "view",
+        "palette",
+        "reactivity",
+        "speed",
+        "morph",
+        "ink",
+        "hatching",
+        "quality",
+    ]
+    # Option order is lib/sphere-view.js VIEWS, lib/tess.js PALETTES, tess-music QUALITIES.
+    assert params["view"]["options"] == ["outside", "inside", "auto"]
+    assert params["view"]["default"] == "auto"
+    assert params["palette"]["options"] == ["ink", "dusk", "four-block", "ochre", "watercolour"]
+    assert params["quality"]["options"] == ["low", "medium", "high"]
+    r = params["reactivity"]
+    assert (r["min"], r["max"], r["default"]) == (0, 2, 1)
+    assert "\n" not in v["description"] and len(v["description"]) < 200
+    text = json.dumps(v).lower()
+    assert "escher" not in text
+    for name in (
+        "shaders/tess/tess.glsl",
+        "shaders/tess/sphere.frag",
+        "shaders/tess/paper.frag",
+    ):
         assert (REPOS["builtin"] / name).is_file(), name

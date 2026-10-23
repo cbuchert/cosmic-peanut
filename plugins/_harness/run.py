@@ -33,6 +33,7 @@ VIZ = {
     "metamorphosis": "builtin",
     "tile-horizon": "builtin",
     "endless-zoom": "builtin",
+    "tiled-sphere": "builtin",
     "halo": "template",
     "cosmic-peanut": "cosmic-peanut",
 }

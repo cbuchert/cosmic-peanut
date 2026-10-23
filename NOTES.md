@@ -3,9 +3,45 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tessellations: Tiled Sphere (2026-10-22)
+
+**Tiled Sphere** (`tiled-sphere`, webgl2) wraps the woodcut tiling round a sphere, seen from
+outside (it floats and turns on the paper, a soft limb shade and shadow) or from inside (a tiled
+dome all round); in `auto` the camera pushes through the skin on a phrase change and back out on
+a later one. Surface: `shaders/tess/sphere.frag`; JS: `lib/cube-sphere.js`, `lib/sphere-view.js`.
+
+- **Cube-sphere, p4 only**: six equal-angle faces of 3 × 3 lattice cells (`faceCells`: a divisor
+  or multiple of BLEND_PERIOD), 24 tiles round the equator. Across each edge the two face planes
+  differ by a quarter turn plus whole-face translation (`transitions`, exact along the edge), a
+  symmetry of the p4 warp, so the tiles carry on with no gap or kink. p3 would need an icosahedral
+  net whose corners turn 60°, which p3 can't absorb, so there is no Symmetry param.
+- **Colours across edges**: a quarter turn swaps the checkerboard's classes and every corner turns
+  an odd number of quarters, so no 2-colouring closes up. Each tile takes the class of the face
+  whose warped square holds its centre; per-face flips (searched, 64 cases) leave 4 seam edges,
+  one per corner, where every other tile along the seam takes the palette's third colour. On the
+  regular cells no two neighbours share a colour, corners included (tested); the warp still
+  distorts the tiles right at the 8 corners. Engine change: an optional `TESS_CLASS(cls, c)` hook
+  in tess.glsl (default `cls`), like TESS_RING.
+- **The spatial blend is off on the sphere** (`u_tBlend.xy = 0`): the wave runs along one lattice
+  direction, which a quarter-turn edge breaks, so the two motif sets blend in time only.
+- **S** = the face chart's analytic Jacobian × screen derivatives of the hit point, which are
+  smooth across faces (misses use the closest point, so the limb is continuous too); outlines keep
+  their weight over the edges. `TESS_RING` = angle from a pole (upper left) / π, so fronts and
+  spectrum rings sweep the sphere like a terminator.
+- **Motion**: turn = 0.07 rad per unit of glide travel (bass and the eased beat surge), axis tilt
+  swaying slowly. Push-through: smoothstep over 6 s (Reduce motion 12 s), on every 8th morph step
+  (a phrase with a tempo) ≥ 12 s after the last, or after 60 s anyway; within 0.15 of the surface
+  the print fades to paper, so crossing the skin is soft. Drag orbits outside, looks round
+  inside, and eases back with a critically damped spring (no jolt, no overshoot; slower under
+  Reduce motion).
+- **Cost**: WebKit harness, 2560×1440, Quality high, `sync=1`: outside p50 4 ms / p99 9 ms, auto
+  6 / 10, inside 14 / 25, 58.8 fps for each. Measured while other agents shared the GPU:
+  Metamorphosis measured 15 / 20 in the same session (6–8 / 7–11 above), so the inside numbers
+  are inflated by about the same factor.
+
 ## Tessellations: Endless Zoom (2026-10-22)
 
-**Endless Zoom** (`endless-zoom`, webgl2) is the second tessellation surface: Metamorphosis's
+**Endless Zoom** (`endless-zoom`, webgl2) is a tessellation surface: Metamorphosis's
 woodcut tiling seen through a log-polar map, p = α log z + O (z relative to the vanishing point,
 in half-short-side units), so it spirals self-similarly into the centre and zooms without end.
 
@@ -118,6 +154,8 @@ void main() {
 stretches the plane (use an analytic S where p has a seam, e.g. log-polar's angle wrap).
 `TESS_RING(c)` gives a tile (by its plane centre c) its ring, 0 near/centre … 1 far/edge, for the
 figure/ground front and the spectrum rings; the default is `|c − u_tRing.xy| / u_tRing.z`.
+`TESS_CLASS(cls, c)` (optional) recolours a tile from its regular class and centre (0–2, into
+`u_tCls`; Tiled Sphere uses it where its face charts meet with a class-swapping turn).
 On the JS side:
 
 ```js
