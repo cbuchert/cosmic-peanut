@@ -13,14 +13,24 @@
  * spiral: outward while zooming in, inward while zooming out. Tiles too small to print fade into
  * a soft ink point (paper, zooming out). Drag moves the vanishing point; it eases home on
  * release. The music side is the engine's (lib/tess-music.js). frame() allocates nothing.
+ *
+ * Relief (the engine's carved block, TESS_RELIEF, as in Metamorphosis): the spiral is the block
+ * the print is pulled from, relief-mapped through the log-polar map with soft shadows under a
+ * raking light (the Light param, fixed to the screen). The map's analytic Jacobian carries the
+ * heights, slopes and parallax, so the relief scales with the tiles at every radius and closes
+ * across the seam (tiles are hashed by a cell key reduced modulo one turn: lib/tess-zoom.js
+ * cellKey). Every beat lifts a wave of tiles that ripples along the spiral by log radius, the
+ * spectrum heaves the rings, onsets pop single tiles and the figure/ground front turns the tiles
+ * over radially, outward zooming in and inward zooming out. Relief fades out near the vanishing
+ * point, where tiles are too small to carve. Relief 0 is the flat print, unchanged.
  */
 import { createTessPipeline } from "./lib/tess-gl.js";
-import { createTessState, renderScale } from "./lib/tess-music.js";
+import { createTessState, lightDir, renderScale } from "./lib/tess-music.js";
 import { createDrag, createZoom, readParams, ringSpan, VANISH } from "./lib/tess-zoom.js";
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
-  const tess = await createTessPipeline(ctx, "shaders/tess/endless-zoom.frag");
+  const tess = await createTessPipeline(ctx, "shaders/tess/endless-zoom.frag", { relief: true });
   const state = createTessState();
   const zoom = createZoom();
   const drag = createDrag();
@@ -36,6 +46,8 @@ export default async function create(ctx) {
     spiral: "",
     zoomSpeed: 1,
     direction: "in",
+    relief: 0,
+    light: 0,
   };
   const opts = {
     symmetry: "p4",
@@ -48,7 +60,9 @@ export default async function create(ctx) {
     height: 1,
     reduceMotion: false,
     reduceFlashing: false,
+    relief: 0,
   };
+  const light = new Float32Array(3);
   const zoomIn = { group: state.group, spiral: "", zoomSpeed: 1, direction: "in" };
   const span = [0, 0];
   let lastTravel = 0;
@@ -65,6 +79,10 @@ export default async function create(ctx) {
     gl.uniform3f(u.u_ring, span[0], span[1], flip);
     gl.uniform2f(u.u_vp, drag.x, drag.y);
     gl.uniform3f(u.u_vanish, VANISH[0], VANISH[1], 0.5 - 0.5 * zoom.dir);
+    // Relief programs only (null elsewhere: a no-op).
+    gl.uniform3fv(u.u_light, light);
+    gl.uniform1f(u.u_hsFull, 0.5 * Math.min(ctx.size.width, ctx.size.height));
+    gl.uniform4f(u.u_cellKey, zoom.cellBase[0], zoom.cellBase[1], zoom.seam[0], zoom.seam[1]);
   };
 
   return {
@@ -81,6 +99,8 @@ export default async function create(ctx) {
       opts.height = ctx.size.height;
       opts.reduceMotion = ctx.reduceMotion;
       opts.reduceFlashing = ctx.reduceFlashing;
+      opts.relief = params.relief;
+      lightDir(params.light, light);
       const s = state.step(audio, dt, opts);
 
       zoomIn.group = s.group;

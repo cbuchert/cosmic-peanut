@@ -320,6 +320,7 @@ vec4 tessShade(vec2 p, float px) { return tessShade(p, mat2(px)); }
 //                                                         plate (h, dh/dp, face, pit) and the
 //                                                         fine carving's height (gouges cut,
 //                                                         features raised) for the surface's normals
+// Optional hooks: TESS_FLIP_DIR(c) (below), TESS_CELL_KEY(cell) (the id tiles are hashed by).
 #define TESS_LIFT_BINS 32
 #define TESS_POP_SLOTS 3
 #define RELIEF_BLOCK 0.07
@@ -344,6 +345,11 @@ vec2 tessFlipDir(vec2 c) {
 }
 #ifndef TESS_FLIP_DIR
 #define TESS_FLIP_DIR(c) tessFlipDir(c)
+#endif
+// The id a tile's lift variation and pop choice hash. Optional hook: a surface whose map
+// identifies cells (e.g. one turn of a log-polar map) defines TESS_CELL_KEY(cell) to reduce it.
+#ifndef TESS_CELL_KEY
+#define TESS_CELL_KEY(cell) (cell)
 #endif
 
 float tessRamp(float x, float w, out float slope) {
@@ -403,7 +409,8 @@ TessPlate tessPlate(vec2 p) {
   float th = 3.14159265 * fade;
   float sn = sin(th);
   float cs = cos(th);
-  float lift = u_tRelief.x * (tessLiftAt(ring) * (1.0 - LIFT_VARY + 2.0 * LIFT_VARY * tessHash12(r.t.cell * 0.731 + 3.7)) + tessPopAt(r.t.cell, ring));
+  vec2 key = TESS_CELL_KEY(r.t.cell);
+  float lift = u_tRelief.x * (tessLiftAt(ring) * (1.0 - LIFT_VARY + 2.0 * LIFT_VARY * tessHash12(key * 0.731 + 3.7)) + tessPopAt(key, ring));
   r.face = cs < 0.0 ? 1.0 : 0.0;
   r.pit = 0.0;
   float ac = 1.0;
