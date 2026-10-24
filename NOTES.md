@@ -34,6 +34,17 @@ before/after interleaved in one session (3 rounds, medians), GPU shared with ano
   first crossing before bisecting. Against a dense unjittered reference (4 samples a texel, 10
   bisections), pixels off by > 24/255, outside at still=150: 44583 → 10697 (the rest at the
   very limb). p50 / p99 outside 4 / 5 → 4 / 5 ms, inside 11 / 12 → 11 / 13 ms.
+- **Tile Horizon, edge-on cards as a band of tall blocks; jagged far silhouettes**: a card turning
+  edge-on is a sliver CARD_RISE tall; far off, where a height texel is a sizeable part of a tile,
+  the map smeared a row of them into a band of tall bare walls, and lifted tiles' silhouettes
+  stepped with the texels. The block is now band-limited to the map (`floorBlock`, used by the
+  height pass and the exact height alike): a feature rises at most SIDE_RISE (0.15) plane units
+  per map texel of ground from its outline (over ‖J‖, so a squeezed card counts its real
+  width). Near the camera a texel is tiny and the sides stand as before; far off they lean over
+  a few texels, which the map holds, so turning cards read as tilted cards in their colours and
+  the far silhouettes are smoother (a few leaned sides there shade as grey smudges). The exact
+  side refinement now runs only on steps over WALL_EPS + 0.1 × SIDE_RISE: leaned sides no
+  longer need it, which more than pays for the rest.
 
 ## Shader compile check (2026-10-23)
 
