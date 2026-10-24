@@ -236,6 +236,12 @@ vec4 tessAtlasShade(vec2 p, mat2 S);
 // its after-shift colour): gouges, features, the atlas art, the key block's outlines and the
 // fade to the mean. q seeds the ink-spread grain. marks returns the
 // gouge (x) and feature (y) coverage, for a surface that carves them (relief).
+#ifdef TESS_CINEMATIC
+// The cinematic Look's materials (look.glsl) need to know what each pixel of the print is: set by
+// tessPrintFill, the share of paper showing where the cuts reach it (a dark tile's gouges and
+// features); the rest is ink (the tile's colour block and the key block).
+float g_tessPaper = 0.0;
+#endif
 vec4 tessPrintFill(Tile t, vec3 fill, float fade, float pxq, float tileSize, float dpx, float m, vec2 q, out vec2 marks) {
   float fpx = 1.0 / u_tPxScale;                    // full-resolution px in target px
   bool dark = dot(fill, vec3(0.2126, 0.7152, 0.0722)) < 0.18;
@@ -274,6 +280,10 @@ vec4 tessPrintFill(Tile t, vec3 fill, float fade, float pxq, float tileSize, flo
 
   // Tiles too small to print fade to their mean.
   col = mix(u_tAvg, col, smoothstep(3.0 * fpx, 10.0 * fpx, tileSize));
+#ifdef TESS_CINEMATIC
+  g_tessPaper = dark ? max(marks.x * min(1.0, u_tHatch * 1.6), marks.y) * (1.0 - tessBand(dpx, u_tInkW * spread * fpx)) *
+                       smoothstep(3.0 * fpx, 10.0 * fpx, tileSize) : 0.0;
+#endif
   return vec4(col, 1.0);
 }
 

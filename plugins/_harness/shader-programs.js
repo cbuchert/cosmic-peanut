@@ -16,6 +16,7 @@ import { opartDefines } from "../builtin/src/lib/opart.js";
 import { glslDefines } from "../builtin/src/lib/skull-bounds.js";
 import { assembleShader, STRUCTURE_OPTIONS, STRUCTURES, structureFor } from "../builtin/src/lib/structures.js";
 import { includesOf, spliceIncludes, withDefines } from "../builtin/src/lib/tess-gl.js";
+import { lookDefines as tessLookDefines } from "../builtin/src/lib/tess-look.js";
 import { CINEMA_ASSETS, includeQuad } from "../cosmic-peanut/src/lib/cinema.js";
 import { shapeFor } from "../cosmic-peanut/src/lib/shapes.js";
 
@@ -76,16 +77,20 @@ const TESS = "builtin/shaders/tess/";
  * lib/tess-gl.js createTessPipeline: the surface with the engine (and atlas.glsl for a TESS_ATLAS
  * surface) spliced in; with relief, the relief and height-pass pair, and for an atlas surface the
  * carved animals' pair too (TESS_ATLAS_RELIEF); and paper.frag. Whether relief is on is read from
- * the visualizer's own `createTessPipeline(ctx, "<surface>", { relief: true })` call.
+ * the visualizer's own `createTessPipeline(ctx, "<surface>", { relief: true })` call. The
+ * cinematic Look (lib/tess-look.js): the surface's main programs again with TESS_CINEMATIC (plain,
+ * relief, carved animals), the composite (post.frag), the bloom chain (bloom.frag: KARIS, down,
+ * UP) and, for a `{ relief: true, dof: true }` surface, the depth-of-field gather (dof.frag).
  * @param {Read} read @param {string} viz @param {string} surface file name under shaders/tess/
  * @param {string} entry the visualizer's module, e.g. "builtin/src/metamorphosis.js"
  * @returns {Promise<Program[]>}
  */
 async function tessPipeline(read, viz, surface, entry) {
   const js = await read(entry);
-  const call = new RegExp(`createTessPipeline\\(ctx, "shaders/tess/${surface.replace(".", "\\.")}"(, \\{ relief: true \\})?\\)`).exec(js);
+  const call = new RegExp(`createTessPipeline\\(ctx, "shaders/tess/${surface.replace(".", "\\.")}"(, \\{ relief: true(, dof: true)? \\})?\\)`).exec(js);
   if (!call) throw new Error(`${entry}: no createTessPipeline(ctx, "shaders/tess/${surface}"…) call`);
   const relief = Boolean(call[1]);
+  const dof = Boolean(call[2]);
   const [vs, engine, paperFs, surfFs] = await Promise.all(["fullscreen.vert", "tess.glsl", "paper.frag", surface].map((f) => read(TESS + f)));
   const atlas = surfFs.includes("#define TESS_ATLAS") ? await read(TESS + "atlas.glsl") : "";
   /** @type {Record<string, string>} */
@@ -112,6 +117,19 @@ async function tessPipeline(read, viz, surface, entry) {
   if (relief) out.push(...reliefPair([], "relief"));
   if (relief && atlas) out.push(...reliefPair(["TESS_ATLAS_RELIEF"], "relief, atlas"));
   out.push({ viz, variant: "paper.frag", files: [TESS + "fullscreen.vert", TESS + "paper.frag"], vs, fs: paperFs });
+  // The cinematic Look (lib/tess-gl.js makeCinematic): the main programs with TESS_CINEMATIC.
+  const cine = tessLookDefines("cinematic");
+  out.push(at("cinematic", withDefines(src, cine)));
+  if (relief) out.push(at("relief, cinematic", withDefines(src, ["TESS_RELIEF", ...cine])));
+  if (relief && atlas) out.push(at("relief, atlas, cinematic", withDefines(src, ["TESS_RELIEF", "TESS_ATLAS_RELIEF", ...cine])));
+  const [postFs, bloomFs, dofFs] = await Promise.all(["post.frag", "bloom.frag", "dof.frag"].map((f) => read(TESS + f)));
+  /** @param {string} file @param {string} label @param {string} fs */
+  const own = (file, label, fs) => ({ viz, variant: label, files: [TESS + "fullscreen.vert", TESS + file], vs, fs });
+  out.push(own("post.frag", "post.frag", postFs));
+  out.push(own("bloom.frag", "bloom.frag (karis)", withDefines(bloomFs, ["KARIS"])));
+  out.push(own("bloom.frag", "bloom.frag", bloomFs));
+  out.push(own("bloom.frag", "bloom.frag (up)", withDefines(bloomFs, ["UP"])));
+  if (dof) out.push(own("dof.frag", "dof.frag", dofFs));
   return out;
 }
 

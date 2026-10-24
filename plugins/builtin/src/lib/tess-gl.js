@@ -25,8 +25,20 @@
  * runs a second pair of relief programs, compiled (on first use) with `TESS_ATLAS_RELIEF` too, in
  * which tessRelief / tessShadeRelief carve the bestiary's tiles (shaders/tess/atlas.glsl); the
  * warp's relief programs never carry that path, so they stay exactly as they were.
+ *
+ * Look (lib/tess-look.js; `setLook(look, quality)`): classic runs the programs above, untouched.
+ * Cinematic compiles the surface's programs again with `TESS_CINEMATIC` (on first use; the height
+ * pass is shared, it doesn't change), in which the surface lights the print with look.glsl's
+ * materials and AO and writes its circle of confusion to alpha. Then the post passes: depth of
+ * field (`{ dof: true }` surfaces, while `setFocus` gives an aperture; dof.frag), the highlight
+ * bloom (bloom.frag through lib/lattice-bloom.js) and the composite with the tone curve
+ * (post.frag) instead of paper.frag. The cinematic uniforms (`u_kFocus`, `u_kSamples`) are set
+ * here; a surface sets its own (`u_k*`) in its setSurface, where `look` tells it which programs
+ * are drawing.
  */
+import { createBloom } from "./lattice-bloom.js";
 import { createProgram, createTarget } from "./gl.js";
+import { BLOOM_GAIN, lookDefines, lookOf, lookSamples } from "./tess-look.js";
 
 const DIR = "shaders/tess/";
 /** Texture units of the atlas motif's field and art textures (lib/atlas-gl.js binds them). */
@@ -64,7 +76,7 @@ export const spliceIncludes = (src, files) => src.replace(INCLUDE, (line, name) 
  * @param {string} surface path of the surface fragment shader (it contains `// #include tess`, and
  *   may include other shaders/tess/<name>.glsl files the same way)
  */
-export async function createTessPipeline(ctx, surface, { relief = false } = {}) {
+export async function createTessPipeline(ctx, surface, { relief = false, dof = false } = {}) {
   const gl = /** @type {WebGL2RenderingContext} */ (ctx.gl);
   const [vs, engine, paperFs, surfFs] = await Promise.all(
     [DIR + "fullscreen.vert", DIR + "tess.glsl", DIR + "paper.frag", surface].map((f) => ctx.assets.text(f)),
@@ -99,6 +111,12 @@ export async function createTessPipeline(ctx, surface, { relief = false } = {}) 
     atlasUnits([pair.main, pair.height]);
     return pair;
   };
+  /** A cinematic main program (the height passes are the classic ones). @param {string[]} defs @param {string} label */
+  const cineProgram = (defs, label) => {
+    const pr = createProgram(gl, vs, withDefines(src, [...defs, ...lookDefines("cinematic")]), `${surface} (${label})`);
+    atlasUnits([pr]);
+    return pr;
+  };
   const rel = relief ? { ...reliefPair([], "relief"), target: createTarget(gl) } : null;
   /** The carved animals' relief pair, compiled the first time the atlas motif shows in relief. */
   let relAtlas = /** @type {ReturnType<typeof reliefPair> | null} */ (null);
@@ -109,10 +127,58 @@ export async function createTessPipeline(ctx, surface, { relief = false } = {}) 
   const target = createTarget(gl);
   let scale = 1;
 
+  /**
+   * The cinematic Look's programs and targets, made the first time it is used (classic never
+   * creates them). @type {null | {
+   *   plain: ReturnType<typeof createProgram>, relief: ReturnType<typeof createProgram> | null,
+   *   reliefAtlas: ReturnType<typeof createProgram> | null, post: ReturnType<typeof createProgram>,
+   *   dof: ReturnType<typeof createProgram> | null, dofTarget: ReturnType<typeof createTarget> | null,
+   *   bloom: ReturnType<typeof createBloom>, bloomProgs: import('./lattice-bloom.js').BloomPrograms }}
+   */
+  let cine = null;
+  let cinematic = false;
+  let samples = lookSamples("high");
+  /** setFocus: focus depth, aperture and cap (full-resolution px), the key light on screen. */
+  let focusZ = 1;
+  let aperture = 0;
+  let cocCap = 0;
+  let lightX = 0;
+  let lightY = 0;
+
+  async function makeCinematic() {
+    const [postFs, bloomFs, dofFs] = await Promise.all(["post.frag", "bloom.frag", "dof.frag"].map((f) => ctx.assets.text(DIR + f)));
+    const c = {
+      plain: cineProgram([], "cinematic"),
+      relief: rel ? cineProgram(["TESS_RELIEF"], "relief, cinematic") : null,
+      reliefAtlas: /** @type {ReturnType<typeof createProgram> | null} */ (null),
+      post: createProgram(gl, vs, postFs, DIR + "post.frag"),
+      dof: dof ? createProgram(gl, vs, dofFs, DIR + "dof.frag") : null,
+      dofTarget: dof ? createTarget(gl) : null,
+      bloom: createBloom(gl),
+      bloomProgs: {
+        karis: createProgram(gl, vs, withDefines(bloomFs, ["KARIS"]), DIR + "bloom.frag (karis)"),
+        down: createProgram(gl, vs, bloomFs, DIR + "bloom.frag"),
+        up: createProgram(gl, vs, withDefines(bloomFs, ["UP"]), DIR + "bloom.frag (up)"),
+      },
+    };
+    cine = c;
+    resize();
+  }
+
   function resize(/** @type {number} */ s = scale) {
     scale = s;
     target.resize(Math.max(1, Math.round(ctx.size.width * scale)), Math.max(1, Math.round(ctx.size.height * scale)));
     rel?.target.resize(Math.max(1, Math.round(target.width * HEIGHT_SCALE)), Math.max(1, Math.round(target.height * HEIGHT_SCALE)));
+    if (cine) {
+      cine.dofTarget?.resize(target.width, target.height);
+      cine.bloom.resize(target.width, target.height);
+    }
+  }
+
+  /** The cinematic uniforms of a program. @param {Record<string, WebGLUniformLocation | null>} u */
+  function uploadLook(u) {
+    gl.uniform4f(u.u_kFocus, focusZ, aperture * scale, cocCap * scale, 0);
+    gl.uniform4i(u.u_kSamples, samples.aoDirs, samples.aoSteps, samples.shadow, 0);
   }
 
   /**
@@ -146,6 +212,87 @@ export async function createTessPipeline(ctx, surface, { relief = false } = {}) 
     gl.uniform1fv(u.u_tLift, s.lift);
     gl.uniform4fv(u.u_tPop, s.pops);
   }
+  /** @type {Promise<void> | null} */
+  let pending = null;
+
+  /**
+   * The cinematic frame: the height pass (shared with classic), the cinematic print, then depth of
+   * field, bloom and the composite. @param {TessState} s @param {SetSurface} setSurface
+   * @param {number} motif @param {NonNullable<typeof cine>} c
+   */
+  function renderCinematic(s, setSurface, motif, c) {
+    const { width: w, height: h } = ctx.size;
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.bindVertexArray(vao);
+    let main = c.plain;
+    if (rel && c.relief && s.relief > 0) {
+      const atlasRelief = atlas && motif === 1;
+      if (atlasRelief && !relAtlas) relAtlas = reliefPair(["TESS_ATLAS_RELIEF"], "relief, atlas");
+      if (atlasRelief && !c.reliefAtlas) c.reliefAtlas = cineProgram(["TESS_RELIEF", "TESS_ATLAS_RELIEF"], "relief, atlas, cinematic");
+      const pair = atlasRelief && relAtlas ? relAtlas : rel;
+      main = atlasRelief && c.reliefAtlas ? c.reliefAtlas : c.relief;
+      const hu = pair.height.u;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, rel.target.fbo);
+      gl.viewport(0, 0, rel.target.width, rel.target.height);
+      gl.useProgram(pair.height.program);
+      gl.uniform2f(hu.u_res, rel.target.width, rel.target.height);
+      upload(hu, s, w);
+      uploadRelief(hu, s);
+      setSurface(gl, hu, rel.target.width, rel.target.height);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    const mu = main.u;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+    gl.viewport(0, 0, target.width, target.height);
+    gl.useProgram(main.program);
+    gl.uniform2f(mu.u_res, target.width, target.height);
+    upload(mu, s, w);
+    uploadLook(mu);
+    if (main !== c.plain && rel) {
+      uploadRelief(mu, s);
+      gl.activeTexture(gl.TEXTURE0 + HEIGHT_UNIT);
+      gl.bindTexture(gl.TEXTURE_2D, rel.target.tex);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.uniform1i(mu.u_tHeight, HEIGHT_UNIT);
+      gl.uniform2f(mu.u_tHeightTexel, 1 / rel.target.width, 1 / rel.target.height);
+    }
+    setSurface(gl, mu, target.width, target.height);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // Depth of field (the surface wrote its circle of confusion to alpha).
+    let print = target;
+    if (c.dof && c.dofTarget && aperture > 0) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, c.dofTarget.fbo);
+      gl.viewport(0, 0, c.dofTarget.width, c.dofTarget.height);
+      gl.useProgram(c.dof.program);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, target.tex);
+      gl.uniform1i(c.dof.u.u_src, 0);
+      gl.uniform2f(c.dof.u.u_texel, 1 / target.width, 1 / target.height);
+      gl.uniform1i(c.dof.u.u_taps, samples.dofTaps);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      print = c.dofTarget;
+    }
+    c.bloom.render(print.tex, print.width, print.height, c.bloomProgs, /** @type {WebGLVertexArrayObject} */ (vao));
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    gl.useProgram(c.post.program);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, c.bloom.tex);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, print.tex);
+    gl.uniform1i(c.post.u.u_print, 0);
+    gl.uniform1i(c.post.u.u_bloom, 1);
+    gl.uniform1f(c.post.u.u_bloomN, c.bloom.levels);
+    gl.uniform1f(c.post.u.u_bloomK, BLOOM_GAIN);
+    gl.uniform3fv(c.post.u.u_paper, s.paper);
+    gl.uniform1f(c.post.u.u_grain, GRAIN);
+    gl.uniform2f(c.post.u.u_lightScr, lightX, lightY);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
   resize();
 
   return {
@@ -160,6 +307,10 @@ export async function createTessPipeline(ctx, surface, { relief = false } = {}) 
      *   carved in relief), else 0
      */
     render(s, setSurface, motif = 0) {
+      if (cinematic && cine) {
+        renderCinematic(s, setSurface, motif, cine);
+        return;
+      }
       const { width: w, height: h } = ctx.size;
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
@@ -212,7 +363,49 @@ export async function createTessPipeline(ctx, surface, { relief = false } = {}) 
       gl.uniform1f(paper.u.u_grain, GRAIN);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },
+    /** True while the cinematic programs draw (a surface's setSurface may set its u_k* then). */
+    get look() {
+      return cinematic && cine ? "cinematic" : "classic";
+    },
+    /**
+     * Switch the Look (lib/tess-look.js lookOf) and the Quality's sample counts. The cinematic
+     * programs compile on the first switch (asynchronously: classic keeps drawing until they're
+     * ready). @param {unknown} look @param {unknown} quality
+     */
+    setLook(look, quality) {
+      cinematic = lookOf(look) === "cinematic";
+      samples = lookSamples(quality);
+      if (cinematic && !cine && !pending) {
+        pending = makeCinematic().catch((e) => {
+          // Classic keeps drawing; the error still surfaces (create awaits it, a param change rejects).
+          cinematic = false;
+          pending = null;
+          throw e;
+        });
+      }
+      return pending ?? Promise.resolve();
+    },
+    /**
+     * Depth of field for this frame (a `{ dof: true }` surface): the focus depth (the surface's
+     * own depth units), the blur far away and its cap, full-resolution px (0: none), and the key
+     * light's direction on screen for the paper's fibres (any surface; unit or 0).
+     * @param {number} z @param {number} blur @param {number} cap @param {number} lx @param {number} ly
+     */
+    setFocus(z, blur, cap, lx = 0, ly = 0) {
+      focusZ = z;
+      aperture = dof ? blur : 0;
+      cocCap = cap;
+      lightX = lx;
+      lightY = ly;
+    },
     dispose() {
+      if (cine) {
+        for (const p of [cine.plain, cine.relief, cine.reliefAtlas, cine.post, cine.dof, cine.bloomProgs.karis, cine.bloomProgs.down, cine.bloomProgs.up]) {
+          if (p) gl.deleteProgram(p.program);
+        }
+        cine.dofTarget?.dispose();
+        cine.bloom.dispose();
+      }
       target.dispose();
       for (const pair of [rel, relAtlas]) {
         if (!pair) continue;
