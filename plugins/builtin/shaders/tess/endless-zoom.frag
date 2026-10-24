@@ -87,8 +87,17 @@ float heightAt(vec2 z) {
   vec2 uv = 0.5 + 0.5 * (z + u_vp) / HEIGHT_MARGIN * min(u_res.x, u_res.y) / u_res;
   return texture(u_tHeight, uv).r * u_tRelief.z;
 }
+#ifdef TESS_CINEMATIC
+// The cinematic Look's horizon AO reads the height map round the shading point g_aoZ: offsets in
+// plane units (screen-turned) are g_aoK screen units each there.
+vec2 g_aoZ;
+float g_aoK;
+#define TESS_AO_HEIGHT(o) heightAt(g_aoZ + (o) * g_aoK)
+#define AO_RADIUS 0.12
 #endif
 #endif
+#endif
+// #include look
 
 void main() {
   float hs = 0.5 * min(u_res.x, u_res.y);
@@ -147,7 +156,9 @@ void main() {
     vec2 g = vec2(heightAt(Z + e.xy) - heightAt(Z - e.xy), heightAt(Z + e.yx) - heightAt(Z - e.yx));
     vec3 Nw = normalize(vec3(-g, 0.25 * length(g) + 1e-4));
     N = normalize(mix(N, Nw, wall));
+#ifndef TESS_CINEMATIC
     c.rgb *= 1.0 - 0.45 * wall;                  // the block's cut side, in the shade of its top
+#endif
   }
 
   vec3 L = u_light;
@@ -156,6 +167,9 @@ void main() {
   float k = rz / la;
   float reach = max(H - Pz, 0.0) / L.z;
   int ns = int(clamp(ceil(reach * length(L.xy) * k / texel / 4.0), 0.0, 8.0));
+#ifdef TESS_CINEMATIC
+  ns = tessShadowSteps(ns);
+#endif
   for (int i = 1; i <= 8; i++) {
     if (i > ns) break;
     float t = reach * ((float(i) - jit) / float(ns)) + texel / k;
@@ -163,12 +177,22 @@ void main() {
     shadow = min(shadow, clamp(0.5 + 6.0 * clear / t, 0.0, 1.0));
   }
   shadow = smoothstep(0.0, 1.0, shadow);
+#ifdef TESS_CINEMATIC
+  // Physically based print materials (look.glsl) and horizon AO from the map, in the screen frame.
+  vec3 V = normalize(vec3(-(Z / rz) * ZOOM_LEAN, 1.0));
+  g_aoZ = Z;
+  g_aoK = k;
+  float ao = mix(1.0, tessHorizonAO(Pz, vec2(dot(pl.grad, u), dot(pl.grad, vec2(-u.y, u.x))), AO_RADIUS, jit), kf);
+  float px = sqrt(abs(determinant(S)));
+  o = vec4(tessLookShade(c.rgb, g_tessPaper, wall, tessEndGrain(vec3(zoomP(Z), Pz), px), N, vec3(0.0, 0.0, 1.0), V, L, shadow, ao, 0.36, 0.64, L.z), 1.0);
+#else
   float diff = max(dot(N, L), 0.0) / L.z;        // a flat top in full light prints as it is
   float ao = 1.0 - 0.28 * kf * (1.0 - smoothstep(0.0, 1.0, Pz / max(zRef, 1e-6)));
   float shade = 0.36 + 0.64 * min(diff * shadow, 1.6);
   vec3 V = normalize(vec3(-(Z / rz) * ZOOM_LEAN, 1.0));
   float sheen = pow(max(dot(reflect(-L, N), V), 0.0), 24.0) * shadow * 0.08;
   o = vec4(c.rgb * shade * ao + sheen, 1.0);
+#endif
   // Tiles too small to print fade (in the engine) to their mean; then into a soft point.
   float kv = 1.0 - smoothstep(u_vanish.x, u_vanish.y, r0);
   o.rgb = mix(o.rgb, mix(u_tInk, u_tPaper, u_vanish.z), kv * kv);

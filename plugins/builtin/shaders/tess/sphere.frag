@@ -78,8 +78,18 @@ float solid(vec3 P, float sg) {
   float r = length(P);
   return sg * (r - 1.0) - u_dispK * heightAt(P);
 }
+#ifdef TESS_CINEMATIC
+// The cinematic Look's horizon AO reads the height map round the direction g_aoD: an offset o in
+// plane units along the face chart's axes (g_aoU, g_aoV) turns the direction by o · π / 2N.
+vec3 g_aoD;
+vec3 g_aoU;
+vec3 g_aoV;
+#define TESS_AO_HEIGHT(o) heightAt(g_aoD + ((o).x * g_aoU + (o).y * g_aoV) * (1.5707963 / u_N))
+#define AO_RADIUS 0.12
 #endif
 #endif
+#endif
+// #include look
 
 #if defined(TESS_HEIGHT_PASS)
 void main() {
@@ -180,7 +190,11 @@ void main() {
   // The paper round the sphere skips the print (most of the frame outside). Only quads straddling
   // the silhouette mix the two, where the print's fine-carving derivatives barely show.
   if (cover <= 0.0) {
+#ifdef TESS_CINEMATIC
+    o = vec4(mix(bg, paper, u_veil), tessCoC(1e6));
+#else
     o = vec4(mix(bg, paper, u_veil), 1.0);
+#endif
     return;
   }
 
@@ -216,7 +230,9 @@ void main() {
     vec2 g = vec2(heightAt(dir + e * tu) - heightAt(dir - e * tu), heightAt(dir + e * tv) - heightAt(dir - e * tv));
     vec3 Nw = normalize(-(g.x * tu + g.y * tv) + n0 * (0.25 * length(g) + 1e-4));
     N = normalize(mix(N, Nw, wall));
+#ifndef TESS_CINEMATIC
     c.rgb *= 1.0 - 0.45 * wall;                      // the block's cut side, in the shade of its top
+#endif
   }
 
   vec3 L = u_rot * u_rlight;
@@ -226,6 +242,9 @@ void main() {
   float reach = up > 0.05 ? max(A - sg * (r - 1.0), 0.0) / up : 0.0;
   float tw = texel;                                  // a texel, world (on the unit sphere)
   int ns = int(clamp(ceil(reach / tw / 4.0), 0.0, 8.0));
+#ifdef TESS_CINEMATIC
+  ns = tessShadowSteps(ns);
+#endif
   for (int i = 1; i <= 8; i++) {
     if (i > ns) break;
     float t = reach * ((float(i) - jit) / float(ns)) + tw;
@@ -242,9 +261,22 @@ void main() {
   float ndv = abs(dot(dir, dr));
   float limb = inside ? 0.82 + 0.18 * ndv : 1.0 - 0.38 * pow(1.0 - ndv, 2.0);
 
+#ifdef TESS_CINEMATIC
+  // Physically based print materials (look.glsl), horizon AO from the charts' heights, the
+  // circle of confusion (depth along the view) in alpha.
+  g_aoD = dir;
+  g_aoU = normalize(F[1] - dir * su);
+  g_aoV = normalize(F[2] - dir * sv);
+  ao = tessHorizonAO(hp, pl.grad, AO_RADIUS, jit);
+  float px = sqrt(abs(determinant(S)));
+  vec3 col = tessLookShade(c.rgb, g_tessPaper, wall, tessEndGrain(vec3(p, hp), px), N, n0, -dr, L, shadow, ao, 0.42, 0.58, max(up, 0.5)) * limb;
+  col = mix(bg, col, cover);
+  o = vec4(mix(col, paper, u_veil), tessCoC(seg ? mix(tA, tB, t1) * dot(rd, u_cam[2]) : 1e6));
+#else
   vec3 col = c.rgb * shade * ao * limb + sheen;
   col = mix(bg, col, cover);
   o = vec4(mix(col, paper, u_veil), 1.0);
+#endif
 }
 #else
 void main() {
@@ -293,6 +325,10 @@ void main() {
     col *= lit * limb;
   }
   col = mix(bg, col, cover);
+#ifdef TESS_CINEMATIC
+  o = vec4(mix(col, paper, u_veil), tessCoC(disc > 0.0 ? (inside ? -b + sq : -b - sq) * dot(rd, u_cam[2]) : 1e6));
+#else
   o = vec4(mix(col, paper, u_veil), 1.0);
+#endif
 }
 #endif

@@ -29,6 +29,10 @@
  * Relief carves the animals too: each is a block bevelled along its outline, domed and with its
  * fins raised and its scales carved by the species' height hints (the atlas's height channel),
  * and the beat waves, pops and card turns move each animal as a whole.
+ *
+ * Look (lib/tess-look.js): classic is the print as above, untouched; cinematic lights the carved
+ * block with physically based print materials (satin ink, paper, end grain), horizon AO in the
+ * grooves, a faint highlight bloom and a film-like shoulder (shaders/tess/look.glsl, post.frag).
  */
 import { createAtlas } from "./lib/atlas-gl.js";
 import { atlasBlockMax, createCreatures, creatureList, hintMax } from "./lib/atlas.js";
@@ -79,6 +83,7 @@ export default async function create(ctx) {
   let sr = 0;
 
   tess.resize(renderScale(ctx.params.quality));
+  await tess.setLook(ctx.params.look, ctx.params.quality);
 
   // The bestiary, loaded the first time Creatures leaves "abstract".
   const creatures = createCreatures();
@@ -203,6 +208,9 @@ export default async function create(ctx) {
       cr = Math.cos(turn);
       sr = Math.sin(turn);
 
+      // Cinematic: no depth of field on the flat block; the paper's fibres catch the light.
+      const ll = Math.hypot(light[0], light[1]) || 1;
+      tess.setFocus(1, 0, 0, (cr * light[0] - sr * light[1]) / ll, (sr * light[0] + cr * light[1]) / ll);
       tess.render(s, surface, atlasOn ? 1 : 0);
     },
 
@@ -212,6 +220,7 @@ export default async function create(ctx) {
 
     params(changed) {
       if ("quality" in changed) tess.resize(renderScale(ctx.params.quality));
+      if ("look" in changed || "quality" in changed) tess.setLook(ctx.params.look, ctx.params.quality);
       if ("creatures" in changed) select(String(ctx.params.creatures));
     },
 

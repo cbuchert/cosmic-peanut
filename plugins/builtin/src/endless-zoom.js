@@ -69,6 +69,7 @@ export default async function create(ctx) {
   let flip = 0;
 
   tess.resize(renderScale(ctx.params.quality));
+  await tess.setLook(ctx.params.look, ctx.params.quality);
 
   /** @type {import('./lib/tess-gl.js').SetSurface} */
   const surface = (gl, u, w, h) => {
@@ -113,6 +114,10 @@ export default async function create(ctx) {
       // Fronts ripple with the flow; the ring order only changes while no front is under way.
       if (s.invert[0] <= -0.5 * s.invert[1] + 1e-6) flip = params.direction === "out" ? 1 : 0;
 
+      // Cinematic: no depth of field (the zoom is self-similar, no subject depth); the paper's
+      // fibres catch the light, fixed to the screen.
+      const ll = Math.hypot(light[0], light[1]) || 1;
+      tess.setFocus(1, 0, 0, light[0] / ll, light[1] / ll);
       tess.render(s, surface);
     },
 
@@ -122,6 +127,7 @@ export default async function create(ctx) {
 
     params(changed) {
       if ("quality" in changed) tess.resize(renderScale(ctx.params.quality));
+      if ("look" in changed || "quality" in changed) tess.setLook(ctx.params.look, ctx.params.quality);
     },
 
     pointer(e) {

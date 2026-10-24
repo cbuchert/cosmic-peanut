@@ -25,6 +25,7 @@
  */
 import { createProgram } from "./lib/gl.js";
 import { createTessPipeline, HEIGHT_UNIT } from "./lib/tess-gl.js";
+import { createFocus, tubeWallAhead } from "./lib/tess-look.js";
 import { createTessState, lightDir, renderScale } from "./lib/tess-music.js";
 import { createTorusCamera, insideScale, latticeCounts, mapParams, twistTurns } from "./lib/torus.js";
 import { RELIEF_CAP, RELIEF_SCALE, reliefShell, reliefSlope, reliefStep, ringWindow, STEP_REACH } from "./lib/torus-relief.js";
@@ -39,9 +40,17 @@ const MAP_UNIT = 2;
 const MAP_W = 512;
 const MAP_H = 256;
 
+/**
+ * Cinematic depth of field inside the tube: focus on the wall ahead (where the walls meet the
+ * middle of the view); the blur far away and its cap (full-resolution px on a 1440-px-high
+ * canvas). It opens with the dive (the inside look's share), none outside.
+ */
+const DOF_FAR = 4;
+const DOF_CAP = 7;
+
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
-  const tess = await createTessPipeline(ctx, "shaders/tess/torus.frag", { relief: true });
+  const tess = await createTessPipeline(ctx, "shaders/tess/torus.frag", { relief: true, dof: true });
   const state = createTessState();
   const cam = createTorusCamera();
   const counts = { nu: 0, nv: 0, lx: 0, ly: 0 };
@@ -139,6 +148,9 @@ export default async function create(ctx) {
     tess.resize(side < 0 ? insideScale(q) : renderScale(q));
   };
   setQuality();
+  await tess.setLook(ctx.params.look, ctx.params.quality);
+  const focus = createFocus(1);
+  let focused = false;
 
   /** @type {import('./lib/tess-gl.js').SetSurface} */
   const surface = (gl, u) => {
@@ -219,6 +231,16 @@ export default async function create(ctx) {
         stepK = stepFactor(history, amp, p.thickness);
       }
       if (canMap) renderMap();
+      // Cinematic: focus on the tube wall ahead inside (outside, on the ring's near side), eased;
+      // Reduce motion holds it. Depth of field opens with the inside look.
+      const c = cam.pose;
+      const ahead = cam.mix * tubeWallAhead(p.thickness) + (1 - cam.mix) * Math.max(0.2, Math.hypot(c.pos[0], c.pos[1], c.pos[2]) - 1);
+      if (!focused) focus.reset(ahead);
+      focused = true;
+      focus.step(ahead, time.dt, ctx.reduceMotion);
+      const px = (ctx.size.height / 1440) * cam.mix;
+      const ll = Math.hypot(light[0], light[1]) || 1;
+      tess.setFocus(focus.distance, DOF_FAR * px, DOF_CAP * px, light[0] / ll, light[1] / ll);
       tess.render(s, surface);
     },
 
@@ -232,6 +254,7 @@ export default async function create(ctx) {
 
     params(changed) {
       if ("quality" in changed) setQuality();
+      if ("look" in changed || "quality" in changed) tess.setLook(ctx.params.look, ctx.params.quality);
     },
 
     dispose() {

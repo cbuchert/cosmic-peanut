@@ -45,6 +45,7 @@ import { faceCells, sphereTables } from "./lib/cube-sphere.js";
 import { sphereFrame, threeClassColors } from "./lib/sphere-view.js";
 import { createTessPipeline } from "./lib/tess-gl.js";
 import { createDiskOptions, createDiskView, createDiskWarp, diskGeometry, diskGroup, kiteIds, readDiskParams } from "./lib/tess-disk.js";
+import { createFocus } from "./lib/tess-look.js";
 import { createTessState, LIFT_VARY, lightDir, REDUCED_FLASH_LIFT, REDUCED_GLIDE, renderScale } from "./lib/tess-music.js";
 import { MAX_TILE_COLORS, paletteOf } from "./lib/tess.js";
 
@@ -78,6 +79,14 @@ const unit = (v) => {
   return [v[0] / l, v[1] / l, v[2] / l];
 };
 
+/**
+ * Cinematic depth of field in the sphere scene: focus on the coin (its centre's depth along the
+ * view), so the skim's near rim and far side and the wall behind soften; the blur far away and its
+ * cap (full-resolution px on a 1440-px-high canvas).
+ */
+const DOF_FAR = 5;
+const DOF_CAP = 10;
+
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
   const gl = /** @type {WebGL2RenderingContext} */ (ctx.gl);
@@ -85,7 +94,7 @@ export default async function create(ctx) {
   // their plain programs, exactly the print as it was before relief.
   const [tess, tess3d] = await Promise.all([
     createTessPipeline(ctx, "shaders/tess/disk.frag", { relief: true }),
-    createTessPipeline(ctx, "shaders/tess/disk3d.frag", { relief: true }),
+    createTessPipeline(ctx, "shaders/tess/disk3d.frag", { relief: true, dof: true }),
   ]);
   const state = createTessState();
   const warp = createDiskWarp();
@@ -144,6 +153,9 @@ export default async function create(ctx) {
   const scale = renderScale(ctx.params.quality);
   tess.resize(scale);
   tess3d.resize(scale);
+  await Promise.all([tess.setLook(ctx.params.look, ctx.params.quality), tess3d.setLook(ctx.params.look, ctx.params.quality)]);
+  const focus = createFocus(1);
+  let focused = false;
 
   /** The hyperbolic tiling's uniforms (both scenes). @param {WebGL2RenderingContext} gl @param {Record<string, WebGLUniformLocation | null>} u */
   const diskUniforms = (gl, u) => {
@@ -447,6 +459,17 @@ export default async function create(ctx) {
       nTiles = paletteOf(palName, pal);
     }
     threeClassColors(pal, nTiles, s.shift, cls, clsNext);
+    // Cinematic: focus on the coin, eased; Reduce motion holds it (no focus pulling).
+    const e = director.eye;
+    const ahead = Math.max(0.05, -(e[0] * cam[6] + e[1] * cam[7] + e[2] * cam[8]));
+    if (!focused) focus.reset(ahead);
+    focused = true;
+    focus.step(ahead, dt, ctx.reduceMotion);
+    const px = ctx.size.height / 1440;
+    const lr = keyL[0] * cam[0] + keyL[1] * cam[1] + keyL[2] * cam[2];
+    const lu = keyL[0] * cam[3] + keyL[1] * cam[4] + keyL[2] * cam[5];
+    const lh = Math.hypot(lr, lu) || 1;
+    tess3d.setFocus(focus.distance, DOF_FAR * px, DOF_CAP * px, lr / lh, lu / lh);
     tess3d.render(s, surface3d);
   }
 
@@ -480,6 +503,8 @@ export default async function create(ctx) {
         setRange(b.lo, b.hi);
         lightDir(opts.light, lightF);
       }
+      const ll = Math.hypot(lightF[0], lightF[1]) || 1;
+      tess.setFocus(1, 0, 0, lightF[0] / ll, lightF[1] / ll);
       tess.render(s, surface);
     },
 
@@ -493,6 +518,10 @@ export default async function create(ctx) {
         const sc = renderScale(ctx.params.quality);
         tess.resize(sc);
         tess3d.resize(sc);
+      }
+      if ("look" in changed || "quality" in changed) {
+        tess.setLook(ctx.params.look, ctx.params.quality);
+        tess3d.setLook(ctx.params.look, ctx.params.quality);
       }
     },
 

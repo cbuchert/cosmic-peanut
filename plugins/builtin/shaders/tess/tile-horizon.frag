@@ -96,8 +96,15 @@ float heightAt(vec2 p) {
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
   return texture(u_tHeight, uv).r * u_rel.y;
 }
+#ifdef TESS_CINEMATIC
+// The cinematic Look's horizon AO reads the height map round the shading point g_aoP.
+vec2 g_aoP;
+#define TESS_AO_HEIGHT(o) heightAt(g_aoP + (o))
+#define AO_RADIUS 0.12
 #endif
 #endif
+#endif
+// #include look
 
 void main() {
   float hs = 0.5 * min(u_res.x, u_res.y);
@@ -118,7 +125,11 @@ void main() {
   vec3 d = floorRay(s);
   float down = -d.z;
   if (down <= 0.0) {
+#ifdef TESS_CINEMATIC
+    o = vec4(tessAtmos(u_tPaper, 1.0, 1.0), tessCoC(1e6));
+#else
     o = vec4(u_tPaper, 1.0);
+#endif
     return;
   }
   vec3 E = u_cam;
@@ -188,7 +199,11 @@ void main() {
   float footA = smoothstep(0.5 / 16.0, 0.5 / 5.0, fp);
   float a = max(fogA, footA);
   if (a > 0.995) {
+#ifdef TESS_CINEMATIC
+    o = vec4(tessAtmos(u_tPaper, 1.0, a), tessCoC(t1 * u_focal));
+#else
     o = vec4(u_tPaper, 1.0);
+#endif
     return;
   }
   float k = floorK(P.xy);
@@ -217,7 +232,9 @@ void main() {
     N = normalize(mix(N, Nw, wall));
     // The block's cut side: bare wood (the print's mean colour, no marks: the outline of the tile
     // in front would smear up it) in the shade of its top.
+#ifndef TESS_CINEMATIC
     c.rgb = mix(c.rgb, u_tAvg, wall) * (1.0 - 0.45 * wall);
+#endif
   }
 
   vec3 L = u_light;
@@ -225,6 +242,9 @@ void main() {
   float shadow = 1.0;
   float reach = max(top - P.z, 0.0) / L.z;
   int ns = int(clamp(ceil(reach * length(L.xy) / texel / 4.0), 0.0, 8.0));
+#ifdef TESS_CINEMATIC
+  ns = tessShadowSteps(ns);
+#endif
   for (int i = 1; i <= 8; i++) {
     if (i > ns) break;
     float t = reach * ((float(i) - jit) / float(ns)) + texel;
@@ -233,6 +253,15 @@ void main() {
     shadow = min(shadow, clamp(0.5 + 6.0 * clear / t, 0.0, 1.0));
   }
   shadow = smoothstep(0.0, 1.0, shadow);
+#ifdef TESS_CINEMATIC
+  // Physically based print materials under the same light (look.glsl), horizon AO from the map,
+  // paper-coloured atmosphere towards the horizon, and the circle of confusion in alpha.
+  vec3 V = normalize(E - P);
+  g_aoP = P.xy;
+  float ao = mix(1.0, tessHorizonAO(P.z, pl.grad, AO_RADIUS, jit), fade);
+  vec3 lit = tessLookShade(c.rgb, g_tessPaper, wall, tessEndGrain(P, fp), N, vec3(0.0, 0.0, 1.0), V, L, shadow, ao, 0.36, 0.64, L.z);
+  o = vec4(tessAtmos(lit, a, a), tessCoC(t1 * u_focal));
+#else
   float diff = max(dot(N, L), 0.0) / L.z;              // a flat top in full light prints as it is
   float zRef = u_tRelief.x * RELIEF_BLOCK * k;         // resting tops
   float ao = 1.0 - 0.28 * fade * (1.0 - clamp(P.z / max(zRef, 1e-6), 0.0, 1.0));
@@ -240,6 +269,7 @@ void main() {
   vec3 V = normalize(E - P);
   float sheen = pow(max(dot(reflect(-L, N), V), 0.0), 24.0) * shadow * 0.08;
   o = vec4(mix(c.rgb * shade * ao + sheen, u_tPaper, a), 1.0);
+#endif
 #else
   vec3 d = u_fwd * u_focal + u_right * s.x + u_up * s.y;
   float down = -d.z;
@@ -253,10 +283,18 @@ void main() {
   float footA = smoothstep(0.5 / 16.0, 0.5 / 5.0, fp); // half-unit tile under 16 → 5 px
   float a = down <= 0.0 ? 1.0 : max(fogA, footA);
   if (a > 0.995) {
+#ifdef TESS_CINEMATIC
+    o = vec4(tessAtmos(u_tPaper, 1.0, a), tessCoC(down > 0.0 ? t * u_focal : 1e6));
+#else
     o = vec4(u_tPaper, 1.0);
+#endif
     return;
   }
   vec4 c = tessShade(p, S);
+#ifdef TESS_CINEMATIC
+  o = vec4(tessAtmos(c.rgb, a, a), tessCoC(t * u_focal));
+#else
   o = vec4(mix(c.rgb, u_tPaper, a), 1.0);
+#endif
 #endif
 }
