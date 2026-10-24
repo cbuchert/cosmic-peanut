@@ -2,16 +2,22 @@
 import { describe, expect, it } from "vitest";
 import {
   ATLAS_ERODE,
+  ATLAS_HINT,
+  atlasBlock,
+  atlasBlockMax,
   createAtlasUniforms,
   createCreatures,
   creatureList,
   DATA_W,
   dwellSteps,
+  hintAt,
+  hintMax,
   packLibrary,
   packShape,
   TYPE_CHANGE_EVERY,
 } from "./atlas.js";
-import { blendShapes, createShape, parseSpecies, plainOf, TYPES } from "./bestiary.js";
+import { blendShapes, createShape, inside, parseSpecies, plainOf, TYPES } from "./bestiary.js";
+import { RELIEF_BLOCK, reliefBound, reliefProfile } from "./tess.js";
 
 /** @param {keyof typeof TYPES} type @param {number} bump @param {string} name */
 function species(type, bump, name, group = "fish") {
@@ -240,3 +246,155 @@ describe("createCreatures", () => {
     expect(c.plain).toBe(before);
   });
 });
+
+describe("relief hint (the bake's height channel)", () => {
+  // A raised boss (0.6) and a carved pit (−0.4) on a domed body; a second species, compatible,
+  // with a raised ridge where the first has its pit.
+  /** @param {string} name @param {any[]} art @param {Record<string, number>} parts @param {number} dome */
+  const carved = (name, art, parts, dome, type = /** @type {keyof typeof TYPES} */ ("TGTG")) => {
+    /** @type {Record<string, any>} */
+    const edges = {};
+    for (const e of TYPES[type].free) edges[`e${e}`] = { smooth: [[0.3, 0.04], [0.7, -0.04]] };
+    /** @type {Record<string, string>} */
+    const colours = {};
+    for (const a of art) colours[a.part] = "cut";
+    return parseSpecies({ format: 1, name, group: "fish", type, edges, art, colours, height: { dome, parts } }, `fish/${name}.json`);
+  };
+  const A = carved(
+    "a",
+    [
+      { part: "boss", circle: [0.5, 0.5, 0.1] },
+      { part: "pit", fill: { polyline: [[0.2, 0.2], [0.32, 0.2], [0.32, 0.32], [0.2, 0.32]] } },
+    ],
+    { boss: 0.6, pit: -0.4 },
+    0.7,
+  );
+  const B = carved("b", [{ part: "ridge", stroke: { polyline: [[0.15, 0.26], [0.4, 0.26]] }, width: 0.05 }], { ridge: 0.5 }, 0.3);
+  const C = carved("c", [{ part: "shell", circle: [0.5, 0.5, 0.2] }], { shell: 0.9 }, 1, "C4");
+  const lib = packLibrary([A, B, C, plainOf(A), plainOf(C)]);
+  const set = (/** @type {string} */ id) => /** @type {{ start: number, count: number }} */ (lib.sets.get(id));
+  const none = { start: 0, count: 0 };
+  const dome = (/** @type {number} */ k, /** @type {number} */ d) => k * (1 - (1 - Math.min(d / 0.35, 1)) ** 2);
+
+  it("is the body's dome plus the height of the part on top, deep inside each part", () => {
+    const h = (/** @type {number} */ x, /** @type {number} */ y) => hintAt(lib.data, set("fish/a"), none, 0, 0, 0.7, 0.3, x, y);
+    expect(h(0.5, 0.5)).toBeCloseTo(dome(0.7, 0.3) + 0.6, 6);
+    expect(h(0.26, 0.26)).toBeCloseTo(dome(0.7, 0.3) - 0.4, 6);
+    expect(h(0.8, 0.2)).toBeCloseTo(dome(0.7, 0.3), 6);
+    // The dome is 0 at the outline (the bevel starts at the groove) and tops out DOME_REACH in.
+    expect(hintAt(lib.data, none, none, 0, 0, 0.7, 0, 0.8, 0.2)).toBe(0);
+    expect(hintAt(lib.data, none, none, 0, 0, 0.7, 1, 0.8, 0.2)).toBeCloseTo(0.7, 9);
+  });
+
+  it("has no step at a part's edge (a march and its normals need a continuous height)", () => {
+    let worst = 0;
+    const dx = 0.0005;
+    let prev = hintAt(lib.data, set("fish/a"), none, 0, 0, 0, 0.3, 0.3, 0.5);
+    for (let x = 0.3 + dx; x < 0.7; x += dx) {
+      const h = hintAt(lib.data, set("fish/a"), none, 0, 0, 0, 0.3, x, 0.5);
+      worst = Math.max(worst, Math.abs(h - prev));
+      prev = h;
+    }
+    // A raised part rises over at least ~6 base texels of a 512² bake (no cliff).
+    expect(worst).toBeLessThan(0.6 * (dx / 0.012));
+    expect(worst).toBeGreaterThan(0); // it does rise
+  });
+
+  /**
+   * Run createCreatures through a change at 60 fps and return the largest per-frame change of the
+   * block height (atlasBlock, × RELIEF_BLOCK at Relief 1) over a grid of base-frame points.
+   * @param {import('./bestiary.js').Species[]} list
+   */
+  const worstFrame = (list) => {
+    const c = createCreatures();
+    c.setSpecies(list);
+    const s = createShape();
+    const o = { stepped: false, morph: 1, reduceMotion: false };
+    /** @type {number[] | null} */
+    let prev = null;
+    let worst = 0;
+    let moved = false;
+    for (let f = 0; f < 60 * 4; f++) {
+      o.stepped = f === 1;
+      c.step(1 / 60, o);
+      moved ||= c.moving;
+      blendShapes(c.a, c.b, c.w, s);
+      const sa = set(c.a.id);
+      const sb = c.a === c.b ? none : set(c.b.id);
+      const dm = c.a.dome + (c.b.dome - c.a.dome) * c.w;
+      /** @type {number[]} */
+      const now = [];
+      for (let i = 1; i < 12; i++) {
+        for (let j = 1; j < 12; j++) {
+          const x = s.box[0] + ((s.box[2] - s.box[0]) * i) / 12;
+          const y = s.box[1] + ((s.box[3] - s.box[1]) * j) / 12;
+          let blk = 0;
+          if (inside(s, x, y)) {
+            const d = outlineDist(s, x, y);
+            blk = RELIEF_BLOCK * atlasBlock(reliefProfile(d * TYPES[s.type].scale, 0.35), hintAt(lib.data, sa, sb, c.erodeA, c.erodeB, dm, d, x, y), c.dip);
+          }
+          now.push(blk);
+        }
+      }
+      if (prev) for (let k = 0; k < now.length; k++) worst = Math.max(worst, Math.abs(now[k] - prev[k]));
+      prev = now;
+    }
+    expect(moved).toBe(true);
+    return worst;
+  };
+
+  it("blends smoothly while species morph and the atlas re-bakes: no part pops in or out", () => {
+    // A part 0.6 tall is ATLAS_HINT · 0.6 · RELIEF_BLOCK of block; no frame moves it a quarter of that.
+    expect(worstFrame([A, B])).toBeLessThan(0.25 * ATLAS_HINT * 0.6 * RELIEF_BLOCK);
+  });
+
+  it("flattens through a change of tile type, so the swap of outlines doesn't jump", () => {
+    // The tallest block here is atlasBlockMax(1.9) RELIEF_BLOCKs; it lays down and rises again
+    // eased (the print's dip), no frame moving it an eighth of the way.
+    expect(worstFrame([A, C])).toBeLessThan(0.125 * atlasBlockMax(hintMax(C)) * RELIEF_BLOCK);
+  });
+
+  it("bounds every hint and block (the march starts at the bound)", () => {
+    expect(hintMax(A)).toBeCloseTo(0.7 + 0.6, 9);
+    expect(hintMax(B)).toBeCloseTo(0.3 + 0.5, 9);
+    expect(hintMax(plainOf(A))).toBe(0);
+    // An all-carved species: the dome alone.
+    const D = carved("d", [{ part: "pit", circle: [0.5, 0.5, 0.1] }], { pit: -0.5 }, 0.4);
+    expect(hintMax(D)).toBeCloseTo(0.4, 9);
+    for (const sp of [A, B, C, D]) {
+      const top = hintMax(sp);
+      const own = packLibrary([sp]);
+      const ss = /** @type {{ start: number, count: number }} */ (own.sets.get(sp.id));
+      for (let i = 0; i < 200; i++) {
+        const x = (i % 20) / 20;
+        const y = Math.floor(i / 20) / 10;
+        expect(hintAt(own.data, ss, none, 0, 0, sp.dome, 1, x, y)).toBeLessThanOrEqual(top + 1e-6);
+      }
+      for (const prof of [0, 0.5, 1]) {
+        expect(atlasBlock(prof, top, 0)).toBeLessThanOrEqual(atlasBlockMax(top) + 1e-9);
+      }
+    }
+    expect(atlasBlockMax(0)).toBe(1);
+    expect(atlasBlockMax(1.3)).toBeCloseTo(1 + ATLAS_HINT * 1.3, 9);
+    // The groove stays at the floor, and the dip lays the whole block down.
+    expect(atlasBlock(0, 1.3, 0)).toBe(0);
+    expect(atlasBlock(1, 1.3, 1)).toBe(0);
+    // reliefBound takes the block's bound.
+    expect(reliefBound(1, 0, 0, false, 0, atlasBlockMax(1.3))).toBeCloseTo(RELIEF_BLOCK * (1 + ATLAS_HINT * 1.3), 9);
+    expect(reliefBound(0.6, 0.1, 0.02, true, 0.08)).toBe(reliefBound(0.6, 0.1, 0.02, true, 0.08, 1));
+  });
+});
+
+/** Distance from (x, y) to a shape's outline (tile frame). @param {ReturnType<typeof createShape>} s @param {number} x @param {number} y */
+function outlineDist(s, x, y) {
+  let best = Infinity;
+  for (let i = 0, j = s.n - 1; i < s.n; j = i++) {
+    const ax = s.outline[j * 2];
+    const ay = s.outline[j * 2 + 1];
+    const bx = s.outline[i * 2] - ax;
+    const by = s.outline[i * 2 + 1] - ay;
+    const h = Math.min(1, Math.max(0, ((x - ax) * bx + (y - ay) * by) / Math.max(bx * bx + by * by, 1e-12)));
+    best = Math.min(best, Math.hypot(x - ax - bx * h, y - ay - by * h));
+  }
+  return best;
+}

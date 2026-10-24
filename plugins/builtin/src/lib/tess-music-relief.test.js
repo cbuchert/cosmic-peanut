@@ -411,6 +411,24 @@ describe("tess state with relief", () => {
     expect(st.step(drums(0), DT, opts({ relief: 0 })).reliefMax).toBe(0);
   });
 
+  it("raises the bound for a taller block (carved animals: reliefBlock), leaving the rest as it was", () => {
+    const a = createTessState();
+    const b = createTessState();
+    for (let i = 0; i < 600; i++) {
+      const sa = a.step(drums(i), DT, opts({ relief: 0.6 }));
+      const sb = b.step(drums(i), DT, opts({ relief: 0.6, reliefBlock: 1.8 }));
+      expect(sb.reliefMax).toBeCloseTo(sa.reliefMax + 0.6 * RELIEF_BLOCK * 0.8, 9);
+      expect(Array.from(sb.lift)).toEqual(Array.from(sa.lift));
+      expect(Array.from(sb.pops)).toEqual(Array.from(sa.pops));
+    }
+    // Without the option, or at 1, the bound is the plain block's.
+    const c = createTessState();
+    const d = createTessState();
+    for (let i = 0; i < 60; i++) {
+      expect(c.step(drums(i), DT, opts({ relief: 0.6, reliefBlock: 1 })).reliefMax).toBe(d.step(drums(i), DT, opts({ relief: 0.6 })).reliefMax);
+    }
+  });
+
   it("stronger defaults: at Relief and Reactivity's defaults a bar's beat lifts tiles a fifth of a tile", () => {
     const st = createTessState();
     let peak = 0;
