@@ -169,6 +169,21 @@ float disp(float theta, float phi) {
   return u_amp * texture(u_dispMap, uv).r;
 }
 
+#ifdef TESS_RELIEF
+// The block's height as the height pass bakes it (plane units): each tile capped at RELIEF_SLOPE
+// × its distance to its outline over the warp's largest stretch ‖J‖ (so its cut sides lean),
+// and a card's bed is the floor.
+float jNorm(mat2 J) {
+  float tt = dot(J[0], J[0]) + dot(J[1], J[1]);
+  float dt = determinant(J);
+  return sqrt(0.5 * (tt + sqrt(max(0.0, tt * tt - 4.0 * dt * dt))));
+}
+float leanedH(TessPlate r) {
+  float jn = jNorm(r.J);
+  return r.pit > 0.5 ? 0.0 : min(r.h, RELIEF_SLOPE * r.t.dist / max(jn, 1e-6));
+}
+#endif
+
 #if defined(TESS_RELIEF) && !defined(TESS_HEIGHT_PASS)
 // The combined surface's signed distance along the tube's radius (waves + block, raised towards
 // the viewer), as the march's innermost tier measures it; outside the displaced shell, the
@@ -192,11 +207,7 @@ float reliefF(vec3 X) {
 void main() {
   vec2 ab = gl_FragCoord.xy / u_res;
   TessPlate r = tessPlate(vec2(u_lxy.x * ab.x, u_lxy.y * (ab.y + u_twist * ab.x)));
-  float tt = dot(r.J[0], r.J[0]) + dot(r.J[1], r.J[1]);
-  float dt = determinant(r.J);
-  float jn = sqrt(0.5 * (tt + sqrt(max(0.0, tt * tt - 4.0 * dt * dt))));
-  float h = r.pit > 0.5 ? 0.0 : min(r.h, RELIEF_SLOPE * r.t.dist / max(jn, 1e-6));
-  o = vec4(h / max(u_tRelief.z, 1e-6), 0.0, 0.0, 1.0);
+  o = vec4(leanedH(r) / max(u_tRelief.z, 1e-6), 0.0, 0.0, 1.0);
 }
 #else
 void main() {
@@ -434,14 +445,14 @@ void main() {
     float Hm = reliefH(ab);
     float cphi = w / q;
     float sc = u_rel.x * (1.0 + u_k * cphi);              // world per plane unit here
-    float dtf = sqrt(1.0 - u_k * u_k) / (2.0 * PI * (1.0 + u_k * cphi)); // dt/dφ
     vec3 gH = pl.grad.x * gx + pl.grad.y * gy;           // ∇H, world, from the plate
-    float wall = smoothstep(0.002, 0.012, pl.h - Hm);
+    // The leaned cut sides from the exact block the map was baked from, not from its bilinear
+    // texels (a close view spreads one over ~20 px, which made the sides ragged): where the cap
+    // holds, the side's slope is the cap's, RELIEF_SLOPE along the outline distance's gradient.
+    float wall = smoothstep(0.002, 0.012, pl.h - leanedH(pl));
     if (wall > 0.0) {
-      vec2 e = u_tHeightTexel;
-      float Ha = (reliefH(ab + vec2(e.x, 0.0)) - reliefH(ab - vec2(e.x, 0.0))) / (2.0 * e.x);
-      float Hb = (reliefH(ab + vec2(0.0, e.y)) - reliefH(ab - vec2(0.0, e.y))) / (2.0 * e.y);
-      gH = mix(gH, Ha * gTheta / (2.0 * PI) + Hb * dtf * gPhi, wall);
+      vec2 gc = (RELIEF_SLOPE / max(jNorm(pl.J), 1e-6)) * (transpose(pl.J) * pl.t.n);
+      gH = mix(gH, gc.x * gx + gc.y * gy, wall);
       col *= 1.0 - 0.4 * wall;                           // a cut side, in the shade of its top
     }
     bool capped = sc * Hm >= u_rel.y;

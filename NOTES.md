@@ -21,6 +21,12 @@ before/after interleaved in one session (3 rounds, medians), GPU shared with ano
   now bisects (6) back to the crossing. Against a reference march with no budget (4000 steps),
   pixels off by > 24/255 at still=150: 3749 → 1883 (the rest are sub-tile grazing detail at the
   hole's rim). Cost: only those few pixels.
+- **Tiled Torus, ragged cut sides close up** (inside, relief): the sides' shade mask and normal
+  came from the height map (a texel is ~20 px in the close-up), so the dark bands had lumpy,
+  texel-kinked edges. They now come from the exact leaned block at the hit, from the plate the
+  shading already has (`leanedH`, shared with the height pass): mask `pl.h − leanedH(pl)`,
+  slope RELIEF_SLOPE / ‖J‖ along the outline distance's gradient. No extra plate evaluation.
+  The geometry (where rays land) is still the map's.
 
 ## Shader compile check (2026-10-23)
 
