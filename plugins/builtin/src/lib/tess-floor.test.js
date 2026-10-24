@@ -289,6 +289,7 @@ describe("relief scale and bound", () => {
 });
 
 describe("height map frame", () => {
+  /** @type {{ h: number, pitch: number, top: number }[]} */
   const cases = [];
   for (const h of [HEIGHT_MIN, H0, HEIGHT_MAX])
     for (const pitch of [0.03, PITCH_MIN, P0, PITCH_MAX, 1.0, 1.3]) for (const f of [0, 0.3, 1]) cases.push({ h, pitch, top: f * TOP_FRAC * h });

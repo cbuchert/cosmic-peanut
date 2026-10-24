@@ -224,8 +224,8 @@ export function heightFrame(h, pitch, focal, top, out) {
 }
 
 /** The march's step limits: on the ground (plane units, a tenth of a p4 tile) and in height-map texels. */
-export const STEP_GROUND = 0.05;
-export const STEP_TEXELS = 2;
+export const STEP_GROUND = 0.08;
+export const STEP_TEXELS = 3;
 /** Most steps a ray takes (then bisection). */
 export const MARCH_MAX = 32;
 /**
