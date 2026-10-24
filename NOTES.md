@@ -3,6 +3,93 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Quiet-machine performance pass: the new visualizer series (2026-10-24)
+
+Every Möbius, Lattice and tessellation visualizer measured at 2560×1440 in WebKit, at its default
+params and at each Quality, in both Looks; the default Quality is chosen so each holds 60 fps.
+**One change: Tiled Torus defaults to medium** (high misses 60 fps inside the tube). Everything
+else holds at its default, Looks stay classic.
+
+- **Machine:** Apple M4 Pro (16-core GPU), 24 GB, macOS 26.6. The app and the other agents were
+  stopped; a VM (~27 % of a core) and WindowServer stayed up. Load average (1 / 5 / 15 min) at the
+  start of each round: 2.49 / 2.38 / 2.50, 2.45 / 2.07 / 2.15, 2.64 / 2.40 / 2.33; the re-measure
+  2.84 / 2.57 / 2.40 → 1.69 / 2.23 / 2.29. One harness instance at a time, no tests running.
+- **Method** (Playwright WebKit, 1280×720 at DPR 2, after a warm-up page; 3 interleaved rounds over
+  all 140 configurations; medians across rounds, p99 the median of the rounds' p99s):
+  - **p50 / p99:** `sync=1`, one render per rAF, 4 s after 1.5 s warm. It includes the readback's
+    ~3 ms round trip, so it overstates the frame by about that; the 1 ms clock rounds it.
+  - **GPU:** the new `sync=end&rep=8`: eight frames, then one readback, divided by 8 (p50). The old
+    `sync=1&rep=4` paid the round trip every frame, a ~3 ms floor under every cheap visualizer
+    (Lattice cubic read 3 ms at every Quality; now 1.6–1.9). The floor is now ~1.1 ms (the round
+    trip / 8). Heavy ones agree with the old method (Lattice diamond high 7.9 both ways).
+  - **The real app's bench** (`tidalviz --bench`) doesn't measure here: launched from a
+    non-interactive shell, the plugin iframe stays at WebKit's 20 Hz cross-origin throttle (the
+    host logs "throttled at 20 fps"), so Tiled Torus, Tile Horizon and Möbius Field all read
+    ~22 fps / 48 ms with ~0 ms plugin time. The harness numbers stand alone.
+- **Defaults** (ms; classic is the default Look; cinematic at the same Quality for the user to
+  decide):
+
+  | Visualizer | Default Quality | classic p50 / p99 / GPU | cinematic p50 / p99 / GPU |
+  | --- | --- | --- | --- |
+  | Cosmic Peanut | – | 3 / 5 / 1.4 | 6 / 9 / 1.8 |
+  | Möbius | – | 3 / 4 / 1.5 | 6 / 8 / 1.8 |
+  | Möbius Field | – | 9 / 10 / 5.5 | 8 / 13 / 2.6 |
+  | Lattice cubic | medium | 7 / 8 / 1.6 | 9 / 11 / 2.3 |
+  | Lattice octet | medium | 9 / 12 / 3.3 | 11 / 14 / 4.3 |
+  | Lattice diamond | medium | 9 / 10 / 5.1 | 9 / 14 / 6.3 |
+  | Lattice bitruncated | medium | 8 / 11 / 2.8 | 9 / 10 / 4.0 |
+  | Lattice gyroid | medium | 8 / 11 / 1.9 | 9 / 10 / 2.8 |
+  | Lattice Schwarz P | medium | 7 / 10 / 1.8 | 9 / 11 / 2.6 |
+  | Lattice Schwarz D | medium | 8 / 12 / 2.0 | 8 / 14 / 2.8 |
+  | Lattice sponge | medium | 9 / 10 / 4.0 | 9 / 10 / 5.4 |
+  | Lattice kaleidoscope | medium | 8 / 14 / 3.4 | 9 / 13 / 4.4 |
+  | Tentacle Lattice | medium | 9 / 10 / 4.9 | 12 / 14 / 7.8 |
+  | Metamorphosis abstract (default) | high | 9 / 10 / 6.3 | 10 / 11 / 7.3 |
+  | Metamorphosis abstract, Relief 0 | high | 9 / 10 / 5.1 | 9 / 10 / 5.6 |
+  | Metamorphosis all (morphing) | high | 9 / 14 / 2.0 | 9 / 15 / 3.1 |
+  | Metamorphosis all, Relief 0 | high | 7 / 12 / 1.4 | 9 / 12 / 1.8 |
+  | Tile Horizon | high | 10 / 11 / 8.1 | 13 / 14 / 9.9 |
+  | Endless Zoom | high | 9 / 10 / 6.4 | 10 / 11 / 7.4 |
+  | Tiled Sphere outside | high | 9 / 11 / 3.0 | 9 / 10 / 3.9 |
+  | Tiled Sphere inside | high | 10 / 11 / 7.8 | 13 / 14 / 10.3 |
+  | Tiled Torus outside, before | high | 14 / 16 / 10.1 | 15 / 16 / 10.9 |
+  | Tiled Torus inside, before | high | 17 / **27** / 11.9 (55.6 fps) | 18 / **29** / 13.4 (52.6 fps) |
+  | **Tiled Torus outside** | **medium** | 10 / 14 / 5.8 | 11 / 14 / 6.3 |
+  | **Tiled Torus inside** | **medium** | 13 / 16 / 6.9 | 13 / 16 / 7.6 |
+  | Tiled Torus default (view auto) | medium | 11 / 14 / 5.8 | – |
+  | Poincaré Disk sphere | high | 9 / 10 / 7.1 | 11 / 12 / 8.5 |
+  | Poincaré Disk flat | high | 8 / 11 / 2.3 | 9 / 10 / 3.0 |
+  | Tentacube (control, older) | – | 6 / 12 / 2.3 | – |
+
+  Tiled Torus rows after the change are the 3-round re-measure (the baseline gave the same:
+  medium 5.9 / 6.9 GPU).
+- **Every Quality** (GPU ms, classic → cinematic, low / medium / high): Lattice at high peaks at
+  diamond 7.9 → 9.9, sponge 6.3 → 8.8, kaleidoscope 5.3 → 7.0; the TPMS structures stay under
+  3 → 4.4. Tentacle Lattice 2.6 / 4.9 / 8.0 → 4.3 / 7.8 / 12.5. Tile Horizon 2.6 / 4.8 / 8.1 →
+  2.9 / 5.6 / 9.9; Tiled Sphere inside 2.3 / 4.5 / 7.8 → 2.8 / 5.8 / 10.3; Tiled Torus inside
+  4.0 / 6.9 / 11.9 → 4.5 / 7.6 / 13.4; Poincaré sphere 2.1 / 4.3 / 7.1 → 2.5 / 5.0 / 8.5;
+  Metamorphosis abstract 1.9 / 3.6 / 6.3 → 2.1 / 4.3 / 7.3. Raw rounds:
+  scratchpad `base.jsonl`, `after.jsonl`.
+- **Still over budget, off the defaults:** Tiled Torus high, both Looks and both views (inside p99
+  26–29 ms, 53–56 fps; outside p99 16–17 ms, GPU p99 14); Tentacle Lattice cinematic high (GPU
+  12.5, p99 18). Both are opt-in Qualities. Cinematic Tiled Torus at medium is 16 ms p99 inside,
+  on the line; cinematic everywhere else at the defaults is ≤ 15 ms p99 and ≤ 10.3 ms GPU.
+- **Why Quality and not the knobs:** only Tiled Torus missed, and only at high, where the cost is
+  the displaced-shell march (160 steps at 0.8 render scale inside), not the Look: classic misses
+  too, so `SAMPLES`, `DOF_*`, `AO_RADIUS` and `BLOOM_GAIN` wouldn't fix it. Medium is the documented
+  fallback (128 steps, 0.75 / 0.6 render scale) and keeps the look; Relief stays at 0.6.
+- **The M1 Air** (the PRD's reference: 60 fps, p99 under 20 ms, at 1440p): its GPU is ~2.6 TFLOPS
+  against ~7–8 here and has a quarter of the memory bandwidth, so expect ~3× these GPU times. The
+  defaults' GPU cost here runs 1.4–8.1 ms; 60 fps there needs ≤ ~5.5 ms here. Cosmic Peanut,
+  Möbius, Lattice and Tentacle Lattice at medium, Tiled Sphere outside, the disk's flat scene and
+  Metamorphosis's bestiary fit; Möbius Field (5.5) is on the line; Metamorphosis abstract (6.3),
+  Endless Zoom (6.4), Tiled Torus medium (6.9), Poincaré sphere (7.1), Tiled Sphere inside (7.8)
+  and Tile Horizon (8.1) don't, and would lean on the SDK's Auto render scale (down to 50 %) or
+  medium. Cosmic Peanut's own budget (GPU < 4 ms on the Air, Dense) is ~1.3 ms here: it reads 1.4
+  at Medium, near this method's ~1.1 ms floor, so the margin is unresolved; Dense not measured.
+- **Not test-first:** the harness's `sync=end` (a dev tool, checked by the agreement above).
+  The Torus default is test-first (`test_tiled_torus_manifest` asserts medium; seen red first).
+
 ## Tessellations: a cinematic Look (2026-10-24)
 
 All six tessellation visualizers gain **Look** (`classic` | `cinematic`, before Quality). The tested
