@@ -19,7 +19,7 @@ uniform float u_grain;     // paper texture strength
 uniform vec2 u_lightScr;   // the key light's direction on screen (unit, or 0: no emboss)
 
 #define TONE_KNEE 0.93     // lib/tess-look.js
-#define FIBRE_LIT 0.06
+#define FIBRE_LIT 0.03
 
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);

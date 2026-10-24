@@ -526,7 +526,7 @@ vec4 tessShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail) {
 // classic's TESS_EXACT_SIDES variant is what lib/tess-gl.js draws then (its resting frames come
 // from the programs exactly as they were); the cinematic programs carry it behind u_tFlip.
 // TESS_REFINE_ON is the surface's gate.
-#define TESS_REFINE_STEPS 5
+#define TESS_REFINE_STEPS 4
 #define TESS_REFINE_BISECT 5
 #ifdef TESS_CINEMATIC
 uniform float u_tFlip;            // 1 while cards turn (lib/tess-gl.js)
@@ -534,6 +534,11 @@ uniform float u_tFlip;            // 1 while cards turn (lib/tess-gl.js)
 #else
 #define TESS_REFINE_ON true
 #endif
+// A card mid-turn (the figure/ground front over its ring): only there is the search worth it.
+bool tessTurning(TessPlate r) {
+  float f = clamp((u_tInvert.x - TESS_RING(r.t.centre)) / u_tInvert.y + 0.5, 0.0, 1.0);
+  return f > 0.0 && f < 1.0;
+}
 float tessRefineHit(float lo, float hi) {
   float a = lo;
   for (int i = 1; i <= TESS_REFINE_STEPS; i++) {

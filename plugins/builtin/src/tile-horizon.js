@@ -48,8 +48,8 @@ const RING_SPAN = 0.6;
  * towards the bottom edge, the far floor towards the horizon.
  */
 const FOCUS_AHEAD = 4;
-const DOF_FAR = 4;
-const DOF_CAP = 9;
+const DOF_FAR = 3;
+const DOF_CAP = 6;
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {

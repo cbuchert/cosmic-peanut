@@ -239,7 +239,7 @@ void main() {
   // (tessRefineHit) and print there; a hit under a block's top is its cut side.
   float under = 0.0;
   float hp0 = sg * (r - 1.0) / max(u_dispK, 1e-6);
-  if (TESS_REFINE_ON && hit && u_dispK > 0.0 && abs(hp0 - pl.h) > 0.004) {
+  if (TESS_REFINE_ON && tessTurning(pl) && hit && u_dispK > 0.0 && abs(hp0 - pl.h) > 0.004) {
     g_rPA = PA;
     g_rPB = PB;
     g_rSg = sg;
