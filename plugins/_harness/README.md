@@ -16,7 +16,10 @@ Query params: `repo`, `viz`, `audio=drums` (a separable kick / snare / hat patte
 analytic, noise-free spectrum — for spectrogram views such as Radar), `audio=tones` (sustained sines, two loud/quiet pairs 20 dB apart at 400/800 Hz and 3.2/6.4 kHz, on from 1 s = frame 60), `audio=melody` (a bass note per bar under a plucked arpeggio with harmonics), `reduce=0|1`, `strobe=1`, `rep=N` (run `frame` N times per rAF —
 WebKit clamps `performance.now()` to 1 ms, so divide a longer span; raising N until fps drops also
 bounds GPU time), `finish=1`, `sync=1` (a 1-pixel `readPixels` after each frame, inside the timed
-region: WebKit's `gl.finish()` returns without waiting, so use this to include GPU time), `lum=1` (record mean luminance), `p.<param>=value`, `bg=light` (a
+region: WebKit's `gl.finish()` returns without waiting, so use this to include GPU time; each readback is a ~3 ms round trip, so a
+cheap visualizer reads ~3 ms however little it draws), `sync=end` (one readback after all `rep`
+frames: with `rep=8` the GPU-bound cost per frame, the round trip and the 1 ms clock divided by 8),
+`lum=1` (record mean luminance), `p.<param>=value`, `bg=light` (a
 bright, busy backdrop behind the transparent canvas; default black like the shell), `nocanvas=1`,
 `still=N` (seeded `Math.random`, fixed 60 Hz steps, stop after N frames: deterministic stills),
 `gain=G` (scale the audio's level — waveform, rms, peak, spectrum, bands — e.g. `gain=0.05` for a

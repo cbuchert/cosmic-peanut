@@ -13,6 +13,8 @@
  *   finish=1  gl.finish() inside the timed region, so the number includes GPU work
  *   sync=1    a 1-pixel gl.readPixels after each frame inside the timed region: WebKit's finish()
  *             returns without waiting, a readback can't, so this is the one that includes GPU time
+ *   sync=end  one readback after the `rep` frames instead: with rep=8 the GPU-bound cost per frame,
+ *             the readback's ~3 ms round trip and the 1 ms clock divided by rep
  *   lum=1     record mean frame luminance (for the flash-limiter check)
  *   bg=light  a bright, busy backdrop behind the transparent canvas (default black, like the shell)
  *   nocanvas=1  hide the canvas (screenshot the backdrop alone)
@@ -32,6 +34,9 @@ const repo = q.get("repo") ?? "builtin";
 const vizId = q.get("viz") ?? "bars";
 const finish = q.get("finish") === "1";
 const sync = q.get("sync") === "1";
+// sync=end: one readback after all `rep` frames, so the 1 ms clock and the readback's round trip
+// are both divided by rep: the GPU-bound cost per frame.
+const syncEnd = q.get("sync") === "end";
 const px = new Uint8Array(4);
 const measureLum = q.get("lum") === "1";
 // WebKit coarsens performance.now() to 1 ms; rep=N runs frame() N times per rAF and divides.
@@ -263,6 +268,7 @@ async function main() {
         if (finish && gl) gl.finish();
         if (sync && gl) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
       }
+      if (syncEnd && gl) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
     } catch (e) {
       errors.push(String(/** @type {any} */ (e)?.stack ?? e));
     }
