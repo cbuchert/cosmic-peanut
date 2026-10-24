@@ -51,6 +51,8 @@ uniform float u_fog;    // ground distance where the floor is paper
 #define STEP_GROUND 0.08
 #define STEP_TEXELS 3.0
 #define MARCH_MAX 32
+#define FINE_TEXELS 1.0   // the bracket's walk for its first crossing, map texels a step,
+#define FINE_STEPS 4      // at most this many
 #define HEIGHT_SCALE 0.35
 uniform sampler2D u_tHeight;  // height / u_rel.y over the map's frame
 uniform vec2 u_tHeightTexel;  // 1 / its size
@@ -171,6 +173,23 @@ void main() {
       t0 = t;
     }
     if (hit) {
+      // A step spans up to STEP_TEXELS map texels, and with the jitter neighbouring pixels found
+      // different crossings where a step clips a side or a card's edge: grain and striation on
+      // the cut sides. Walk the bracket again a texel a step for its first crossing.
+      float bt = length((floorUV(E + d * t0) - floorUV(E + d * t1)) / u_tHeightTexel);
+      int m = int(clamp(ceil(bt / FINE_TEXELS), 1.0, float(FINE_STEPS)));
+      if (m > 1) {
+        float ta = t0;
+        float ds = (t1 - t0) / float(m);
+        for (int i = 1; i < FINE_STEPS; i++) {
+          if (i >= m) break;
+          float t = ta + ds;
+          vec3 P = E + d * t;
+          if (heightAt(P.xy) >= P.z) { t1 = t; break; }
+          ta = t;
+        }
+        t0 = ta;
+      }
       for (int i = 0; i < 5; i++) {
         float t = 0.5 * (t0 + t1);
         vec3 P = E + d * t;

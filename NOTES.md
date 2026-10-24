@@ -45,6 +45,12 @@ before/after interleaved in one session (3 rounds, medians), GPU shared with ano
   the far silhouettes are smoother (a few leaned sides there shade as grey smudges). The exact
   side refinement now runs only on steps over WALL_EPS + 0.1 × SIDE_RISE: leaned sides no
   longer need it, which more than pays for the rest.
+- **Tile Horizon, striation on cut sides**: a march step spans up to 3 map texels and the
+  interleaved-gradient jitter (which runs mostly along x) made neighbouring pixels find different
+  crossings where a step clips a side: vertical striation. The bracket is walked again a texel a
+  step (≤ 4) for its first crossing before bisecting. With the band limit, p50 / p99 at `rep=4`
+  (4 renders a frame, so GPU time dominates): 19.9 / 24.4 → 18.1 / 21.5 ms; at `rep=1` 13 / 15
+  → 14 / 16 ms in an earlier, noisier pair (1 ms is the timer's step).
 
 ## Shader compile check (2026-10-23)
 
