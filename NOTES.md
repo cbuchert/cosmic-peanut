@@ -51,6 +51,13 @@ before/after interleaved in one session (3 rounds, medians), GPU shared with ano
   step (≤ 4) for its first crossing before bisecting. With the band limit, p50 / p99 at `rep=4`
   (4 renders a frame, so GPU time dominates): 19.9 / 24.4 → 18.1 / 21.5 ms; at `rep=1` 13 / 15
   → 14 / 16 ms in an earlier, noisier pair (1 ms is the timer's step).
+- **Poincaré Disk, the rim's olive band** (shows at Relief 0 too, so Relief 0 changes at the rim
+  only): kites under 10 → 3 px fade to the palette's mean (four-block: olive) before turning to
+  ink under 1.6 → 0.6 px, a wide muddy band. A tiny kite is mostly outline (the ink keeps its px
+  width), so the disk now darkens that mean towards ink by the outline's share, RIM_INK (1.6) ×
+  ink width / kite size (`diskRimFade` in disk.glsl, used by disk.frag and disk3d.frag's face
+  and print): the detail fades through a darkening tone into the ink rim. Elsewhere unchanged
+  (kites over 10 px are untouched). p50 / p99 sphere 11 / 13 → 11 / 13 ms, flat 5 / 7 → 5 / 6.
 
 ## Shader compile check (2026-10-23)
 

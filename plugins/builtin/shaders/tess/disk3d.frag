@@ -270,7 +270,7 @@ vec3 shadeFace(vec2 w, float eta, float sc, mat2 Jpx, float side, vec3 pw, vec3 
       c = tessPrintFill(r.k.t, fill, r.face, r.k.pxq, tileSize, r.k.dpx, 0.0, 0.5 * r.k.t.uv, marks);
     }
     float shown = smoothstep(0.6 * fpx, 1.6 * fpx, tileSize);
-    base = mix(u_tInk, c.rgb, shown);
+    base = mix(u_tInk, diskRimFade(c.rgb, tileSize, fpx), shown);
     grad += (r.grad + diskDetail(r, marks, 1.0, Jp, tileSize, fpx)) * shown;
     // Lifted kites: lighter tops (their shadows and cut sides do the rest).
     base *= 1.0 + 0.5 * clamp(r.lift / 0.2, 0.0, 1.5) * r.kPx;
@@ -502,7 +502,7 @@ void main() {
       vec3 base = u_tInk;
       float ao = 1.0;
       if (tileSize > 0.6 * fpx) {
-        base = mix(u_tInk, diskShade(w, 1.0, Jp, tileSize).rgb, smoothstep(0.6 * fpx, 1.6 * fpx, tileSize));
+        base = mix(u_tInk, diskRimFade(diskShade(w, 1.0, Jp, tileSize).rgb, tileSize, fpx), smoothstep(0.6 * fpx, 1.6 * fpx, tileSize));
         // Tiles the beat or the spectrum lifts: lighter tops, deeper cuts round them.
         float lt = u_lift.x * rippleLift(u_kick.x, hdist(g_dk.impactD), u_kick.y) / 0.05 +
                    u_lift.y * specLift(hdist(g_dk.centreD)) / 0.05;
