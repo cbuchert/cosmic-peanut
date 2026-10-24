@@ -104,6 +104,51 @@ float faceHeight(vec2 w) {
   return h * (1.0 - smoothstep(0.82, 0.98, r));
 }
 
+#ifdef TESS_RELIEF
+// ---- Relief: the face carved like a woodblock (disk.glsl diskRelief) ---------------------------
+// The beat's ripple and the spectrum's heave lift whole kites now (u_kLift; the smooth swell
+// above keeps the share u_kLift.z, all of it at Relief 0): the ripple by each kite's hyperbolic
+// distance from the impact, the heave ring by ring from the centre, ± LIFT_VARY per kite; onsets
+// pop single kites near the ripple's front (u_kPop). lib/disk-relief.js kiteLift mirrors it.
+#define POP_RING_BAND 0.35
+#define REFINE_STEP 0.006     // a height-map step (world units per texel) worth refining…
+#define REFINE_STEPS 6        // …in this many exact steps over ± 2 texels of the ray
+uniform vec4 u_kLift;         // beat, heave (tile units), smooth swell's share, the previous ripple's age (s)
+uniform vec4 u_kPop[3];       // per pop: height (tile units), ring (hyperbolic, from the impact), seed, 0
+
+#define KITE_REACH 2.2
+// rippleLift with the kites' wider reach (lib/disk-relief.js KITE_REACH).
+float kiteRipple(float age, float d, float period) {
+  float a = age - d / 3.0;
+  if (a <= 0.0) return 0.0;
+  float fall = max(0.05, 0.9 * period - 0.08);
+  float env = a < 0.08 ? smoothstep(0.0, 1.0, a / 0.08) : 1.0 - smoothstep(0.0, 1.0, (a - 0.08) / fall);
+  return env * exp(-d / KITE_REACH);
+}
+
+float diskKiteLift() {
+  float id = float(g_dk.id);
+  float vary = 1.0 - LIFT_VARY + 2.0 * LIFT_VARY * tessHash12(vec2(id * 0.731 + 3.7, 1.3));
+  float dI = hdist(g_dk.impactD);
+  float ripple = kiteRipple(u_kick.x, dI, u_kick.y) + kiteRipple(u_kLift.w, hdist(g_dk.prevD), u_kick.y);
+  float h = u_kLift.x * ripple * vary + u_kLift.y * specLift(hdist(g_dk.centreD));
+  for (int k = 0; k < 3; k++) {
+    vec4 pp = u_kPop[k];
+    if (pp.x > 0.0 && abs(dI - pp.y) < POP_RING_BAND && tessHash12(vec2(id * 1.7 + pp.z, 0.5)) < POP_DENSITY) h += pp.x;
+  }
+  return h;
+}
+
+// The face's height at w (world units): the carved kites plus the smooth swell's share.
+float faceRelief(vec2 w, float texel) {
+  float rr = dot(w, w);
+  float h = 0.0;
+  if (rr < 1.0 && 0.5 * u_kiteA * (1.0 - rr) / texel > 0.5 * KITE_FADE_LO) h = diskRelief(w, 1.0, mat2(1.0), texel).h;
+  if (u_kLift.z > 0.0) h += u_kLift.z * faceHeight(w);
+  return clamp(h, u_kH.x, u_kH.x + u_kH.y);
+}
+#endif
+
 // ---- Ambient occlusion -------------------------------------------------------------------------
 
 // The carved outline as a V groove: depth GROOVE_D of its half-width gw at the outline, nothing
@@ -192,6 +237,104 @@ float ggx(vec3 n, vec3 v, vec3 l, float a) {
   return D * G * F / (4.0 * nv * max(nl, 1e-3) + 1e-4) * nl;
 }
 
+#if defined(TESS_RELIEF) && !defined(TESS_HEIGHT_PASS)
+// The face under the key light, carved: the print on the kite the ray met (the march found w at
+// height eta above the face plane, sc = how much nearer than the face plane, so magnified), the
+// kite's and the fine carving's normals, a soft shadow marched towards the light through the height
+// map, the grooves darker, the lacquer over it all.
+vec3 shadeFace(vec2 w, float eta, float sc, mat2 Jpx, float side, vec3 pw, vec3 rd, float fpx, float jit) {
+  g_surf = 0;
+  vec3 V = -rd;
+  float texel = 2.0 * max(u_tHeightTexel.x, u_tHeightTexel.y);
+  mat2 Jp = Jpx * sc;
+  float px = sqrt(abs(determinant(Jp)));
+  float rw = length(w);
+  float tileSize = rw < 1.0 ? 0.5 * u_kiteA * (1.0 - rw * rw) / max(px, 1e-6) : 0.0;
+  vec3 base = u_tInk;
+  vec2 grad = vec2(0.0);
+  float ao = 1.0;
+  float wall = 0.0;
+  if (u_kLift.z > 0.0) {
+    float e = 0.004;
+    grad += u_kLift.z * vec2(faceHeight(w + vec2(e, 0.0)) - faceHeight(w - vec2(e, 0.0)),
+                             faceHeight(w + vec2(0.0, e)) - faceHeight(w - vec2(0.0, e))) / (2.0 * e * u_coinG.x);
+  }
+  if (tileSize > 0.6 * fpx) {
+    DiskRelief r = diskRelief(w, 1.0, Jp, texel);
+    vec4 c;
+    vec2 marks = vec2(0.0);
+    if (r.pit > 0.5) c = vec4(mix(u_tInk, u_tPaper, 0.22), 1.0);
+    else {
+      int fc = TESS_CLASS(r.k.t.cls, r.k.t.centre);
+      vec3 fill = r.face > 0.5 ? u_tClsNext[fc] : u_tCls[fc];
+      c = tessPrintFill(r.k.t, fill, r.face, r.k.pxq, tileSize, r.k.dpx, 0.0, 0.5 * r.k.t.uv, marks);
+    }
+    float shown = smoothstep(0.6 * fpx, 1.6 * fpx, tileSize);
+    base = mix(u_tInk, c.rgb, shown);
+    grad += (r.grad + diskDetail(r, marks, 1.0, Jp, tileSize, fpx)) * shown;
+    // Lifted kites: lighter tops (their shadows and cut sides do the rest).
+    base *= 1.0 + 0.5 * clamp(r.lift / 0.2, 0.0, 1.5) * r.kPx;
+    ao = mix(1.0, 0.72 + 0.28 * r.prof, r.kPx * min(1.0, u_tRelief.x / 0.25));
+    float hk = r.h + u_kLift.z * faceHeight(w);
+    wall = smoothstep(0.004, 0.014, (eta - hk) / max(r.scale, 1e-5)) * r.kPx;
+    base *= 1.0 - 0.45 * wall;
+    // Treble glints along the gouges.
+    float x = g_dk.dist / 0.03;
+    float idx = floor(x);
+    float line = (1.0 - smoothstep(0.08, 0.3, abs(fract(x) - 0.5))) * step(0.5, idx) * step(idx, 6.0);
+    line *= smoothstep(3.0, 6.0, 0.03 * g_dk.dpx / max(g_dk.dist, 1e-6));
+    float glint = 0.5 + 0.5 * sin(u_treble.y * 23.0 + idx * 2.1 + g_dk.uv.x * 31.0 + g_dk.uv.y * 17.0);
+    base += u_treble.x * line * glint * glint * 0.35 * (u_tPaper + 0.2);
+  }
+  // Normals in the face's frame (w.x, w.y, out of the face), then the coin's, then the world's.
+  vec3 nf = normalize(vec3(-grad, 1.0));
+  if (wall > 0.0) {
+    vec2 e = vec2(texel, 0.0);
+    vec2 g = vec2(diskHeightAt(w + e.xy) - diskHeightAt(w - e.xy), diskHeightAt(w + e.yx) - diskHeightAt(w - e.yx));
+    nf = normalize(mix(nf, normalize(vec3(-g, 0.25 * length(g) + 1e-6)), wall));
+  }
+  vec3 N = normalize(transpose(u_coin) * vec3(nf.x, side * nf.z, -side * nf.y));
+  vec3 N0 = normalize(transpose(u_coin) * vec3(0.0, side, 0.0));
+  // The light in the face's frame, and a soft shadow towards it.
+  vec3 ll = u_coin * u_light;
+  vec3 Lf = vec3(ll.x, -side * ll.z, side * ll.y);
+  float shadow = 1.0;
+  if (Lf.z > 0.02) {
+    float top = u_kH.x + u_kH.y;
+    float reach = max(top - eta, 0.0) / Lf.z;
+    int ns = int(clamp(ceil(reach * length(Lf.xy) / texel / 4.0), 0.0, 8.0));
+    vec3 P = vec3(w, eta);
+    for (int i = 1; i <= 8; i++) {
+      if (i > ns) break;
+      float t = reach * ((float(i) - jit) / float(ns)) + texel;
+      vec3 Q = P + Lf * t;
+      float clear = Q.z - diskHeightAt(Q.xy);
+      shadow = min(shadow, clamp(0.5 + 6.0 * clear / t, 0.0, 1.0));
+    }
+    shadow = smoothstep(0.0, 1.0, shadow);
+  }
+  // The coin's light as before, times the carving's: a facet against a flat top in the same light.
+  float nl0 = max(dot(N0, u_light), 0.0);
+  float rel = max(dot(N, u_light), 0.0) * shadow / max(nl0, 0.25);
+  float carve = 0.4 + 0.6 * min(rel, 1.6);
+  float nv = max(dot(N, V), 1e-3);
+  float fr = 0.04 + 0.96 * pow(1.0 - nv, 5.0);
+  vec3 refl = mix(wallCheap(pw, reflect(rd, N)), 0.9 * u_tAvg, smoothstep(0.02, 0.12, length(grad)));
+  vec3 col = base * (0.66 + 0.34 * nl0) * carve * ao * (1.0 - 0.7 * fr) + 0.7 * fr * refl;
+  col += ggx(N, V, u_light, 0.16) * vec3(1.0, 0.97, 0.9) * 0.8 * (0.35 + 0.65 * shadow);
+  return col;
+}
+#endif
+
+#ifdef TESS_HEIGHT_PASS
+// The face's height over the disk's square ([−1, 1]² over the target), for the march.
+void main() {
+  g_surf = 0;
+  vec2 w = 2.0 * gl_FragCoord.xy / u_res - 1.0;
+  float h = faceRelief(w, 2.0 / min(u_res.x, u_res.y));
+  o = vec4((h - u_kH.x) / u_kH.y, 0.0, 0.0, 1.0);
+}
+#else
 void main() {
   vec2 s = (gl_FragCoord.xy - 0.5 * u_res) / (0.5 * u_res.y);
   vec3 rd = normalize(u_cam * vec3(s * u_tanHalf, 1.0));
@@ -232,10 +375,82 @@ void main() {
   float bb = dot(ro, rl);
   float cc = dot(ro, ro) - u_coinG.w * u_coinG.w;
   float disc = bb * bb - cc;
+#ifdef TESS_RELIEF
+  // The carved face: march the ray down through the relief (the height map), from the top of
+  // its range to its floor, where it crosses the face; a hit outside the face is the rim's.
+  bool faceHit = false;
+  vec2 wHit = vec2(0.0);
+  float etaHit = 0.0;
+  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  if (side * rl.y < -1e-5) {
+    float tA = max(0.0, (side * (u_coinG.z + u_kH.x + u_kH.y) - ro.y) / rl.y);
+    float tB = (side * (u_coinG.z + u_kH.x) - ro.y) / rl.y;
+    vec3 pA = ro + tA * rl;
+    vec3 pB = ro + tB * rl;
+    vec2 wA = vec2(pA.x, -side * pA.z) / u_coinG.x;
+    vec2 wB = vec2(pB.x, -side * pB.z) / u_coinG.x;
+    if (min(dot(wA, wA), dot(wB, wB)) < 1.0) {
+      float texel = 2.0 * max(u_tHeightTexel.x, u_tHeightTexel.y);
+      int n = int(clamp(ceil(length(wB - wA) / texel / 3.0), 1.0, 16.0));
+      float t0 = 0.0;
+      float t1 = 1.0;
+      for (int i = 1; i <= 16; i++) {
+        if (i > n) break;
+        float t = min(1.0, (float(i) - jit + 0.5) / float(n));
+        vec3 P = ro + mix(tA, tB, t) * rl;
+        if (diskHeightAt(vec2(P.x, -side * P.z) / u_coinG.x) >= side * P.y - u_coinG.z) { t1 = t; break; }
+        t0 = t;
+      }
+      for (int i = 0; i < 5; i++) {
+        float t = 0.5 * (t0 + t1);
+        vec3 P = ro + mix(tA, tB, t) * rl;
+        if (diskHeightAt(vec2(P.x, -side * P.z) / u_coinG.x) >= side * P.y - u_coinG.z) t1 = t; else t0 = t;
+      }
+      float t = mix(tA, tB, t1);
+      vec3 P = ro + t * rl;
+      vec2 w = vec2(P.x, -side * P.z) / u_coinG.x;
+      // At a lifted kite's cut side the height map's texels (many px in a close-up) leave a
+      // sawtooth: there, find the hit again against the kites' exact height, from a little before
+      // the map's hit to a little after (only pixels at such a step pay for the extra folds).
+      vec2 e = vec2(texel, 0.0);
+      float step = max(abs(diskHeightAt(w + e.xy) - diskHeightAt(w - e.xy)), abs(diskHeightAt(w + e.yx) - diskHeightAt(w - e.yx)));
+      if (step > REFINE_STEP && dot(w, w) < 1.0) {
+        float span = 2.0 * texel * u_coinG.x / max(length(vec2(rl.x, rl.z)), 1e-3);
+        float r0 = t - span;
+        float r1 = t + span;
+        float lo = r0;
+        float hi = r1;
+        for (int i = 1; i <= REFINE_STEPS; i++) {
+          float tt = mix(r0, r1, float(i) / float(REFINE_STEPS));
+          vec3 Q = ro + tt * rl;
+          if (faceRelief(vec2(Q.x, -side * Q.z) / u_coinG.x, texel) >= side * Q.y - u_coinG.z) { hi = tt; break; }
+          lo = tt;
+        }
+        for (int i = 0; i < 3; i++) {
+          float tt = 0.5 * (lo + hi);
+          vec3 Q = ro + tt * rl;
+          if (faceRelief(vec2(Q.x, -side * Q.z) / u_coinG.x, texel) >= side * Q.y - u_coinG.z) hi = tt; else lo = tt;
+        }
+        t = hi;
+        P = ro + t * rl;
+        w = vec2(P.x, -side * P.z) / u_coinG.x;
+      }
+      if (dot(w, w) < 1.0) {
+        hit = true;
+        faceHit = true;
+        th = t;
+        wHit = w;
+        etaHit = side * P.y - u_coinG.z;
+      }
+    }
+  }
+  if (!hit && disc > 0.0) {
+#else
   if (tp > 0.0 && tp < 1e5 && length(pf.xz) < u_coinG.x) {
     hit = true;
     th = tp;
   } else if (disc > 0.0) {
+#endif
     float sq = sqrt(disc);
     float t = max(-bb - sq, 0.0);
     float t1 = -bb + sq;
@@ -253,6 +468,11 @@ void main() {
   if (hit) {
     vec3 pl = ro + th * rl;
     vec3 pw = u_eye + th * rd;
+#ifdef TESS_RELIEF
+    if (faceHit) {
+      col = shadeFace(wHit, etaHit, th / tp, Jpx, side, pw, rd, fpx, jit);
+    } else {
+#else
     bool face = length(pl.xz) < u_coinG.x && abs(pl.y) > u_coinG.z - 0.003;
     if (face) {
       // The print, raised where the music lifts it: parallax by the height, then its slope.
@@ -313,6 +533,7 @@ void main() {
       col = base * (0.66 + 0.34 * nl0) * ao * (1.0 - 0.7 * fr) + 0.7 * fr * refl;
       col += ggx(N, V, u_light, 0.16) * vec3(1.0, 0.97, 0.9) * 0.8;
     } else {
+#endif
       // The rim: brushed metal, its streaks running round the circumference.
       vec3 nloc = coinNormal(pl);
       vec3 N = normalize(transpose(u_coin) * nloc);
@@ -346,3 +567,4 @@ void main() {
   }
   o = vec4(col, 1.0);
 }
+#endif

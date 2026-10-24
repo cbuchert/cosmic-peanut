@@ -88,15 +88,37 @@ struct DiskOut {
   float dpx;
   vec2 edge;
   vec2 uv;
+#ifdef TESS_RELIEF
+  float prevD;                // …from the previous beat's impact (DISK_IMPACT)
+  int id;                     // the kite's id in the quotient (lib/tess-disk.js kiteIds)
+  vec2 wc;                    // the kite's centre on the face (disk point)
+#endif
 };
 DiskOut g_dk;
 #ifdef DISK_IMPACT
 uniform vec2 u_I;             // the beat's impact (tiling point), folded with the pixel
 #endif
+#if defined(DISK_IMPACT) && defined(TESS_RELIEF)
+#define DISK_PREV
+uniform vec2 u_I2;            // the previous beat's impact, likewise (its ripple runs out)
+#endif
+#ifdef TESS_RELIEF
+uniform highp usampler2D u_gId; // r² × r²: per matrix, the ids of the four kites round M
+#endif
+
+// The kite under a disk point, everything the print needs: the tile, the colour block's tile
+// (out of register), plane units per target px, px to the outline, dq/dpixel.
+struct DiskKite {
+  Tile t;
+  Tile tf;
+  float pxq;
+  float dpx;
+  mat2 M;
+};
 
 // w: the disk point; R: target px per disk unit; Jpx: dw/dpixel × R (the identity on the flat
 // print, where w is the pixel over R; the face's perspective elsewhere).
-vec4 diskShade(vec2 w, float R, mat2 Jpx, float tileSize) {
+DiskKite diskKite(vec2 w, float R, mat2 Jpx) {
   // z = T(w), and T′(w).
   vec2 wc = u_conj > 0.5 ? cconj(w) : w;
   vec2 den = cmul(u_M1.xy, wc) + u_M1.zw;
@@ -116,6 +138,9 @@ vec4 diskShade(vec2 w, float R, mat2 Jpx, float tileSize) {
 #ifdef DISK_IMPACT
   vec2 iz = u_I;
 #endif
+#ifdef DISK_PREV
+  vec2 jz = u_I2;
+#endif
   for (int i = 0; i < FOLD_ITERATIONS; i++) {
     float k = floor(atan(z.y, z.x) / a2);
     if (k != 0.0) {
@@ -125,6 +150,9 @@ vec4 diskShade(vec2 w, float R, mat2 Jpx, float tileSize) {
 #ifdef DISK_IMPACT
       iz = cmul(rt, iz);
 #endif
+#ifdef DISK_PREV
+      jz = cmul(rt, jz);
+#endif
       D = cmul(rt, D);
       E = gmul(E, u_gRho[int(mod(k, float(u_gP)))]);
     }
@@ -133,6 +161,9 @@ vec4 diskShade(vec2 w, float R, mat2 Jpx, float tileSize) {
       oz = cmul(mir, cconj(oz));
 #ifdef DISK_IMPACT
       iz = cmul(mir, cconj(iz));
+#endif
+#ifdef DISK_PREV
+      jz = cmul(mir, cconj(jz));
 #endif
       D = cmul(mir, cconj(D));
       odd = !odd;
@@ -150,6 +181,10 @@ vec4 diskShade(vec2 w, float R, mat2 Jpx, float tileSize) {
     vec2 id = iz - vec2(cx, 0.0);
     iz = vec2(cx, 0.0) + id * (cr2 / dot(id, id));
 #endif
+#ifdef DISK_PREV
+    vec2 jd = jz - vec2(cx, 0.0);
+    jz = vec2(cx, 0.0) + jd * (cr2 / dot(jd, jd));
+#endif
     odd = !odd;
     E = gmul(E, u_gC);
   }
@@ -158,6 +193,9 @@ vec4 diskShade(vec2 w, float R, mat2 Jpx, float tileSize) {
     oz = cconj(oz);
 #ifdef DISK_IMPACT
     iz = cconj(iz);
+#endif
+#ifdef DISK_PREV
+    jz = cconj(jz);
 #endif
     D = cconj(D);
     E = gmul(E, u_gA);
@@ -223,6 +261,155 @@ vec4 diskShade(vec2 w, float R, mat2 Jpx, float tileSize) {
   g_dk.dpx = dpx;
   g_dk.edge = transpose(M) * t.n;
   g_dk.uv = uv;
-  return tessPrint(t, tf, pxq, tileSize, dpx, 0.0, 0.5 * uv);
+#ifdef TESS_RELIEF
+#ifdef DISK_PREV
+  g_dk.prevD = pdist(jz, u_cK[quad]);
+#else
+  g_dk.prevD = 1.0;
+#endif
+  uvec4 ids = texelFetch(u_gId, ivec2(E.z * u_gR + E.w, E.x * u_gR + E.y), 0);
+  g_dk.id = int(ids[quad]);
+  // Φ (face → frame) is w ↦ (u w + o) / (1 + ō u w), o = Φ(0) = oz; Φ′(w) = D T′(w) gives u, and
+  // Φ⁻¹ takes the kite's centre back to the face (lib/tess-disk.js faceCentre).
+  vec2 oc = cconj(oz);
+  vec2 az = vec2(1.0, 0.0) - cmul(oc, z);
+  vec2 uk = cdiv(cmul(D, Tp) * (1.0 - dot(oz, oz)), cmul(az, az));
+  vec2 ck = u_cK[quad];
+  g_dk.wc = cdiv(ck - oz, cmul(uk, vec2(1.0, 0.0) - cmul(oc, ck)));
+#endif
+  DiskKite dk;
+  dk.t = t;
+  dk.tf = tf;
+  dk.pxq = pxq;
+  dk.dpx = dpx;
+  dk.M = M;
+  return dk;
 }
+
+vec4 diskShade(vec2 w, float R, mat2 Jpx, float tileSize) {
+  DiskKite dk = diskKite(w, R, Jpx);
+  return tessPrint(dk.t, dk.tf, dk.pxq, tileSize, dk.dpx, 0.0, 0.5 * dk.t.uv);
+}
+
+#ifdef TESS_RELIEF
+// ---- Relief: the kites carved like the engine's block (lib/disk-relief.js mirrors it) ---------
+// Heights are world units (the face is the unit disk): tile units (the engine's, a kite half a
+// unit across) times the kite's size there, √A (1 − |w|²). A resting top lies on the face plane,
+// the outline's groove is cut below it by the engine's bevel-to-dome profile, the music lifts the
+// whole kite (diskKiteLift, the surface's, tile units), and while the figure/ground front passes
+// each kite turns over like a card about its axis radial from the face's centre (squeezed on the
+// face, its back in the next colour). The carving fades out where a kite spans too few height
+// texels (texel: disk units per texel of the height map), so the rim stays clean.
+#define KITE_FADE_LO 3.0
+#define KITE_FADE_HI 8.0
+#define GOUGE_SLOPE 0.9
+#define FEATURE_SLOPE 0.8
+
+uniform vec2 u_kH;            // the height map's range: lowest height, span (world units)
+#ifndef TESS_HEIGHT_PASS
+uniform sampler2D u_tHeight;  // the face's height over the disk's square, (h − lo) / span
+uniform vec2 u_tHeightTexel;
+// The height map's height at disk point w (world units).
+float diskHeightAt(vec2 w) { return u_kH.x + u_kH.y * texture(u_tHeight, 0.5 + 0.5 * w).r; }
+#endif
+
+float diskKiteLift();         // the surface's: the kite in g_dk's lift (tile units)
+
+float diskFade(float scale, float texel) { return smoothstep(KITE_FADE_LO, KITE_FADE_HI, 0.5 * scale / texel); }
+
+struct DiskRelief {
+  DiskKite k;   // the kite at the point (on a turning card: at the card's own point)
+  float h;      // height above the face plane (world units)
+  vec2 grad;    // dh/dw
+  float prof;   // block profile 0 (groove) … 1 (top)
+  float face;   // 0 front (u_tCls), 1 back (u_tClsNext)
+  float pit;    // 1 where a card has turned up off its bed and the bed shows
+  float lift;   // the kite's lift (tile units)
+  float kPx;    // the carving's fade here
+  float scale;  // the kite's size (world units per tile unit, at its centre)
+};
+
+DiskRelief diskRelief(vec2 w, float R, mat2 Jpx, float texel) {
+  DiskRelief r;
+  r.k = diskKite(w, R, Jpx);
+  float sPx = u_kiteA * max(0.0, 1.0 - dot(w, w));
+  r.kPx = diskFade(sPx, texel);
+  float cd = g_dk.centreD;
+  r.scale = u_kiteA * max(0.0, 1.0 - cd * cd);
+  float kT = diskFade(r.scale, texel);
+  float ring = TESS_RING(vec2(cd, 0.0));
+  float fade = smoothstep(0.0, 1.0, clamp((u_tInvert.x - ring) / u_tInvert.y + 0.5, 0.0, 1.0));
+  float th = 3.14159265 * fade;
+  float sn = sin(th);
+  float cs = cos(th);
+  r.lift = max(diskKiteLift(), 0.0);
+  r.face = cs < 0.0 ? 1.0 : 0.0;
+  r.pit = 0.0;
+  float blk = u_tRelief.x * RELIEF_BLOCK * sPx * r.kPx;
+  float ac = 1.0;
+  float card = 0.0;
+  vec2 gc = vec2(0.0);
+  if (sn > 1e-3 && kT > 0.0) {
+    // The card: the kite squeezed by |cos θ| across its axis about its centre on the face; the
+    // pixel shows the card's point w + b (x/|cos θ| − x), if that is still this kite.
+    float lw = length(g_dk.wc);
+    vec2 b = lw > 1e-4 ? g_dk.wc / lw : vec2(1.0, 0.0);
+    ac = max(abs(cs), 0.02);
+    float x = dot(w - g_dk.wc, b);
+    float xc = x / ac;
+    vec2 w2 = w + b * (xc - x);
+    mat2 C = mat2(1.0) + outerProduct(b, b) * (1.0 / ac - 1.0);
+    int id0 = g_dk.id;
+    DiskOut keep = g_dk;
+    DiskKite k2 = diskKite(w2, R, C * Jpx);
+    if (g_dk.id != id0 || dot(w2, w2) >= 1.0) {
+      g_dk = keep;
+      r.pit = 1.0;
+      r.h = -blk;
+      r.grad = vec2(0.0);
+      r.prof = 0.0;
+      return r;
+    }
+    r.k = k2;
+    float sg = cs >= 0.0 ? 1.0 : -1.0;
+    float xt = xc / max(r.scale, 1e-6);           // tile units across the axis
+    card = CARD_RISE * (sn * (CARD_HALF + u_tRelief.w) + clamp(xt, -CARD_HALF, CARD_HALF) * sn * sg);
+    gc = abs(xt) < CARD_HALF ? (kT * CARD_RISE * sn * sg / ac) * b : vec2(0.0);
+  }
+  float slope;
+  r.prof = tessProfile(r.k.t.dist, slope);
+  r.h = blk * (ac * r.prof - 1.0) + r.scale * kT * (r.lift + card);
+  // ∇_w of the tile distance: dpixel → dw is Jpx / R.
+  vec2 gd = R * (inverse(transpose(Jpx)) * g_dk.edge);
+  r.grad = (blk * ac * slope) * gd + gc;
+  return r;
+}
+
+// The fine carving's slope (dh/dw, for the normals only): each gouge a V cut across the hatching's
+// line, the features' edges bevelled up. marks: tessPrintFill's gouge and feature coverage.
+vec2 diskDetail(DiskRelief r, vec2 marks, float R, mat2 Jpx, float tileSize, float fpx) {
+  Tile t = r.k.t;
+  mat2 Wi = R * inverse(transpose(Jpx));            // ∇_pixel → ∇_w
+  vec2 gd = Wi * g_dk.edge;
+  float lg = length(gd);
+  vec2 g = vec2(0.0);
+  if (marks.x > 0.0 && lg > 0.0) {
+    float bandv = u_tBands[int(clamp(TESS_RING(t.centre) * 16.0, 0.0, 15.0))];
+    float x = t.dist / (0.03 * (1.0 - 0.18 * bandv));
+    g += (fract(x) < 0.5 ? -1.0 : 1.0) * GOUGE_SLOPE * marks.x * (gd / lg);
+  }
+  float fs = smoothstep(6.0 * fpx, 16.0 * fpx, tileSize);
+  if (marks.y > 0.0 && fs > 0.0) {
+    float uvPx = 2.0 * r.k.pxq;
+    float e = 1.5 * uvPx;
+    float f0 = tessFeatures(t.uv, u_tFeatA, uvPx, fpx);
+    vec2 gf = vec2(tessFeatures(t.uv + vec2(e, 0.0), u_tFeatA, uvPx, fpx) - f0,
+                   tessFeatures(t.uv + vec2(0.0, e), u_tFeatA, uvPx, fpx) - f0) / e;
+    vec2 gw = Wi * (2.0 * (transpose(r.k.M) * gf));  // uv = 2 q
+    float l = length(gw);
+    if (l > 0.0) g += FEATURE_SLOPE * 4.0 * f0 * (1.0 - f0) * fs * (gw / l);
+  }
+  return g;
+}
+#endif
 

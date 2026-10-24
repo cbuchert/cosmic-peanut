@@ -19,14 +19,33 @@
  * spectrum heaves the tiles ring by ring; treble glints along the gouges. The camera orbits,
  * swoops, skims and pulls back, a move per phrase; a drag takes it over. Scene "flat" is the print
  * alone, exactly as it first was (its drag carries the plane).
+ *
+ * Relief (default 0.6; lib/disk-relief.js, disk.glsl diskRelief): the kites are carved like the
+ * engine's woodblock: raised, bevelled tiles, gouges cut, features raised, scaled to each kite's
+ * size so the rim stays clean. On the coin the ripple and the heave lift whole kites (the latest
+ * beat's ripple and the previous one's running out, by hyperbolic distance from each impact),
+ * onsets pop kites near the ripple's front and phrase changes turn the kites over like cards,
+ * relief-marched with self-shadowing under the lacquer; the flat scene is the block under a raking
+ * light with the engine's waves. Light turns the key light. Relief 0 renders exactly as before.
  * frame() allocates nothing.
  */
-import { COIN, createCoinMotion, createCounterSpin, createDirector, createDrive, createKicks, createWaveRim, SPHERE_R } from "./lib/disk3d.js";
+import {
+  createKitePops,
+  KITE_BEAT,
+  KITE_HEAVE,
+  kiteBound,
+  keyLight,
+  POP_BOOST,
+  reliefMix,
+  rippleMax,
+  sphereLiftMax,
+} from "./lib/disk-relief.js";
+import { COIN, createCoinMotion, createCounterSpin, createDirector, createDrive, createKicks, createWaveRim, RIPPLE_REACH, RIPPLE_SPEED, SPHERE_R } from "./lib/disk3d.js";
 import { faceCells, sphereTables } from "./lib/cube-sphere.js";
 import { sphereFrame, threeClassColors } from "./lib/sphere-view.js";
 import { createTessPipeline } from "./lib/tess-gl.js";
-import { createDiskOptions, createDiskView, createDiskWarp, diskGeometry, diskGroup, readDiskParams } from "./lib/tess-disk.js";
-import { createTessState, REDUCED_GLIDE, renderScale } from "./lib/tess-music.js";
+import { createDiskOptions, createDiskView, createDiskWarp, diskGeometry, diskGroup, kiteIds, readDiskParams } from "./lib/tess-disk.js";
+import { createTessState, LIFT_VARY, lightDir, REDUCED_FLASH_LIFT, REDUCED_GLIDE, renderScale } from "./lib/tess-music.js";
 import { MAX_TILE_COLORS, paletteOf } from "./lib/tess.js";
 
 /** The disk's radius: this fraction of half the short side. */
@@ -47,6 +66,11 @@ const TREBLE_TAU = 0.08;
 const LIGHT = [-0.45, 0.78, 0.43];
 const POLE = [0.3, 0.9, -0.3];
 /** Ripple impacts drift with the plane: until the next beat they ride on the kicked tiling. */
+/** Relief: the flat scene's camera height over the face (half short sides of the view, as
+ * Metamorphosis's), and the texture unit of the kite-id table (the colour table is on 1, the
+ * height map on 3). */
+const CAM_DIST = 2.2;
+const ID_UNIT = 2;
 
 /** @param {number[]} v */
 const unit = (v) => {
@@ -57,9 +81,11 @@ const unit = (v) => {
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
   const gl = /** @type {WebGL2RenderingContext} */ (ctx.gl);
+  // Both scenes carve the kites (lib/disk-relief.js) while Relief is above 0; at 0 they run
+  // their plain programs, exactly the print as it was before relief.
   const [tess, tess3d] = await Promise.all([
-    createTessPipeline(ctx, "shaders/tess/disk.frag"),
-    createTessPipeline(ctx, "shaders/tess/disk3d.frag"),
+    createTessPipeline(ctx, "shaders/tess/disk.frag", { relief: true }),
+    createTessPipeline(ctx, "shaders/tess/disk3d.frag", { relief: true }),
   ]);
   const state = createTessState();
   const warp = createDiskWarp();
@@ -82,6 +108,7 @@ export default async function create(ctx) {
   /** @type {Int32Array[]} */
   let gens = [];
   const colTex = gl.createTexture();
+  const idTex = gl.createTexture();
   function applyTiling() {
     const g = diskGroup(tilingName);
     const geo = diskGeometry(tilingName);
@@ -102,6 +129,12 @@ export default async function create(ctx) {
     gl.bindTexture(gl.TEXTURE_2D, colTex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, r * r, r * r, 0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, g.table);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, idTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16UI, r * r, r * r, 0, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, kiteIds(tilingName));
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -130,6 +163,13 @@ export default async function create(ctx) {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, colTex);
     gl.uniform1i(u.u_gCol, 1);
+    if (u.u_gId) {
+      // Relief programs only (the kite ids; null elsewhere).
+      gl.activeTexture(gl.TEXTURE0 + ID_UNIT);
+      gl.bindTexture(gl.TEXTURE_2D, idTex);
+      gl.uniform1i(u.u_gId, ID_UNIT);
+      gl.uniform2f(u.u_kH, hRange[0], hRange[1]);
+    }
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform3fv(u.u_chart, chart);
     gl.uniformMatrix3fv(u.u_H, false, H);
@@ -147,6 +187,18 @@ export default async function create(ctx) {
     const px = (RING_EDGE_PX * w) / Math.max(1, ctx.size.width);
     const rim = Math.sqrt(Math.max(0, 1 - px / Math.max(1e-6, 0.5 * kiteA * radius)));
     gl.uniform1f(u.u_ringR, 2 * Math.atanh(Math.min(rim, 0.999999)));
+    gl.uniform3fv(u.u_light, lightF); // relief programs only (null elsewhere: a no-op)
+    gl.uniform1f(u.u_camD, (CAM_DIST * 0.5 * Math.min(w, h)) / radius);
+  };
+
+  // ---- Relief (both scenes) ------------------------------------------------------------------
+  /** The height map's range (world units): lowest, span (u_kH). */
+  const hRange = new Float32Array([0, 1]);
+  const lightF = new Float32Array(3);
+  /** @param {number} lo @param {number} hi */
+  const setRange = (lo, hi) => {
+    hRange[0] = lo;
+    hRange[1] = Math.max(1e-4, hi - lo);
   };
 
   // ---- The sphere scene ----------------------------------------------------------------------
@@ -168,6 +220,11 @@ export default async function create(ctx) {
   const light = unit(LIGHT);
   const poleW = unit(POLE);
   const iw = new Float64Array(2);
+  const keyL = new Float64Array(3);
+  const kitePops = createKitePops();
+  const kLift = new Float32Array(4);
+  let agePrev = 99;
+  let lastAge = 99;
   const driveIn = { live: false, bassAtt: 1, env: 0, reactivity: 1, reduceMotion: false };
   const coinIn = { midAtt: 1, bassAtt: 1, env: 0, reactivity: 1, reduceMotion: false, pace: 1 };
   const kickIn = { env: 0, reactivity: 1, period: 0.5 };
@@ -252,6 +309,7 @@ export default async function create(ctx) {
     diskUniforms(gl, u);
     gl.uniform1f(u.u_ringR, FACE_RING_R);
     gl.uniform2f(u.u_I, view.tracked[0], view.tracked[1]);
+    gl.uniform2f(u.u_I2, view.trackedPrev[0], view.trackedPrev[1]); // relief programs only
     gl.uniform2f(u.u_Iw, iw[0], iw[1]);
     gl.uniformMatrix3fv(u.u_frame, false, tab.frames);
     gl.uniform4iv(u.u_nb, tab.nb);
@@ -267,7 +325,9 @@ export default async function create(ctx) {
     gl.uniform4f(u.u_coinG, COIN.face, COIN.face + COIN.bevel, COIN.half, COIN.face + COIN.bevel + 2.5 * COIN.waveAmp);
     gl.uniformMatrix3fv(u.u_wall, false, wall);
     gl.uniform1f(u.u_SR, SPHERE_R);
-    gl.uniform3f(u.u_light, light[0], light[1], light[2]);
+    gl.uniform3f(u.u_light, keyL[0], keyL[1], keyL[2]);
+    gl.uniform4fv(u.u_kLift, kLift); // relief programs only
+    gl.uniform4fv(u.u_kPop, kitePops.pops);
     gl.uniform2f(u.u_kick, kicks.age, kickIn.period);
     gl.uniform2f(u.u_lift, RIPPLE_H * react, HEAVE_H * react);
     gl.uniform2f(u.u_treble, treble, clock);
@@ -324,6 +384,10 @@ export default async function create(ctx) {
     const before = kicks.count;
     const dist = kicks.step(dt, kickIn);
     if (kicks.count !== before) {
+      // The previous impact's ripple runs out (relief), its age carried on from the beat's.
+      view.trackedPrev[0] = view.tracked[0];
+      view.trackedPrev[1] = view.tracked[1];
+      agePrev = lastAge;
       // A new impact: carry the face point it lands on as a tiling point from now on.
       const m = view.m;
       const x = kicks.impact[0];
@@ -336,6 +400,8 @@ export default async function create(ctx) {
       view.tracked[0] = (nr * dr + ni * di) / q;
       view.tracked[1] = (ni * dr - nr * di) / q;
     }
+    agePrev += dt;
+    lastAge = kicks.age;
     view.nudge(dist, kicks.dir[0], kicks.dir[1]);
     view.step(travel, dt, 300, ctx.reduceMotion);
     impactOnFace();
@@ -344,6 +410,26 @@ export default async function create(ctx) {
     for (let i = 0; i < rimU.length; i++) rimU[i] *= COIN.waveAmp;
     const tr = live ? react * Math.max(0, Math.min(1.5, audio.trebAtt - 0.8)) : 0;
     treble += (tr - treble) * (1 - Math.exp(-dt / TREBLE_TAU));
+
+    // Relief: the ripple and the heave lift whole kites (their share reliefMix), the rest of
+    // them swells the face smoothly as before; onsets pop kites near the ripple's front.
+    keyLight(opts.light, light, keyL);
+    if (s.relief > 0) {
+      const q = reliefMix(s.relief);
+      const calm = ctx.reduceFlashing ? REDUCED_FLASH_LIFT : 1;
+      const front = kicks.age * RIPPLE_SPEED;
+      kitePops.step(s.pops, front < 3 * RIPPLE_REACH ? front : -1, POP_BOOST * q);
+      kLift[0] = q * calm * KITE_BEAT * react;
+      kLift[1] = q * calm * KITE_HEAVE * react;
+      kLift[2] = 1 - q;
+      kLift[3] = agePrev;
+      const lift = sphereLiftMax(kicks.age, agePrev, kickIn.period, kLift[0], kLift[1], s.bands, kitePops.pops);
+      let band = 0;
+      for (let i = 0; i < s.bands.length; i++) band = Math.max(band, s.bands[i]);
+      const swell = (1 - q) * (RIPPLE_H * react * rippleMax(kicks.age, kickIn.period) + HEAVE_H * react * band);
+      const b = kiteBound({ relief: s.relief, kiteA, lift, flipping: s.flipping, hop: s.flipHop, smooth: swell });
+      setRange(b.lo, b.hi);
+    }
 
     dirIn.stepped = s.stepped;
     dirIn.speed = pace;
@@ -383,6 +469,17 @@ export default async function create(ctx) {
       first = false;
       lastTravel = s.travel;
       view.step(travel, dt, 0.5 * FILL * Math.min(ctx.size.cssWidth, ctx.size.cssHeight), ctx.reduceMotion);
+      if (s.relief > 0) {
+        // The engine's waves and pops by ring (diskKiteLift in disk.frag), × Relief.
+        let top = 0;
+        for (let i = 0; i < s.lift.length; i++) top = Math.max(top, s.lift[i]);
+        let pop = 0;
+        for (let k = 0; k < 3; k++) pop += Math.max(0, s.pops[4 * k]);
+        const lift = s.relief * (top * (1 + LIFT_VARY) + pop);
+        const b = kiteBound({ relief: s.relief, kiteA, lift, flipping: s.flipping, hop: s.flipHop, smooth: 0 });
+        setRange(b.lo, b.hi);
+        lightDir(opts.light, lightF);
+      }
       tess.render(s, surface);
     },
 
@@ -406,6 +503,7 @@ export default async function create(ctx) {
 
     dispose() {
       gl.deleteTexture(colTex);
+      gl.deleteTexture(idTex);
       tess.dispose();
       tess3d.dispose();
     },
