@@ -44,6 +44,11 @@ vec2 zoomCellKey(vec2 cell) {
 #define TESS_CELL_KEY(cell) zoomCellKey(cell)
 // Cards turn over radially (along α in the plane): the same direction round every turn.
 #define TESS_FLIP_DIR(c) normalize(u_alpha)
+#if !defined(TESS_HEIGHT_PASS) && (defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC))
+// The engine's exact cut sides (tessRefineHit): the exact block minus the ray's height at t.
+float zoomRaySolid(float t);
+#define TESS_RAY_SOLID(t) zoomRaySolid(t)
+#endif
 #endif
 
 // #include tess
@@ -99,6 +104,17 @@ float g_aoK;
 #endif
 // #include look
 
+#if defined(TESS_RELIEF) && !defined(TESS_HEIGHT_PASS) && (defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC))
+// The ray through z0, by log-radius offset from sA (at the bound H) to sB (at the floor).
+vec2 g_rz0;
+vec3 g_rs;   // sA, sB, H
+float zoomRaySolid(float t) {
+  vec2 z = g_rz0 * exp(mix(g_rs.x, g_rs.y, t));
+  float hs = 0.5 * min(u_res.x, u_res.y);
+  return tessRelief(zoomP(z), zoomJ(z) / hs).x * zoomReliefFade(z) - mix(g_rs.z, 0.0, t);
+}
+#endif
+
 void main() {
   float hs = 0.5 * min(u_res.x, u_res.y);
 #if defined(TESS_HEIGHT_PASS)
@@ -146,15 +162,50 @@ void main() {
   // The fine carving's slope from its screen derivatives (gouges cut, features raised); then the
   // plane slope turned into the screen frame (a similarity: slopes carry over, turned by arg α/z).
   vec2 gd = inverse(transpose(S)) * vec2(dFdx(detail), dFdy(detail));
+#if defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC)
+  // Off the exact block (the map's ramp at a cut side): find the side exactly (tessRefineHit; in
+  // classic while cards turn, always in cinematic); a hit under a block's top is its cut side.
+  float under = 0.0;
+  if (abs(Pz - pl.h) > 0.004) {
+    g_rz0 = z0;
+    g_rs = vec3(sA, sB, H);
+    float span = 2.0 * texel / max(r0 * (exp(sB) - exp(sA)), 1e-6);
+    float tr = tessRefineHit(max(0.0, t1 - span), min(1.0, t1 + span));
+    if (tr >= 0.0) {
+      Z = z0 * exp(mix(sA, sB, tr));
+      Pz = mix(H, 0.0, tr);
+      rz = max(length(Z), 1e-6);
+      kf = zoomReliefFade(Z);
+      S = zoomJ(Z) / hs;
+      c = tessShadeRelief(zoomP(Z), S, pl, detail);
+      pl.h *= kf;
+      pl.grad *= kf;
+      gd = vec2(0.0);
+      under = dot(pl.grad, pl.grad) > 1e-8 ? smoothstep(0.004, 0.014, pl.h - Pz) : 0.0;
+    }
+  }
+  vec2 u = normalize(cmul(u_alpha, vec2(Z.x, -Z.y)));
+  vec2 gp = pl.grad + gd;
+  vec3 N = normalize(vec3(-dot(gp, u), -dot(gp, vec2(-u.y, u.x)), 1.0));
+  float wall = max(smoothstep(0.004, 0.014, Pz - pl.h), under);
+#else
   vec2 u = normalize(cmul(u_alpha, vec2(Z.x, -Z.y)));
   vec2 gp = pl.grad + gd;
   vec3 N = normalize(vec3(-dot(gp, u), -dot(gp, vec2(-u.y, u.x)), 1.0));
   // Where the ray met the side of a taller neighbour the wall's normal comes from the field.
   float wall = smoothstep(0.004, 0.014, Pz - pl.h);
+#endif
   if (wall > 0.0) {
     vec2 e = vec2(texel, 0.0);
     vec2 g = vec2(heightAt(Z + e.xy) - heightAt(Z - e.xy), heightAt(Z + e.yx) - heightAt(Z - e.yx));
     vec3 Nw = normalize(vec3(-g, 0.25 * length(g) + 1e-4));
+#if defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC)
+    // On an exact cut side it faces out across the tile's outline (turned into the screen frame).
+    if (under > 0.0) {
+      vec2 gn = normalize(pl.grad);
+      Nw = normalize(vec3(-dot(gn, u), -dot(gn, vec2(-u.y, u.x)), 0.15));
+    }
+#endif
     N = normalize(mix(N, Nw, wall));
 #ifndef TESS_CINEMATIC
     c.rgb *= 1.0 - 0.45 * wall;                  // the block's cut side, in the shade of its top
@@ -184,7 +235,7 @@ void main() {
   g_aoK = k;
   float ao = mix(1.0, tessHorizonAO(Pz, vec2(dot(pl.grad, u), dot(pl.grad, vec2(-u.y, u.x))), AO_RADIUS, jit), kf);
   float px = sqrt(abs(determinant(S)));
-  o = vec4(tessLookShade(c.rgb, g_tessPaper, wall, tessEndGrain(vec3(zoomP(Z), Pz), px), N, vec3(0.0, 0.0, 1.0), V, L, shadow, ao, 0.36, 0.64, L.z), 1.0);
+  o = vec4(tessLookShade(c.rgb, g_tessPaper, wall, tessWood(wall, vec3(zoomP(Z), Pz), px), N, vec3(0.0, 0.0, 1.0), V, L, shadow, ao, 0.36, 0.64, L.z), 1.0);
 #else
   float diff = max(dot(N, L), 0.0) / L.z;        // a flat top in full light prints as it is
   float ao = 1.0 - 0.28 * kf * (1.0 - smoothstep(0.0, 1.0, Pz / max(zRef, 1e-6)));

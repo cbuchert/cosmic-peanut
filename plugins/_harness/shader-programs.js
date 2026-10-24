@@ -116,6 +116,11 @@ async function tessPipeline(read, viz, surface, entry) {
   ];
   if (relief) out.push(...reliefPair([], "relief"));
   if (relief && atlas) out.push(...reliefPair(["TESS_ATLAS_RELIEF"], "relief, atlas"));
+  // Exact cut sides while cards turn (classic; a surface that defines TESS_RAY_SOLID).
+  if (relief && surfFs.includes("TESS_RAY_SOLID")) {
+    out.push(at("relief, exact sides", withDefines(src, ["TESS_RELIEF", "TESS_EXACT_SIDES"])));
+    if (atlas) out.push(at("relief, atlas, exact sides", withDefines(src, ["TESS_RELIEF", "TESS_ATLAS_RELIEF", "TESS_EXACT_SIDES"])));
+  }
   out.push({ viz, variant: "paper.frag", files: [TESS + "fullscreen.vert", TESS + "paper.frag"], vs, fs: paperFs });
   // The cinematic Look (lib/tess-gl.js makeCinematic): the main programs with TESS_CINEMATIC.
   const cine = tessLookDefines("cinematic");

@@ -83,7 +83,7 @@ describe("Tile Horizon: cinematic depth of field", () => {
       const { draws, run, ctx } = await setup({ look: "cinematic" }, reduce);
       run(5);
       const before = focusAt(draws);
-      ctx.params.height = 1; // the camera rises: the floor ahead moves away
+      /** @type {Record<string, unknown>} */ (ctx.params).height = 1; // the camera rises: the floor ahead moves away
       run(1);
       const one = focusAt(draws);
       run(120);

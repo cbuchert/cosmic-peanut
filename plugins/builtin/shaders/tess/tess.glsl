@@ -514,4 +514,34 @@ vec4 tessShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail) {
   detail = (FEATURE_RAISE * marks.y - GOUGE_DEPTH * marks.x) * u_tRelief.x * k;
   return col;
 }
+
+#if defined(TESS_RAY_SOLID) && (defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC))
+// Exact cut sides. A surface that marches its ray through the height pass's map sees each cut side
+// as a ramp a map texel wide (the map is HEIGHT_SCALE of the print), so where the march lands off
+// the exact block — a turning card's sides above all, edge-on and tall — its sides show a fringe.
+// tessRefineHit searches the ray again against the exact block, from ray parameter lo to hi in
+// TESS_REFINE_STEPS steps, then bisects: TESS_RAY_SOLID(t) is the surface's exact block height
+// minus the ray's height at t (≥ 0: at or under the block). Returns the hit, or −1 if the bracket
+// holds none. Only the pixels a surface sends here pay for it. Compiled in the cinematic programs,
+// and in classic's TESS_EXACT_SIDES variant, which lib/tess-gl.js draws while cards turn, so
+// classic's resting frames come from their programs exactly as they were.
+#define TESS_REFINE_STEPS 6
+#define TESS_REFINE_BISECT 6
+float tessRefineHit(float lo, float hi) {
+  float a = lo;
+  for (int i = 1; i <= TESS_REFINE_STEPS; i++) {
+    float t = mix(lo, hi, float(i) / float(TESS_REFINE_STEPS));
+    if (TESS_RAY_SOLID(t) >= 0.0) {
+      float b = t;
+      for (int j = 0; j < TESS_REFINE_BISECT; j++) {
+        float m = 0.5 * (a + b);
+        if (TESS_RAY_SOLID(m) >= 0.0) b = m; else a = m;
+      }
+      return b;
+    }
+    a = t;
+  }
+  return -1.0;
+}
+#endif
 #endif

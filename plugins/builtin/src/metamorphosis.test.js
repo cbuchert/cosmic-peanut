@@ -162,9 +162,10 @@ describe("Metamorphosis: the Look", () => {
 
   it("flips the Look both ways at runtime, and follows the Quality's samples", async () => {
     const { draws, run, viz, ctx } = await setup({ look: "classic" });
+    const params = /** @type {Record<string, unknown>} */ (ctx.params);
     run(2);
-    ctx.params.look = "cinematic";
-    ctx.params.quality = "low";
+    params.look = "cinematic";
+    params.quality = "low";
     viz.params?.({ look: "cinematic", quality: "low" });
     await settle();
     draws.length = 0;
@@ -172,11 +173,48 @@ describe("Metamorphosis: the Look", () => {
     const q = lookSamples("low");
     expect(draws.find(isCinematic)?.values.get("u_kSamples")).toEqual([q.aoDirs, q.aoSteps, q.shadow, 0]);
     expect(isPost(draws.at(-1))).toBe(true);
-    ctx.params.look = "classic";
+    params.look = "classic";
     viz.params?.({ look: "classic" });
     draws.length = 0;
     run(1);
     expect(draws.some(isCinematic)).toBe(false);
     expect(isPaper(draws.at(-1))).toBe(true);
+  });
+});
+
+describe("Metamorphosis: exact cut sides while cards turn", () => {
+  const isExact = (/** @type {any} */ d) => d.program.fs.includes("#define TESS_EXACT_SIDES");
+  it("classic draws its resting frames with the relief program as before, the exact-sides variant while cards turn", async () => {
+    const { draws, viz } = await setup({ look: "classic" });
+    const audio = /** @type {any} */ ({ bands: new Float32Array(64).fill(0.3), bpm: 0, beatPhase: 0, onset: false, onsetStrength: 0, centroid: 0.15, bassAtt: 1, silent: false });
+    const step = (/** @type {number} */ f) => viz.frame(audio, /** @type {any} */ ({ now: f / 60, dt: 1 / 60, frame: f }));
+    for (let f = 0; f < 10; f++) step(f);
+    expect(draws.filter(isRelief).every((d) => !isExact(d))).toBe(true);
+    // A big onset starts the figure/ground front: the cards turn.
+    audio.onset = true;
+    audio.onsetStrength = 1;
+    step(10);
+    audio.onset = false;
+    audio.onsetStrength = 0;
+    draws.length = 0;
+    for (let f = 11; f < 40; f++) step(f);
+    const relief = draws.filter(isRelief);
+    expect(relief.length).toBe(29);
+    expect(relief.every(isExact)).toBe(true);
+    // The height pass is the same either way.
+    expect(draws.filter(isHeight).every((d) => !isExact(d))).toBe(true);
+    // Once the front has passed (≤ 19.2 s), the resting program again.
+    for (let f = 40; f < 60 * 25; f++) step(f);
+    draws.length = 0;
+    step(60 * 25);
+    expect(draws.filter(isRelief).every((d) => !isExact(d))).toBe(true);
+  });
+
+  it("cinematic always has exact sides (its programs carry them), with no separate variant", async () => {
+    const { draws, run } = await setup({ look: "cinematic" });
+    run(3);
+    const print = draws.filter((d) => isCinematic(d) && isRelief(d));
+    expect(print.length).toBe(3);
+    expect(print.every((d) => !isExact(d) && d.program.fs.includes("TESS_RAY_SOLID"))).toBe(true);
   });
 });

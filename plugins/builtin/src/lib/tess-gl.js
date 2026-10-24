@@ -120,6 +120,20 @@ export async function createTessPipeline(ctx, surface, { relief = false, dof = f
   const rel = relief ? { ...reliefPair([], "relief"), target: createTarget(gl) } : null;
   /** The carved animals' relief pair, compiled the first time the atlas motif shows in relief. */
   let relAtlas = /** @type {ReturnType<typeof reliefPair> | null} */ (null);
+  /**
+   * Exact cut sides (tess.glsl tessRefineHit) for a surface that defines TESS_RAY_SOLID: classic
+   * draws its relief print with the TESS_EXACT_SIDES variant while cards turn (made here, and the
+   * animals' one on first use), its resting frames with the programs above, exactly as before.
+   * @param {string[]} defs @param {string} label
+   */
+  const exactProgram = (defs, label) => {
+    const pr = createProgram(gl, vs, withDefines(src, ["TESS_RELIEF", ...defs, "TESS_EXACT_SIDES"]), `${surface} (${label})`);
+    atlasUnits([pr]);
+    return pr;
+  };
+  const exactSides = Boolean(rel) && surfFs.includes("TESS_RAY_SOLID");
+  const relExact = exactSides ? exactProgram([], "relief, exact sides") : null;
+  let relAtlasExact = /** @type {ReturnType<typeof createProgram> | null} */ (null);
   const paper = createProgram(gl, vs, paperFs, DIR + "paper.frag");
   const u = prog.u;
   atlasUnits([prog]);
@@ -319,6 +333,11 @@ export async function createTessPipeline(ctx, surface, { relief = false, dof = f
       if (rel && s.relief > 0) {
         if (atlas && motif === 1 && !relAtlas) relAtlas = reliefPair(["TESS_ATLAS_RELIEF"], "relief, atlas");
         const pair = atlas && motif === 1 && relAtlas ? relAtlas : rel;
+        let main = pair.main;
+        if (relExact && s.flipping) {
+          if (pair === rel) main = relExact;
+          else main = relAtlasExact ??= exactProgram(["TESS_ATLAS_RELIEF"], "relief, atlas, exact sides");
+        }
         const hu = pair.height.u;
         gl.bindFramebuffer(gl.FRAMEBUFFER, rel.target.fbo);
         gl.viewport(0, 0, rel.target.width, rel.target.height);
@@ -329,10 +348,10 @@ export async function createTessPipeline(ctx, surface, { relief = false, dof = f
         setSurface(gl, hu, rel.target.width, rel.target.height);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-        const ru = pair.main.u;
+        const ru = main.u;
         gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
         gl.viewport(0, 0, target.width, target.height);
-        gl.useProgram(pair.main.program);
+        gl.useProgram(main.program);
         gl.uniform2f(ru.u_res, target.width, target.height);
         upload(ru, s, w);
         uploadRelief(ru, s);
@@ -406,6 +425,7 @@ export async function createTessPipeline(ctx, surface, { relief = false, dof = f
         cine.dofTarget?.dispose();
         cine.bloom.dispose();
       }
+      for (const p of [relExact, relAtlasExact]) if (p) gl.deleteProgram(p.program);
       target.dispose();
       for (const pair of [rel, relAtlas]) {
         if (!pair) continue;
