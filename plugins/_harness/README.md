@@ -32,6 +32,10 @@ Headless Chromium falls back to software GL here; use WebKit numbers.
 over black and over the light backdrop (plus the backdrop alone) to check transparency; `--prefix`
 points at another plugin tree under `/plugins/`, e.g. an older commit extracted with `git archive`.
 
+`compile.html` compiles and links every built-in shader program (the list is
+`shader-programs.js`) in this browser's WebGL2 and publishes `window.__result`; open it by hand for
+the same report `tests/test_shader_compile.py` asserts on.
+
 `motion.py <viz> --port N [--strip DIR]` measures motion (`meter=1`: mean |Δ RGB| per frame over
 named zones, `zone.<name>=+x0,y0,x1,y1;-…` in 0–1 coordinates) over 5 s of silence, a quiet passage
 (`audio=music&gain=0.05`) and loud music, plus the beat response (motion in the 150 ms after a

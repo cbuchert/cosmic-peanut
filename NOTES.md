@@ -3,6 +3,27 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Shader compile check (2026-10-23)
+
+- **Why**: a merge left a stray `#endif` in `tess.glsl` and every suite stayed green; nothing
+  compiled GLSL before a visualizer ran. Now `tests/test_shader_compile.py` (e2e, so it runs in CI's
+  `e2e` and `e2e-linux` jobs on every PR; the default job has no browser) compiles and links every
+  built-in program in WebKit's WebGL2 (ANGLE, as in the app) and fails naming the visualizer,
+  variant and files, preprocessor errors first, each logged line mapped back to its file and line.
+- **What it compiles**: `plugins/_harness/shader-programs.js` lists every program variant, assembled
+  with the visualizers' own helpers (`tess-gl.js` `includesOf`/`spliceIncludes`/`withDefines`,
+  `structures.js` `assembleShader`, `cinema.js` `includeQuad`, `skull-bounds`/`opart` defines): tess
+  plain, relief, height-pass and atlas-relief variants and paper; the lattice scene for every
+  structure × Look plus post and bloom; the cosmic-peanut pack's line, blit and cinematic programs;
+  every other built-in. 121 programs, 113 unique shaders, 102 unique links, ~0.4 s in the page (the
+  test file, with the harness runs, ~2.5 s). Tentacube and Orbit (three.js materials) and the
+  template run 3 frames in the harness instead and fail on any console error.
+- **Coverage**: `shader-programs.test.js` (vitest) fails if a shipped `.glsl`/`.frag`/`.vert` is never
+  read or a manifest visualizer is in no list. A new *combination* (a new `#define` variant) still
+  has to be added to the list by hand; the file says so.
+- **Proof**: with 1f30e2f's stray `#endif` put back, 21 of 102 programs fail (every tess surface), each
+  led by `'endif' : unexpected #endif found without a matching #if  at builtin/shaders/tess/tess.glsl:507`.
+
 ## Poincaré Disk: carved kites, relief on the coin (2026-10-23)
 
 The Poincaré Disk adopts the engine's relief (Relief 0–1, default 0.6; Light). **Relief 0 is
