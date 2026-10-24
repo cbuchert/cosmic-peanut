@@ -391,10 +391,13 @@ void main() {
     vec2 wB = vec2(pB.x, -side * pB.z) / u_coinG.x;
     if (min(dot(wA, wA), dot(wB, wB)) < 1.0) {
       float texel = 2.0 * max(u_tHeightTexel.x, u_tHeightTexel.y);
-      int n = int(clamp(ceil(length(wB - wA) / texel / 3.0), 1.0, 16.0));
+      // Steps of 1.5 height texels (they were 3): at grazing angles a ray crosses a far kite's
+      // crest in under a step, and jittered steps 3 texels apart caught it in some pixels and
+      // not their neighbours, a fringe of hairs along the far tops and cut sides.
+      int n = int(clamp(ceil(length(wB - wA) / texel / 1.5), 1.0, 32.0));
       float t0 = 0.0;
       float t1 = 1.0;
-      for (int i = 1; i <= 16; i++) {
+      for (int i = 1; i <= 32; i++) {
         if (i > n) break;
         float t = min(1.0, (float(i) - jit + 0.5) / float(n));
         vec3 P = ro + mix(tA, tB, t) * rl;

@@ -58,6 +58,12 @@ before/after interleaved in one session (3 rounds, medians), GPU shared with ano
   ink width / kite size (`diskRimFade` in disk.glsl, used by disk.frag and disk3d.frag's face
   and print): the detail fades through a darkening tone into the ink rim. Elsewhere unchanged
   (kites over 10 px are untouched). p50 / p99 sphere 11 / 13 → 11 / 13 ms, flat 5 / 7 → 5 / 6.
+- **Poincaré Disk, fringes on far cut sides** (sphere scene, relief): in the skim a ray crosses
+  a far kite's crest in under one of the face march's jittered 3-texel steps, so some pixels
+  caught it and their neighbours didn't: hairs along the far tops and sides (the exact
+  refinement doesn't run there, the far kites' steps being small). The march now steps every
+  1.5 texels (≤ 32). Smaller hairs remain at the farthest kites. Skim (forced by a private
+  hook), `rep=3`: 10.0 / 11.2 → 10.3 / 11.7 ms per frame; default camera 9.3 / 10.0 → 9.2 / 9.7.
 
 ## Shader compile check (2026-10-23)
 
