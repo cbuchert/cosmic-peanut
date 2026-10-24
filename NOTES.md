@@ -3,6 +3,20 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tessellation surfaces: artifact fixes (2026-10-23)
+
+Surface shaders only (no engine change); Relief 0 runs the untouched plain programs. Stills:
+scratchpad `shots/tess-fix-*.png`. Frame times: WebKit, 2560×1440, Quality high, `sync=1`,
+before/after interleaved in one session (3 rounds, medians), GPU shared with another agent.
+
+- **Tiled Torus, ink arcs past the silhouette** (outside, relief): rays skimming the lifted
+  blocks spent their steps still pixels above them and were projected onto the surface and inked
+  as outline, drawing thin arcs beyond the silhouette and a white wedge at the hole's rim. Now a
+  spent outside ray still more than 1 px clear (its last sample's distance) searches the rest of
+  its chord through the bounding sphere in 24 even steps; a crossing (the hole's far wall) is
+  bisected and shaded as a hit, none is a miss inked from its closest approach like any other.
+  p50 / p99 16 / 20 → 17 / 20 ms (with the cut-side fix below; 1 ms is the timer's step).
+
 ## Shader compile check (2026-10-23)
 
 - **Why**: a merge left a stray `#endif` in `tess.glsl` and every suite stayed green; nothing

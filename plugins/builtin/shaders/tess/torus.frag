@@ -118,6 +118,8 @@ uniform float u_stepK;  // Lipschitz-safe step factor in the displaced shell (to
 // inked as a miss; only there may a step clip a cut side's edge.
 #define RELIEF_STEPS_IN 24
 #define RELIEF_STEPS_OUT 64
+// Outside, even steps over the rest of a spent ray's chord when it is still clear of the blocks.
+#define SPENT_SEARCH 24
 uniform vec4 u_rel;     // world per plane unit on the centre circle (RELIEF_SCALE 2π / lx), cap,
                         // relief shell (world), step factor inside it (reliefStep)
 uniform vec2 u_relWin;  // ring window of a step (turns, torus-relief.js ringWindow), STEP_REACH
@@ -167,6 +169,20 @@ float disp(float theta, float phi) {
   return u_amp * texture(u_dispMap, uv).r;
 }
 
+#if defined(TESS_RELIEF) && !defined(TESS_HEIGHT_PASS)
+// The combined surface's signed distance along the tube's radius (waves + block, raised towards
+// the viewer), as the march's innermost tier measures it; outside the displaced shell, the
+// undisplaced distance less the shell (a lower bound).
+float reliefF(vec3 X) {
+  float w = length(X.xz) - 1.0;
+  float d0 = u_side * (length(vec2(w, X.y)) - u_k);
+  if (d0 > u_dmax) return d0 - u_dmax;
+  float th = atan(X.z, X.x);
+  float ph = atan(X.y, w);
+  return u_side * (length(vec2(w, X.y)) - u_k - disp(th, ph)) - relAt(th, ph);
+}
+#endif
+
 #ifdef TESS_HEIGHT_PASS
 // The block's height over (a, b): texel centres (i + ½) / size, the plane point
 // (lx a, ly (b + tw a)), so the map repeats in both and closes like the tiling. Each tile is
@@ -201,6 +217,9 @@ void main() {
   bool hit = false;
   bool shell = false;
   float minPx = 1e9;                                    // closest miss, px (silhouette ink)
+#ifdef TESS_RELIEF
+  float lastPx = 0.0;                                   // the last sample's miss distance, px
+#endif
   if (u_side < 0.0) tEnd = FOG_END;                     // inside: past this it is all fog
   if (u_side > 0.0) {
     float bR = 1.0 + u_k + u_dmax + 0.01;
@@ -279,6 +298,7 @@ void main() {
       // every sample is a point of the ray: the closest miss counts failed relaxed steps too
       // (under the block they fail often, and those are the grazing samples)
       minPx = min(minPx, est / max(t * pxAng, 1e-6));
+      lastPx = est / max(t * pxAng, 1e-6);
 #endif
       bool fail = omega > 1.0 && r + prevR < stepLen;
       if (fail) {
@@ -300,6 +320,32 @@ void main() {
 #endif
     }
   }
+#ifdef TESS_RELIEF
+  // Outside, a ray that skims the blocks (along the silhouette, over the hole's near lip) can
+  // spend its steps still pixels above them. Projecting it onto the surface and inking it drew
+  // thin ink arcs past the silhouette. Instead, search the rest of its chord through the
+  // bounding sphere in even steps for a crossing (the far wall of the hole), bisect it, and
+  // shade it as a hit; with none, it is a miss and the silhouette ink comes from its closest
+  // approach as for any other miss.
+  if (!hit && u_side > 0.0 && shell && t < tEnd && lastPx > 1.0) {
+    float ta = t;
+    float dt = (tEnd - t) / float(SPENT_SEARCH);
+    for (int i = 1; i <= SPENT_SEARCH; i++) {
+      float tb = t + float(i) * dt;
+      if (reliefF(u_cam + rd * tb) < 0.0) {
+        for (int j = 0; j < 6; j++) {
+          float tm = 0.5 * (ta + tb);
+          if (reliefF(u_cam + rd * tm) < 0.0) tb = tm; else ta = tm;
+        }
+        t = tb;
+        hit = true;
+        break;
+      }
+      ta = tb;
+    }
+    shell = false;                                      // not spent: a hit or a miss
+  }
+#endif
   // A ray that grazes the surface can run out of steps in the shell, just short of it: put its
   // end on the displaced surface (radially in the tube's cross-section) and shade that point, so
   // the fallback is still a point of the surface (inside, every ray ends on the wall).
