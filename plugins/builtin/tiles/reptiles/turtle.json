@@ -1,0 +1,109 @@
+{
+  "format": 1,
+  "name": "Sea turtle",
+  "group": "reptiles",
+  "type": "C4",
+  "notes": "A sea turtle from above, head right (+x). Four turtles turn about V0 (tails) and V2. Its right flippers are bumps on e0; e3 (the tail end) is e0 turned a quarter about V0, so the dent between them makes the tail. Its left flippers come from e1: a dent in e1 near V1 or V2 is a flipper on e2 near V3 or V2.",
+  "edges": {
+    "e0": {
+      "smooth": [[0.1, -0.13], [0.18, -0.08], [0.24, 0.04], [0.33, 0.1], [0.42, 0.02], [0.47, -0.3], [0.55, -0.27], [0.68, -0.1], [0.84, 0.0]]
+    },
+    "e1": {
+      "smooth": [[0.12, 0.13], [0.24, 0.04], [0.36, -0.16], [0.5, -0.3], [0.64, -0.16], [0.73, 0.06], [0.82, 0.2], [0.92, 0.08]]
+    }
+  },
+  "art": [
+    {
+      "part": "shell",
+      "fill": {
+        "smooth": [[0.42, 0.3], [0.56, 0.15], [0.78, 0.18], [0.88, 0.42], [0.8, 0.62], [0.6, 0.66], [0.44, 0.6], [0.4, 0.46]]
+      }
+    },
+    {
+      "part": "rim",
+      "stroke": {
+        "smooth": [[0.42, 0.3], [0.56, 0.15], [0.78, 0.18], [0.88, 0.42], [0.8, 0.62], [0.6, 0.66], [0.44, 0.6], [0.4, 0.46], [0.42, 0.3]]
+      },
+      "width": 0.022
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "smooth": [[0.44, 0.45], [0.58, 0.42], [0.72, 0.43], [0.86, 0.42]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "smooth": [[0.56, 0.17], [0.6, 0.42], [0.58, 0.64]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "scutes",
+      "stroke": {
+        "smooth": [[0.73, 0.18], [0.72, 0.43], [0.72, 0.62]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "head",
+      "fill": {
+        "smooth": [[0.9, 0.44], [1.05, 0.38], [1.2, 0.45], [1.23, 0.5], [1.2, 0.55], [1.05, 0.62], [0.9, 0.56]]
+      }
+    },
+    {
+      "part": "eye",
+      "circle": [1.13, 0.565, 0.022]
+    },
+    {
+      "part": "eye",
+      "circle": [1.13, 0.435, 0.022]
+    },
+    {
+      "part": "flipper",
+      "stroke": {
+        "smooth": [[0.66, 0.0], [0.58, -0.12], [0.52, -0.24]]
+      },
+      "width": [0.02, 0.006]
+    },
+    {
+      "part": "flipper",
+      "stroke": {
+        "smooth": [[0.76, 0.86], [0.79, 0.98], [0.8, 1.1]]
+      },
+      "width": [0.02, 0.006]
+    },
+    {
+      "part": "flipper",
+      "stroke": {
+        "polyline": [[0.24, 0.08], [0.14, -0.06]]
+      },
+      "width": [0.016, 0.006]
+    },
+    {
+      "part": "flipper",
+      "stroke": {
+        "polyline": [[0.2, 0.82], [0.12, 0.98]]
+      },
+      "width": [0.016, 0.006]
+    }
+  ],
+  "colours": {
+    "shell": "shade",
+    "rim": "ink",
+    "scutes": "cut",
+    "head": "light",
+    "eye": "ink",
+    "flipper": "cut"
+  },
+  "height": {
+    "dome": 0.8,
+    "parts": {
+      "shell": 0.5,
+      "scutes": -0.3,
+      "head": 0.2
+    }
+  }
+}

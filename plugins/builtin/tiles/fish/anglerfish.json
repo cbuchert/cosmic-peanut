@@ -1,0 +1,165 @@
+{
+  "format": 1,
+  "name": "Anglerfish",
+  "group": "fish",
+  "type": "TTTTTT",
+  "notes": "A deep-sea anglerfish facing right, a school that all faces one way: the head (e3) with its jutting, fanged lower jaw nests in the tail end (e0) of the fish ahead. The lure on its stalk hooks forward from the top of the head (e4, near V4); e4 is e1 moved, so each lure lies in a pocket in the belly of the fish above-left. The back (e5) arches over the throat dent (e2). The dark open mouth with white fangs and the glowing bulb carry it at small sizes.",
+  "corners": {
+    "v1": [0.05, -1.0],
+    "v2": [0.75, -1.2],
+    "v3": [1.55, -0.95]
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[0.1756, 0.1112], [0.403, 0.2599], [0.5566, 0.1322], [0.7102, 0.4045], [0.8379, 0.1581]]
+    },
+    "e1": {
+      "smooth": [[0.4, 0.1], [0.7321, 0.1377], [0.7509, 0.3717], [0.8679, 0.5623], [1.1094, 0.617], [1.2906, 0.583], [1.3019, 0.4434], [1.1509, 0.3717], [0.9774, 0.3792], [0.917, 0.1906]]
+    },
+    "e2": {
+      "smooth": [[0.1651, 0.0484], [0.3843, 0.0299], [0.726, 0.1231]]
+    }
+  },
+  "art": [
+    {
+      "part": "mouth",
+      "fill": {
+        "smooth": [[1.8, -0.62], [1.68, -0.54], [1.5, -0.42], [1.38, -0.5], [1.44, -0.66], [1.62, -0.72], [1.82, -0.7]]
+      }
+    },
+    {
+      "part": "fangs",
+      "stroke": {
+        "smooth": [[1.5, -0.42], [1.52, -0.5]]
+      },
+      "width": [0.026, 0.006]
+    },
+    {
+      "part": "fangs",
+      "stroke": {
+        "smooth": [[1.6, -0.43], [1.62, -0.52]]
+      },
+      "width": [0.026, 0.006]
+    },
+    {
+      "part": "fangs",
+      "stroke": {
+        "smooth": [[1.46, -0.66], [1.48, -0.56]]
+      },
+      "width": [0.026, 0.006]
+    },
+    {
+      "part": "fangs",
+      "stroke": {
+        "smooth": [[1.58, -0.7], [1.6, -0.6]]
+      },
+      "width": [0.026, 0.006]
+    },
+    {
+      "part": "fangs",
+      "stroke": {
+        "smooth": [[1.7, -0.7], [1.72, -0.6]]
+      },
+      "width": [0.026, 0.006]
+    },
+    {
+      "part": "fangs",
+      "stroke": {
+        "smooth": [[1.82, -0.68], [1.84, -0.6]]
+      },
+      "width": [0.026, 0.006]
+    },
+    {
+      "part": "fin",
+      "fill": {
+        "smooth": [[0.75, -0.45], [0.55, -0.3], [0.4, -0.38], [0.42, -0.55], [0.6, -0.6]]
+      }
+    },
+    {
+      "part": "rays",
+      "stroke": {
+        "smooth": [[0.72, -0.47], [0.5, -0.36]]
+      },
+      "width": [0.012, 0.006]
+    },
+    {
+      "part": "rays",
+      "stroke": {
+        "smooth": [[0.72, -0.47], [0.47, -0.46]]
+      },
+      "width": [0.012, 0.006]
+    },
+    {
+      "part": "rays",
+      "stroke": {
+        "smooth": [[0.72, -0.47], [0.5, -0.55]]
+      },
+      "width": [0.012, 0.006]
+    },
+    {
+      "part": "warts",
+      "circle": [0.3, -0.15, 0.025]
+    },
+    {
+      "part": "warts",
+      "circle": [0.55, 0.05, 0.025]
+    },
+    {
+      "part": "warts",
+      "circle": [0.95, 0.08, 0.025]
+    },
+    {
+      "part": "warts",
+      "circle": [1.1, -0.2, 0.025]
+    },
+    {
+      "part": "warts",
+      "circle": [0.9, -0.75, 0.025]
+    },
+    {
+      "part": "warts",
+      "circle": [1.2, -0.85, 0.025]
+    },
+    {
+      "part": "stalk",
+      "stroke": {
+        "smooth": [[1.44, 0.2], [1.48, 0.38], [1.62, 0.42], [1.74, 0.36]]
+      },
+      "width": [0.018, 0.012]
+    },
+    {
+      "part": "lure",
+      "circle": [1.76, 0.37, 0.05]
+    },
+    {
+      "part": "eye",
+      "circle": [1.34, -0.18, 0.038]
+    },
+    {
+      "part": "pupil",
+      "circle": [1.35, -0.18, 0.019]
+    }
+  ],
+  "colours": {
+    "mouth": "ink",
+    "fangs": "paper",
+    "fin": "shade",
+    "rays": "cut",
+    "warts": "shade",
+    "stalk": "cut",
+    "lure": "accent",
+    "eye": "paper",
+    "pupil": "ink"
+  },
+  "height": {
+    "dome": 0.75,
+    "parts": {
+      "mouth": -0.6,
+      "fangs": 0.3,
+      "fin": 0.2,
+      "rays": -0.2,
+      "lure": 0.8,
+      "eye": 0.4
+    }
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "format": 1,
+  "name": "Swordfish",
+  "group": "fish",
+  "type": "TGTG",
+  "notes": "A swordfish swimming right: the long flat bill (e1, point 1 its tip) nests in the deep fork of the swordfish ahead, between the crescent tail's lobes, which are the corners V0 and V3 (the negative shear sweeps the upper lobe back). The tall dorsal on the back (e2) is the glide image of the slot in the belly (points 2-3), and the sickle pectoral (point 7) dents the back before the tail. Koi structure (e0 smooth 9, e1 smooth 4), so it morphs with the other TGTG fish.",
+  "corners": {
+    "w": 2.3,
+    "h": 0.72,
+    "s": -0.3
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[0.0435, 0.0261], [0.1565, 0.0609], [0.3739, 0.1043], [0.3304, 0.0348], [0.4609, 0.0], [0.5652, -0.0087], [0.6522, 0.0], [0.7043, -0.087], [0.8957, 0.0174]]
+    },
+    "e1": {
+      "smooth": [[0.2702, -0.2515], [0.1045, -0.9324], [0.2781, -0.6159], [0.5444, -0.2268]]
+    }
+  },
+  "art": [
+    {
+      "part": "back",
+      "fill": {
+        "smooth": [[0.9, 0.405], [1.1, 0.409], [1.3, 0.508], [1.5, 0.492], [1.7, 0.388], [1.9, 0.408], [2.05, 0.385], [2.05, 0.506], [1.9, 0.576], [1.7, 0.608], [1.5, 0.697], [1.3, 0.741], [1.1, 0.603], [0.9, 0.59]]
+      }
+    },
+    {
+      "part": "gill",
+      "stroke": {
+        "smooth": [[2.02, 0.56], [1.97, 0.36], [2.03, 0.12]]
+      },
+      "width": [0.014, 0.03]
+    },
+    {
+      "part": "mouth",
+      "stroke": {
+        "smooth": [[2.38, 0.29], [2.28, 0.27], [2.18, 0.24]]
+      },
+      "width": 0.016
+    },
+    {
+      "part": "keel",
+      "stroke": {
+        "smooth": [[0.66, 0.42], [0.9, 0.4], [1.2, 0.42]]
+      },
+      "width": [0.01, 0.018]
+    },
+    {
+      "part": "rays",
+      "stroke": {
+        "smooth": [[1.32, 0.72], [1.26, 0.86]]
+      },
+      "width": [0.014, 0.006]
+    },
+    {
+      "part": "rays",
+      "stroke": {
+        "smooth": [[1.4, 0.72], [1.34, 0.82]]
+      },
+      "width": [0.014, 0.006]
+    },
+    {
+      "part": "rays",
+      "stroke": {
+        "smooth": [[1.62, -0.02], [1.6, -0.14]]
+      },
+      "width": [0.014, 0.006]
+    },
+    {
+      "part": "rays",
+      "stroke": {
+        "smooth": [[1.68, -0.0], [1.64, -0.1]]
+      },
+      "width": [0.014, 0.006]
+    },
+    {
+      "part": "tail",
+      "stroke": {
+        "smooth": [[0.16, 0.54], [0.0, 0.6], [-0.14, 0.66]]
+      },
+      "width": [0.014, 0.006]
+    },
+    {
+      "part": "tail",
+      "stroke": {
+        "smooth": [[0.3, 0.2], [0.16, 0.14], [0.08, 0.08]]
+      },
+      "width": [0.012, 0.006]
+    },
+    {
+      "part": "eye",
+      "circle": [2.16, 0.4, 0.045]
+    },
+    {
+      "part": "pupil",
+      "circle": [2.17, 0.4, 0.0225]
+    }
+  ],
+  "colours": {
+    "back": "shade",
+    "gill": "ink",
+    "mouth": "ink",
+    "keel": "cut",
+    "rays": "cut",
+    "tail": "cut",
+    "eye": "paper",
+    "pupil": "ink"
+  },
+  "height": {
+    "dome": 0.6,
+    "parts": {
+      "back": 0.1,
+      "rays": -0.3,
+      "tail": -0.3,
+      "keel": -0.2,
+      "eye": 0.5
+    }
+  }
+}

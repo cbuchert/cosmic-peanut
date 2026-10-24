@@ -1,0 +1,143 @@
+{
+  "format": 1,
+  "name": "Arctic tern",
+  "group": "birds",
+  "type": "TTTTTT",
+  "notes": "A tern in flight seen from above, flying up (+y). Every tile is a translate, so the head (e3) nests in the forked tail (e0) of the tern ahead: a tern's fork, not a gull's square tail. The wings pair by a half turn: the right leading edge (e2, tip to shoulder) is the left trailing edge (e5, tip to shoulder) and e1 the left leading edge, so a wrist bump 40% out on one edge is a notch 60% out on the other.",
+  "corners": {
+    "v1": [0.6, 0.0],
+    "v2": [1.9, 0.4],
+    "v3": [0.6, 0.8]
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[0.1, -0.08], [0.22, 0.12], [0.3, 0.3], [0.4, 0.42], [0.47, 0.47], [0.5, 0.55], [0.53, 0.47], [0.6, 0.42], [0.7, 0.3], [0.78, 0.12], [0.9, -0.08]]
+    },
+    "e1": {
+      "smooth": [[0.1, 0.07], [0.3, 0.08], [0.5, 0.11], [0.62, 0.12], [0.8, 0.06], [0.92, 0.02]]
+    },
+    "e2": {
+      "smooth": [[0.12, -0.02], [0.3, -0.05], [0.5, -0.11], [0.62, -0.13], [0.76, -0.07], [0.92, 0.04]]
+    }
+  },
+  "art": [
+    {
+      "part": "mantle",
+      "fill": {
+        "smooth": [[0.66, 0.64], [1.0, 0.7], [1.22, 0.68], [1.0, 0.45], [0.72, 0.3]]
+      }
+    },
+    {
+      "part": "mantle",
+      "fill": {
+        "smooth": [[-0.06, 0.64], [-0.4, 0.7], [-0.62, 0.68], [-0.4, 0.45], [-0.12, 0.3]]
+      }
+    },
+    {
+      "part": "body",
+      "fill": {
+        "smooth": [[0.3, 0.84], [0.42, 0.62], [0.38, 0.47], [0.3, 0.43], [0.22, 0.47], [0.18, 0.62]]
+      }
+    },
+    {
+      "part": "primaries",
+      "stroke": {
+        "smooth": [[1.25, 0.66], [1.5, 0.54], [1.78, 0.43]]
+      },
+      "width": [0.03, 0.008]
+    },
+    {
+      "part": "primaries",
+      "stroke": {
+        "smooth": [[-0.65, 0.66], [-0.9, 0.54], [-1.18, 0.43]]
+      },
+      "width": [0.03, 0.008]
+    },
+    {
+      "part": "feathers",
+      "stroke": {
+        "polyline": [[0.8, 0.32], [0.8, 0.22]]
+      },
+      "width": [0.016, 0.006]
+    },
+    {
+      "part": "feathers",
+      "stroke": {
+        "polyline": [[0.95, 0.37], [0.96, 0.27]]
+      },
+      "width": [0.016, 0.006]
+    },
+    {
+      "part": "feathers",
+      "stroke": {
+        "polyline": [[1.1, 0.42], [1.11, 0.33]]
+      },
+      "width": [0.016, 0.006]
+    },
+    {
+      "part": "feathers",
+      "stroke": {
+        "polyline": [[-0.2, 0.32], [-0.2, 0.22]]
+      },
+      "width": [0.016, 0.006]
+    },
+    {
+      "part": "feathers",
+      "stroke": {
+        "polyline": [[-0.35, 0.37], [-0.36, 0.27]]
+      },
+      "width": [0.016, 0.006]
+    },
+    {
+      "part": "feathers",
+      "stroke": {
+        "polyline": [[-0.5, 0.42], [-0.51, 0.33]]
+      },
+      "width": [0.016, 0.006]
+    },
+    {
+      "part": "streamer",
+      "stroke": {
+        "polyline": [[0.13, 0.34], [0.06, 0.06]]
+      },
+      "width": [0.016, 0.006]
+    },
+    {
+      "part": "streamer",
+      "stroke": {
+        "polyline": [[0.47, 0.34], [0.54, 0.06]]
+      },
+      "width": [0.016, 0.006]
+    },
+    {
+      "part": "cap",
+      "fill": {
+        "smooth": [[0.18, 0.93], [0.3, 1.03], [0.42, 0.93], [0.3, 0.88]]
+      }
+    },
+    {
+      "part": "beak",
+      "fill": {
+        "polyline": [[0.26, 1.02], [0.3, 1.1], [0.34, 1.02]]
+      }
+    }
+  ],
+  "colours": {
+    "mantle": "shade",
+    "body": "light",
+    "primaries": "ink",
+    "feathers": "cut",
+    "streamer": "cut",
+    "cap": "ink",
+    "beak": "accent"
+  },
+  "height": {
+    "dome": 0.5,
+    "parts": {
+      "body": 0.3,
+      "feathers": -0.3,
+      "primaries": -0.2,
+      "cap": 0.2
+    }
+  }
+}

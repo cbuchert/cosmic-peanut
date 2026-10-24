@@ -21,6 +21,7 @@ slightly and brightens a touch. Built-in `webgl2` visualizer; spec in
 | `palette` | Palette | nebula | nebula / ember / phosphor | Color ramp by age |
 | `lines` | Lines | soft | soft / fine | Soft: 1× multisampled buffer upscaled (slight glow). Fine: native resolution, gain × 1.35 |
 | `antialias` | Antialias soft lines | on | on / off | 2× MSAA for soft lines, matching the prototype's smoothness. Off saves ~7.5 MB of GPU memory at 1440p (total ~6 MB vs ~13.5 MB) |
+| `look` | Look | classic | classic / cinematic | Classic: the lines exactly as before. Cinematic: HDR lines, bloom, filmic tone mapping, prefiltered lines, lens character (below). Same param on all three visualizers |
 
 Drag to orbit (0.006 rad/px); letting go resumes the self-orbit from there. With macOS Reduce
 motion on, Orbit speed and Bass pulse act as 0 and 0.1 until you move them off their defaults.
@@ -193,6 +194,77 @@ are all the pack's.
   6.6M vertices, 8 / 15 ms. Every point (`STRIDE` 1) at the defaults: 8 / 14 ms, and it no
   longer holds `rep=2`. Bands 80 with dense rings (11M vertices) takes 13 / 22 ms, over budget
   at p99. No distance level of detail was needed at the defaults.
+
+## Look: classic and cinematic
+
+All three visualizers have a Look param. **Classic** (the default) is the look above. It is
+unchanged pixel for pixel: deterministic stills (`run.py --shots`) before and after are
+byte-identical, and `src/cosmic-peanut.test.js` holds every GL call to a snapshot taken before
+the param existed. **Cinematic** re-renders the same lines through a physically based pipeline.
+Its GL objects are only made while it's the Look; the classic soft-lines buffers shrink to 1×1
+meanwhile. Nothing in it reacts to the beat: the beat effects stay the local, eased ones above,
+with no whole-frame pulses through bloom or exposure.
+
+- **Prefiltered lines** (`src/lib/quads.js`, `shaders/quad.glsl`, `shaders/quad-*.vert`; Chan &
+  Durand, "Fast Prefiltered Lines", GPU Gems 2, 2005). Each ring or slice is a triangle strip,
+  two vertices per point, pushed apart along the screen-space normal of the point's neighbours by
+  the core half width plus 2.5 σ. The fragment's coverage is the line's box profile convolved with
+  a Gaussian (σ 0.5 px): ½(erf((h+d)/σ√2) + erf((h−d)/σ√2)), with erf from Abramowitz & Stegun
+  7.1.26. It integrates to the width 2h, and the quad keeps over 99% of it. Lines are 1 CSS px on
+  the sphere and Möbius (Lines fine: one pixel) at any DPR. Antialias soft lines doesn't apply.
+- **HDR accumulation** (`src/lib/cinema.js`). The lines add up as linear light (the classic
+  colour, decoded from gamma 2.2) in an RGBA16F scene, so overlaps roll off instead of clipping.
+  This needs `EXT_color_buffer_float` (or `_half_float`), checked with a probe framebuffer;
+  WebKit has both. Without them it falls back to RGBA8 with the lines at ¼ for headroom.
+- **Bloom** (`src/lib/bloom.js`, `shaders/bloom-*.frag`; Jimenez, "Next Generation Post
+  Processing in Call of Duty: Advanced Warfare", SIGGRAPH 2014). A chain of up to 6 mips from
+  half size (1280 × 720 … 40 × 22 at 1440p), with the 13-tap downsample (0.5 centre box, 4 ×
+  0.125 corner boxes). The first step uses Karis's 1/(1 + luma) average against fireflies. Then a
+  3×3 tent upsample added back up the chain. Every level keeps the mean, so mip 0 ÷ levels does
+  too. The composite lerps toward it (12% for the sphere and Möbius, 4% for the Field): light is
+  spread, never added. The chain is allocated per canvas size, never per frame.
+- **Tone mapping** (`src/lib/look.js`, `shaders/composite.frag`): exposure 1.15, Narkowicz's
+  ACES fit x(2.51x + 0.03) / (x(2.43x + 0.59) + 0.14) (strictly increasing, clamped to 1), then
+  gamma 1/2.2. The sRGB curve's linear toe crushed the Field's faint lines. Alpha = max(r, g, b)
+  after tone mapping, so the canvas is still premultiplied light over the desktop.
+- **Lens character**, all multiplicative so empty pixels stay transparent:
+  - chromatic aberration, red out and blue in, up to 1.2 CSS px at the corners;
+  - a vignette taking up to 28% at the corners;
+  - film grain (±3.5%) from a PCG3D hash (Jarzynski & Olano, JCGT 2020) of the pixel and a
+    seed. The seed changes 24 times a second, and is held still under Reduce flashing or Reduce
+    motion.
+- **Depth of field** (`src/lib/dof.js`). Per vertex, the thin-lens circle of confusion
+  c = A·|1 − focus/depth| (capped) widens the line's Gaussian by the blur disk's σ = c/4. An
+  out-of-focus line gets wider and proportionally dimmer, with the same energy: the cheap
+  line-based bokeh.
+  - Möbius: focused on the strip's centre, A = 3 CSS px, capped at 3.
+  - Möbius Field: A = 6 CSS px, capped at 18. The focus tracks the nearest lit band ahead
+    (`field.js` `ahead`: centre within half the view's half-angles, fade ≥ 0.3), clamped to
+    0.08–0.9 × Fog, and eased with a critically damped spring (2.5/s; no jumps, no overshoot).
+    Reduce motion holds it at 0.3 × Fog: no focus pulling.
+  - The sphere has none.
+- **Möbius Field specifics.** The Field draws its quads into a CSS-pixel scene (a quarter of the
+  fill at DPR 2). The composite upscales it like the classic soft lines. Lines are 0.6 CSS px
+  at display-space gain × 2: GL lines drop sub-pixel segments that quads keep, but each faint
+  line then sits in the ACES toe; × 2 brings the field back to classic's overall brightness.
+  Level of detail by distance:
+  - bands nearer than 4 units draw every 2nd point of a slice, as classic does;
+  - bands nearer than 8 units draw every 4th;
+  - bands beyond that draw every 8th.
+
+  That keeps about 1.4 points per CSS px at each boundary. `pack` groups the instances by level
+  and each level is one instanced draw. At Fog 14 most bands in view are far, so this cut the
+  cinematic vertex work to about a third. The far bands are also blurred by the depth of field.
+- **Budget** (WebKit harness, 2560 × 1440, `sync=1`, `rep=2`; the GPU was shared with other
+  agents' apps, so classic and cinematic were interleaved in one session and only the ratio
+  means much). p50 / p99 ms over three rounds, classic vs cinematic:
+  - sphere: 2–4.5 / 4.5–9.5 vs 2–3 / 4–5.5, plus one 17 / 22.5 outlier round;
+  - Möbius: 2.5–4.5 / 5–7.5 vs 6.5–7.5 / 8–14;
+  - Field: 16–23 / 30–35 vs 16.5–20.5 / 24–27.5.
+
+  The Field's classic numbers are 3–4× its uncontended 5 / 10 ms. Before the CSS-pixel scene and
+  the LOD, the cinematic Field took 2.7× classic. Memory at 1440p: the scene is 29 MB (RGBA16F)
+  for the sphere and Möbius and 7 MB for the Field, plus a bloom chain of about a third of that.
 
 `frame()` allocates nothing in any of the three (the track table, camera fit, field layout and
 instance buffer are rebuilt only on param or size changes). Tests: `cd web && npx vitest run ../plugins/cosmic-peanut`; `src/cosmic-peanut.test.js`

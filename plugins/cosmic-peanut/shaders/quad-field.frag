@@ -1,0 +1,42 @@
+#version 300 es
+// Cinematic Möbius Field: field.frag's colour as linear light into the float scene, weighted by the
+// prefiltered (and defocused) coverage; see quad-rings.frag.
+precision highp float;
+
+in float vAge, vSample, vEmpty, vFade, vHue;
+in float vDist, vHalf, vSigma;
+uniform float uGain, uPalette, uPulse, uGlow, uScale;
+out vec4 o;
+
+vec3 pal(float t) {
+  if (uPalette < 0.5) return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.55, 0.70, 0.85)));       // nebula
+  if (uPalette < 1.5) return 0.5 + 0.5 * cos(6.28318 * (t * 0.7 + vec3(0.0, 0.12, 0.25)));  // ember
+  return vec3(0.25, 1.0, 0.55) * (0.6 + 0.4 * cos(6.28318 * t));                             // phosphor
+}
+
+float erf7(float x) {
+  float a = abs(x);
+  float t = 1.0 / (1.0 + 0.3275911 * a);
+  float y = ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;
+  return sign(x) * (1.0 - y * exp(-a * a));
+}
+
+// Display gamma 2.2 decode (src/lib/look.js GAMMA). The classic colour clips at 1 per line, as the
+// classic RGBA8 target clips the whole sum.
+vec3 toLinear(vec3 c) {
+  return pow(c, vec3(2.2));
+}
+
+float coverage(float d, float h, float s) {
+  float k = 0.70710678 / s;
+  return 0.5 * (erf7((h + d) * k) + erf7((h - d) * k));
+}
+
+void main() {
+  float edges = smoothstep(0.0, 0.035, vAge) * (1.0 - smoothstep(0.88, 1.0, vAge));
+  float fresh = mix(1.5, 0.35, vAge) * (1.0 + uGlow * (1.0 - smoothstep(0.0, 0.18, vAge)));
+  vec3 c = pal(vAge * 0.55 - uPulse * 0.08 + vHue) + abs(vSample) * 0.35 + uPulse * 0.12;
+  c *= edges * fresh * vFade * uGain * (1.0 - vEmpty);
+  c = toLinear(clamp(c, 0.0, 1.0)) * uScale * coverage(vDist, vHalf, vSigma);
+  o = vec4(c, 0.0);
+}

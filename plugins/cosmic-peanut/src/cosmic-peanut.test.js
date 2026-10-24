@@ -15,13 +15,33 @@ const { fileURLToPath } = await load("node:url");
 /** @param {string} p path under the pack @returns {string} */
 const pack = (p) => fileURLToPath(new URL(`../${p}`, import.meta.url));
 
-/** Whether the fake copies texture uploads (off while counting the entry's own allocations). */
+/** Whether the fake copies texture uploads and logs calls (off while counting the entry's own allocations). */
 let recordUploads = true;
+
+/** FNV-1a over bytes, for compact call logs. @param {Uint8Array} b */
+function fnv(b) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i], 0x01000193) >>> 0;
+  return h.toString(16);
+}
+
+/** One GL call argument, serialized: handles by id, arrays by content hash, floats to 7 digits. @param {any} v */
+function arg(v) {
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toPrecision(7);
+  if (typeof v === "string") return v.length > 40 ? `src#${fnv(new TextEncoder().encode(v))}` : v;
+  if (ArrayBuffer.isView(v)) {
+    return `${v.constructor.name}[${/** @type {any} */ (v).length}]#${fnv(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))}`;
+  }
+  if (v && typeof v === "object") return v.id ?? (v.name ? `@${v.name}` : "{}");
+  return String(v);
+}
 
 /** A WebGL2 stand-in that records float uniforms by name and R32F/RG32F row uploads. */
 function fakeGl() {
   /** @type {Map<string, number>} */
   const uniforms = new Map();
+  /** @type {Map<string, number>} integer uniforms */
+  const ints = new Map();
   /** @type {{ tex: any, w: number, y: number, ch: number, data: Float32Array }[]} */
   const uploads = [];
   /** @type {any[]} */
@@ -29,10 +49,17 @@ function fakeGl() {
   let unit = 0;
   /** @type {any[]} textures on unit 0 at each draw */
   const drawUnit0 = [];
-  /** @type {{ kind: string, instances: number }[]} every draw call */
+  /** @type {{ kind: string, instances: number, mode?: string, fb?: any, stride?: number }[]} every draw call */
   const draws = [];
+  /** @type {any} the bound framebuffer (null: the canvas) */
+  let fb = null;
+  /** GL allocations (create*, texImage2D, bufferData, renderbufferStorage*) so far. */
+  const allocs = { n: 0 };
   /** @type {any[]} every array handed to the GPU (uniform matrices, buffer uploads) */
   const sent = [];
+  /** @type {string[]} every GL call, serialized (classic look: must match the pre-Look snapshot) */
+  const log = [];
+  let made = 0;
   /** @type {Record<string, any>} */
   const impl = {
     createShader: () => ({ src: "" }),
@@ -45,20 +72,26 @@ function fakeGl() {
     getActiveUniform: (/** @type {any} */ p, /** @type {number} */ i) => ({ name: names(p)[i] }),
     getUniformLocation: (/** @type {any} */ _p, /** @type {string} */ name) => ({ name }),
     uniform1f: (/** @type {any} */ loc, /** @type {number} */ v) => loc && uniforms.set(loc.name, v),
+    uniform1i: (/** @type {any} */ loc, /** @type {number} */ v) => loc && ints.set(loc.name, v),
     getParameter: () => 4,
     isContextLost: () => false,
     createTexture: () => ({}),
     activeTexture: (/** @type {string} */ u) => (unit = Number(String(u).replace("TEXTURE", ""))),
     bindTexture: (/** @type {any} */ _t, /** @type {any} */ tex) => (units[unit] = tex),
-    drawElements: () => {
+    drawElements: (/** @type {string} */ mode) => {
       drawUnit0.push(units[0]);
-      draws.push({ kind: "elements", instances: 1 });
+      draws.push({ kind: "elements", instances: 1, mode, fb });
     },
     drawElementsInstanced: (/** @type {any[]} */ ...a) => {
       drawUnit0.push(units[0]);
-      draws.push({ kind: "instanced", instances: a[4] });
+      draws.push({ kind: "instanced", instances: a[4], mode: a[0], fb, stride: ints.get("uStride") });
     },
-    drawArrays: () => draws.push({ kind: "arrays", instances: 1 }),
+    drawArrays: () => draws.push({ kind: "arrays", instances: 1, fb }),
+    bindFramebuffer: (/** @type {any} */ _t, /** @type {any} */ f) => (fb = f),
+    checkFramebufferStatus: () => "FRAMEBUFFER_COMPLETE",
+    texImage2D: (/** @type {any[]} */ ...a) => {
+      if (units[unit]) units[unit].internal = a[2];
+    },
     bufferSubData: (/** @type {any[]} */ ...a) => sent.push(a[2]),
     uniformMatrix4fv: (/** @type {any[]} */ ...a) => sent.push(a[2]),
     texSubImage2D: (/** @type {any[]} */ ...a) => {
@@ -81,16 +114,23 @@ function fakeGl() {
   }
   const gl = new Proxy(impl, {
     get(t, prop) {
-      if (prop in t) return t[/** @type {string} */ (prop)];
-      if (typeof prop === "string" && /^[A-Z0-9_]+$/.test(prop)) return prop;
-      return () => ({});
+      if (typeof prop === "string" && /^[A-Z0-9_]+$/.test(prop) && !(prop in t)) return prop;
+      const name = String(prop);
+      const fn = prop in t ? t[name] : () => ({});
+      return (/** @type {any[]} */ ...a) => {
+        if (/^(create|texImage2D$|bufferData$|renderbufferStorage)/.test(name)) allocs.n++;
+        let r = fn(...a);
+        if (name.startsWith("create") && r && typeof r === "object") r.id = `${name.slice(6)}#${made++}`;
+        if (recordUploads) log.push(`${name}(${a.map(arg).join(", ")})`);
+        return r;
+      };
     },
   });
-  return { gl, uniforms, uploads, drawUnit0, draws, sent };
+  return { gl, uniforms, uploads, drawUnit0, draws, sent, log, allocs };
 }
 
 /** @param {string} id */
-async function start(id, /** @type {Record<string, unknown>} */ overrides = {}) {
+async function start(id, /** @type {Record<string, unknown>} */ overrides = {}, /** @type {Record<string, unknown>} */ ctxOverrides = {}) {
   const manifest = JSON.parse(await readFile(pack("tidalviz.json"), "utf8"));
   const viz = manifest.visualizers.find((/** @type {any} */ v) => v.id === id);
   /** @type {Record<string, unknown>} */
@@ -105,6 +145,7 @@ async function start(id, /** @type {Record<string, unknown>} */ overrides = {}) 
     size: { width: 1280, height: 720, cssWidth: 640, cssHeight: 360 },
     reduceMotion: false,
     reduceFlashing: false,
+    ...ctxOverrides,
     assets: {
       text: (/** @type {string} */ p) => readFile(pack(p), "utf8"),
       json: async (/** @type {string} */ p) => JSON.parse(await readFile(pack(p), "utf8")),
@@ -113,7 +154,7 @@ async function start(id, /** @type {Record<string, unknown>} */ overrides = {}) 
   const viz2 = await (id === "mobius-field" ? createField : create)(ctx);
   const shaders = { mobius: "mobius.vert", "mobius-field": "field.vert", "cosmic-peanut": "rings.vert" };
   const vert = await readFile(pack(`shaders/${shaders[/** @type {keyof typeof shaders} */ (id)]}`), "utf8");
-  return { viz: viz2, ...fake, vert };
+  return { viz: viz2, ...fake, vert, ctx };
 }
 
 /** 120 BPM with a kick on every beat (bass up to 3× its average), a steady 220 Hz tone. */
@@ -132,6 +173,24 @@ function audioAt(/** @type {number} */ f) {
     onsetStrength: 0,
   });
 }
+
+describe.each([
+  ["cosmic-peanut", {}],
+  ["cosmic-peanut", { lines: "fine" }],
+  ["cosmic-peanut", { antialias: false }],
+  ["mobius", {}],
+  ["mobius", { track: "figure-8", length: 0.5 }],
+  ["mobius-field", {}],
+  ["mobius-field", { lines: "fine" }],
+])("%s %o in the classic look", (id, overrides) => {
+  it("issues exactly the GL calls it did before the Look param existed", async () => {
+    const { viz, log } = await start(id, { ...overrides, look: "classic" });
+    for (let f = 0; f < 6; f++) viz.frame(audioAt(f * 20), /** @type {any} */ ({ dt: 1 / 60, t: f / 3 }));
+    viz.resize?.(/** @type {any} */ ({ width: 1280, height: 720, cssWidth: 640, cssHeight: 360, dpr: 2 }));
+    viz.frame(audioAt(140), /** @type {any} */ ({ dt: 1 / 60, t: 7 / 3 }));
+    expect(log.join("\n")).toMatchSnapshot();
+  });
+});
 
 describe.each(["mobius", "mobius-field"])("%s on the beat", (id) => {
   it("changes nothing frame-wide about the strip's size or amplitude (only the wring rolls it)", async () => {
@@ -263,3 +322,121 @@ describe("Möbius Field", () => {
   });
 });
 
+
+describe.each(["cosmic-peanut", "mobius", "mobius-field"])("%s in the cinematic look", (id) => {
+  const time = (/** @type {number} */ f) => /** @type {any} */ ({ dt: 1 / 60, now: f / 60, frame: f });
+  const lineDraws = (/** @type {any[]} */ d) => d.filter((x) => x.kind !== "arrays");
+
+  it("draws its lines as triangle-strip quads into a float scene, then blooms and composites", async () => {
+    const { viz, draws } = await start(id, { look: "cinematic" });
+    for (let f = 0; f < 30; f++) {
+      draws.length = 0;
+      viz.frame(audioAt(f), time(f));
+      const lines = lineDraws(draws);
+      // One draw; the Field draws one per detail level that has bands (see below).
+      expect(lines.length).toBeGreaterThanOrEqual(1);
+      expect(lines.length).toBeLessThanOrEqual(id === "mobius-field" ? 3 : 1);
+      for (const l of lines) {
+        expect(l.mode).toBe("TRIANGLE_STRIP");
+        expect(l.fb).not.toBeNull(); // into the scene, not the canvas
+      }
+      const post = draws.slice(draws.indexOf(/** @type {any} */ (lines.at(-1))) + 1);
+      expect(post.length).toBe(6 + 5 + 1); // a 1280 × 720 scene: 6 mips down, 5 up, then the composite
+      expect(post.at(-1)?.fb).toBeNull(); // the composite lands on the canvas
+    }
+  });
+
+  it("keeps the waveform history on unit 0 for every line draw, and uploads rows only into it", async () => {
+    const { viz, drawUnit0, uploads } = await start(id, { look: "cinematic" });
+    for (let f = 0; f < 120; f++) viz.frame(audioAt(f), time(f));
+    expect(drawUnit0.length).toBeGreaterThanOrEqual(120);
+    for (const t of drawUnit0) expect(t?.internal).toBe("R32F");
+    const rows = uploads.filter((u) => u.w === 512);
+    expect(rows.length).toBeGreaterThan(20);
+    for (const u of rows) expect(u.tex).toBe(drawUnit0[0]);
+  });
+
+  it("allocates nothing per frame: no typed arrays and no GL allocations", async () => {
+    const { viz, allocs } = await start(id, { look: "cinematic" });
+    for (let f = 0; f < 60; f++) viz.frame(audioAt(f), time(f)); // warm up
+    const audio = Array.from({ length: 60 * 6 }, (_, f) => audioAt(f));
+    const before = allocs.n;
+    recordUploads = false;
+    const made = typedArraysMade(() => {
+      for (let f = 60; f < 60 * 6; f++) viz.frame(audio[f], time(f));
+    });
+    recordUploads = true;
+    expect(made).toBe(0);
+    expect(allocs.n).toBe(before);
+  });
+
+  it("switches looks at runtime: back to classic draws GL lines again, and cinematic again after", async () => {
+    const { viz, draws, ctx } = await start(id, { look: "cinematic" });
+    const p = /** @type {any} */ (viz).params;
+    viz.frame(audioAt(0), time(0));
+    for (const [look, mode] of [
+      ["classic", "LINE_STRIP"],
+      ["cinematic", "TRIANGLE_STRIP"],
+    ]) {
+      ctx.params.look = look; // ctx.params already holds the new values when params() is called
+      p({ look });
+      draws.length = 0;
+      viz.frame(audioAt(1), time(1));
+      const modes = lineDraws(draws).map((d) => d.mode);
+      expect(modes.length).toBeGreaterThanOrEqual(1);
+      expect(new Set(modes)).toEqual(new Set([mode]));
+    }
+  });
+});
+
+describe("cinematic Möbius Field", () => {
+  const time = (/** @type {number} */ f) => /** @type {any} */ ({ dt: 1 / 60, now: f / 60, frame: f });
+
+  it("draws near bands in full detail and farther ones with fewer points per slice (stride 2, 4, 8)", async () => {
+    const { viz, draws } = await start("mobius-field", { look: "cinematic" });
+    const seen = new Set();
+    for (let f = 0; f < 240; f++) {
+      draws.length = 0;
+      viz.frame(audioAt(f), time(f));
+      const strides = draws.filter((d) => d.kind === "instanced").map((d) => d.stride);
+      for (let k = 1; k < strides.length; k++) expect(strides[k]).toBeGreaterThan(/** @type {number} */ (strides[k - 1]));
+      for (const st of strides) seen.add(st);
+    }
+    expect([...seen].sort()).toEqual([2, 4, 8]);
+  });
+});
+
+describe("cinematic depth of field", () => {
+  const time = (/** @type {number} */ f) => /** @type {any} */ ({ dt: 1 / 60, now: f / 60, frame: f });
+
+  it("has none on the sphere; Möbius and the Field focus with an aperture", async () => {
+    for (const [id, open] of /** @type {[string, boolean][]} */ ([
+      ["cosmic-peanut", false],
+      ["mobius", true],
+      ["mobius-field", true],
+    ])) {
+      const { viz, uniforms } = await start(id, { look: "cinematic" });
+      viz.frame(audioAt(0), time(0));
+      expect((uniforms.get("uAperture") ?? 0) > 0).toBe(open);
+    }
+  });
+
+  it("eases the Field's focus toward the nearest band ahead, and holds it still under Reduce motion", async () => {
+    for (const reduceMotion of [false, true]) {
+      const { viz, uniforms } = await start("mobius-field", { look: "cinematic" }, { reduceMotion });
+      /** @type {number[]} */
+      const focus = [];
+      for (let f = 0; f < 60 * 8; f++) {
+        viz.frame(audioAt(f), time(f));
+        focus.push(/** @type {number} */ (uniforms.get("uFocus")));
+      }
+      const jumps = focus.slice(1).map((v, k) => Math.abs(v - focus[k]));
+      if (reduceMotion) {
+        expect(new Set(focus).size).toBe(1);
+      } else {
+        expect(Math.max(...focus) - Math.min(...focus)).toBeGreaterThan(0.5); // it does pull focus
+        expect(Math.max(...jumps)).toBeLessThan(0.1); // eased: never jumps
+      }
+    }
+  });
+});

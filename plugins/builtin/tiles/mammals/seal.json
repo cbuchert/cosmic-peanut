@@ -1,0 +1,150 @@
+{
+  "format": 1,
+  "name": "Harbour seal",
+  "group": "mammals",
+  "type": "TTTTTT",
+  "notes": "A harbour seal from above, swimming up; every tile is a translate. The head (e3) nests in the notch between the hind flippers (e0) of the seal ahead. TTTTTT pairs the right lower side (e1) with the left upper (e4) and e2 with e5, so e2 is e1 mirrored about the fore-flipper line with v negated, which makes the waist and shoulders mirror-symmetric. The fore flippers (at V2 and V5) and the spots are art.",
+  "corners": {
+    "v1": [0.6, 0.0],
+    "v2": [0.9199999999999999, 1.0],
+    "v3": [0.6, 2.0]
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[-0.0333, -0.1333], [0.2167, -0.0333], [0.3083, 0.3333], [0.5, 0.5667], [0.6917, 0.3333], [0.7833, -0.0333], [1.0333, -0.1333]]
+    },
+    "e1": {
+      "smooth": [[0.12, 0.12], [0.4, 0.16], [0.72, 0.15], [0.92, 0.1]]
+    },
+    "e2": {
+      "smooth": [[0.08, -0.1], [0.28, -0.15], [0.6, -0.16], [0.88, -0.12]]
+    }
+  },
+  "art": [
+    {
+      "part": "spot",
+      "circle": [0.2, 1.55, 0.03]
+    },
+    {
+      "part": "spot",
+      "circle": [0.42, 1.35, 0.026]
+    },
+    {
+      "part": "spot",
+      "circle": [0.13, 1.12, 0.024]
+    },
+    {
+      "part": "spot",
+      "circle": [0.38, 0.9, 0.03]
+    },
+    {
+      "part": "spot",
+      "circle": [0.24, 0.62, 0.022]
+    },
+    {
+      "part": "spot",
+      "circle": [0.44, 1.7, 0.02]
+    },
+    {
+      "part": "spot",
+      "circle": [0.1, 1.38, 0.02]
+    },
+    {
+      "part": "spot",
+      "circle": [0.3, 1.18, 0.022]
+    },
+    {
+      "part": "spot",
+      "circle": [0.46, 1.05, 0.018]
+    },
+    {
+      "part": "spot",
+      "circle": [0.18, 0.82, 0.02]
+    },
+    {
+      "part": "spot",
+      "circle": [0.36, 0.45, 0.018]
+    },
+    {
+      "part": "flipper",
+      "fill": {
+        "smooth": [[0.76, 1.32], [0.8600000000000001, 1.12], [0.8700000000000001, 1.02], [0.74, 1.04], [0.65, 1.2]]
+      }
+    },
+    {
+      "part": "flipper",
+      "fill": {
+        "smooth": [[-0.16000000000000003, 1.32], [-0.26000000000000006, 1.12], [-0.2700000000000001, 1.02], [-0.14, 1.04], [-0.050000000000000044, 1.2]]
+      }
+    },
+    {
+      "part": "hind",
+      "stroke": {
+        "smooth": [[0.17, 0.46], [0.13, 0.33], [0.1, 0.22]]
+      },
+      "width": [0.018, 0.008]
+    },
+    {
+      "part": "hind",
+      "stroke": {
+        "smooth": [[0.42999999999999994, 0.46], [0.47, 0.33], [0.5, 0.22]]
+      },
+      "width": [0.018, 0.008]
+    },
+    {
+      "part": "eye",
+      "circle": [0.22, 2.12, 0.036]
+    },
+    {
+      "part": "eye",
+      "circle": [0.38, 2.12, 0.036]
+    },
+    {
+      "part": "pupil",
+      "circle": [0.22, 2.125, 0.022]
+    },
+    {
+      "part": "pupil",
+      "circle": [0.38, 2.125, 0.022]
+    },
+    {
+      "part": "nose",
+      "fill": {
+        "smooth": [[0.26, 2.26], [0.34, 2.26], [0.3, 2.22]]
+      }
+    },
+    {
+      "part": "whisker",
+      "circle": [0.24, 2.21, 0.009]
+    },
+    {
+      "part": "whisker",
+      "circle": [0.21, 2.18, 0.009]
+    },
+    {
+      "part": "whisker",
+      "circle": [0.36, 2.21, 0.009]
+    },
+    {
+      "part": "whisker",
+      "circle": [0.39, 2.18, 0.009]
+    }
+  ],
+  "colours": {
+    "spot": "shade",
+    "flipper": "shade",
+    "hind": "cut",
+    "eye": "paper",
+    "pupil": "ink",
+    "nose": "ink",
+    "whisker": "ink"
+  },
+  "height": {
+    "dome": 0.7,
+    "parts": {
+      "flipper": 0.2,
+      "spot": -0.1,
+      "eye": 0.3
+    }
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "format": 1,
+  "name": "Black-capped chickadee",
+  "group": "birds",
+  "type": "TGTG",
+  "notes": "A black-capped chickadee perched and leaning forward, facing right; the shear (s 0.35) tilts the body. The long tail is the low dent in e1 moved back as e3, so it tucks under the belly of the chickadee ahead. The round belly (e0) becomes the back's hollow (e2). Same edge structure as the nuthatch and woodpecker (e0 smooth 7, e1 smooth 5): the perching birds morph into each other.",
+  "corners": {
+    "w": 1.0,
+    "h": 1.0,
+    "s": 0.35
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[0.1, -0.04], [0.25, -0.02], [0.4, -0.06], [0.55, -0.12], [0.7, -0.14], [0.82, -0.08], [0.93, -0.03]]
+    },
+    "e1": {
+      "smooth": [[0.0535, 0.2187], [0.4437, -0.1247], [0.7002, -0.1149], [0.882, -0.2913], [0.9149, -0.0998]]
+    }
+  },
+  "art": [
+    {
+      "part": "tail",
+      "fill": {
+        "smooth": [[-0.15, 0.12], [0.05, 0.2], [0.3, 0.3], [0.36, 0.2], [0.1, 0.06], [-0.1, 0.06]]
+      }
+    },
+    {
+      "part": "edges",
+      "stroke": {
+        "smooth": [[-0.12, 0.11], [0.1, 0.16], [0.3, 0.24]]
+      },
+      "width": 0.012
+    },
+    {
+      "part": "flank",
+      "fill": {
+        "smooth": [[0.4, 0.12], [0.6, -0.04], [0.74, 0.04], [0.74, 0.14], [0.9, 0.24], [1.1, 0.3], [0.85, 0.34], [0.6, 0.26]]
+      }
+    },
+    {
+      "part": "wing",
+      "fill": {
+        "smooth": [[0.42, 0.6], [0.7, 0.7], [0.95, 0.6], [1.0, 0.42], [0.75, 0.26], [0.45, 0.26], [0.36, 0.4]]
+      }
+    },
+    {
+      "part": "edges",
+      "stroke": {
+        "smooth": [[0.45, 0.54], [0.7, 0.6], [0.92, 0.52]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "edges",
+      "stroke": {
+        "smooth": [[0.45, 0.44], [0.7, 0.48], [0.9, 0.42]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "edges",
+      "stroke": {
+        "smooth": [[0.48, 0.34], [0.7, 0.36], [0.86, 0.32]]
+      },
+      "width": 0.014
+    },
+    {
+      "part": "cheek",
+      "fill": {
+        "smooth": [[1.06, 0.72], [1.2, 0.65], [1.33, 0.68], [1.35, 0.76], [1.2, 0.8], [1.08, 0.79]]
+      }
+    },
+    {
+      "part": "cap",
+      "fill": {
+        "smooth": [[0.95, 0.86], [1.1, 0.94], [1.3, 0.95], [1.36, 0.9], [1.42, 0.84], [1.35, 0.8], [1.2, 0.82], [1.0, 0.8]]
+      }
+    },
+    {
+      "part": "bib",
+      "fill": {
+        "smooth": [[1.2, 0.62], [1.3, 0.66], [1.35, 0.68], [1.31, 0.6], [1.27, 0.5], [1.18, 0.54]]
+      }
+    },
+    {
+      "part": "bill",
+      "fill": {
+        "polyline": [[1.42, 0.735], [1.56, 0.775], [1.44, 0.805]]
+      }
+    },
+    {
+      "part": "eye",
+      "circle": [1.3, 0.85, 0.03]
+    },
+    {
+      "part": "pupil",
+      "circle": [1.305, 0.85, 0.017]
+    }
+  ],
+  "colours": {
+    "tail": "shade",
+    "edges": "cut",
+    "flank": "accent",
+    "wing": "shade",
+    "cheek": "paper",
+    "cap": "ink",
+    "bib": "ink",
+    "bill": "ink",
+    "eye": "paper",
+    "pupil": "ink"
+  },
+  "height": {
+    "dome": 0.7,
+    "parts": {
+      "cap": 0.2,
+      "wing": 0.2,
+      "edges": -0.3,
+      "eye": 0.4
+    }
+  }
+}

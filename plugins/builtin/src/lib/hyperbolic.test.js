@@ -146,6 +146,73 @@ describe("createDrift", () => {
     }
   });
 
+  /**
+   * How far m is from an exact disk isometry λ·[a b; b̄ ā], |a|² − |b|² = 1, |λ| = 1: with |det| = 1
+   * that is M*JM = J, J = diag(1, −1), i.e. |a|² − |c|² = 1, |d|² − |b|² = 1, āb = c̄d.
+   * @param {Float64Array} m
+   */
+  const formError = (m) => {
+    const [ar, ai, br, bi, cr, ci, dr, di] = m;
+    const detR = ar * dr - ai * di - (br * cr - bi * ci);
+    const detI = ar * di + ai * dr - (br * ci + bi * cr);
+    return Math.max(
+      Math.abs(Math.hypot(detR, detI) - 1),
+      Math.abs(ar * ar + ai * ai - cr * cr - ci * ci - 1),
+      Math.abs(dr * dr + di * di - br * br - bi * bi - 1),
+      Math.abs(ar * br + ai * bi - (cr * dr + ci * di)), // re(āb − c̄d)
+      Math.abs(ar * bi - ai * br - (cr * di - ci * dr)), // im(āb − c̄d)
+    );
+  };
+
+  const nanIsInf = (/** @type {number} */ x) => (Number.isNaN(x) ? Infinity : x);
+
+  it.each([
+    ["{7,3} at 60 Hz", 7, 3, () => 1 / 60],
+    ["{5,4} at 60 Hz", 5, 4, () => 1 / 60],
+    ["{7,3} at 144 Hz", 7, 3, () => 1 / 144],
+    ["{7,3} at 30 Hz", 7, 3, () => 1 / 30],
+    ["{4,5} at a jittery 20–200 Hz", 4, 5, () => 0.005 + 0.045 * rnd()],
+  ])("stays an exact, unmirrored isometry over 30,000 steps (%s), the view continuous across rebases", (_, p, q, dt) => {
+    const tl = tiling(p, q);
+    const drift = createDrift(tl);
+    const before = createIsometry();
+    const probe = [[0, 0], [0.5, 0.2], [-0.3, -0.7], [0.85, -0.1]];
+    let clock = 0;
+    let worstR = 0;
+    let worstForm = 0;
+    let worstJump = 0;
+    let mirrored = 0;
+    let leftDisk = -1; // first step with T(0) not well inside
+    for (let i = 0; i < 30000; i++) {
+      const h = dt();
+      clock += h;
+      // Tentacube's drift, a little faster: speed 0.1–0.3, a slowly reversing turn.
+      drift.advance(h, 0.2 + 0.1 * Math.sin(clock * 0.3), 0.05 * Math.sin(clock * 0.07));
+      before.set(drift.m);
+      drift.rebase();
+      mirrored += drift.m[8]; // the rebase never mirrors
+      mobiusApply(drift.m, 0, 0, out);
+      worstR = Math.max(worstR, nanIsInf(Math.hypot(out[0], out[1])));
+      if (leftDisk < 0 && !(worstR < 0.9)) leftDisk = i;
+      worstForm = Math.max(worstForm, nanIsInf(formError(drift.m)));
+      if (i % 37 === 0) {
+        // The picture (each screen point's folded tiling point) is the same before and after.
+        for (const [x, y] of probe) {
+          mobiusApply(before, x, y, out);
+          fold(out[0], out[1], tl, f);
+          mobiusApply(drift.m, x, y, out2);
+          fold(out2[0], out2[1], tl, f2);
+          worstJump = Math.max(worstJump, nanIsInf(Math.hypot(f2[0] - f[0], f2[1] - f[1])));
+        }
+      }
+    }
+    const seen = JSON.stringify({ mirrored, leftDisk, worstR, worstForm, worstJump });
+    expect(mirrored, seen).toBe(0);
+    expect(worstR, seen).toBeLessThan(0.9); // T(0) stays well inside the disk
+    expect(worstForm, seen).toBeLessThan(1e-9);
+    expect(worstJump, seen).toBeLessThan(1e-6);
+  });
+
   it("moves the view at the requested hyperbolic speed", () => {
     const probe = createDrift(t);
     for (let i = 0; i < 60; i++) probe.advance(1 / 60, 0.3, 0);

@@ -49,6 +49,14 @@ def test_builtin_renderers():
         "marbling": ("webgl2", []),
         "laminar": ("webgl2", []),
         "tetraballs": ("webgl2", []),
+        "lattice": ("webgl2", []),
+        "tentacle-lattice": ("webgl2", []),
+        "metamorphosis": ("webgl2", []),
+        "tile-horizon": ("webgl2", []),
+        "endless-zoom": ("webgl2", []),
+        "tiled-sphere": ("webgl2", []),
+        "tiled-torus": ("webgl2", []),
+        "poincare-disk": ("webgl2", []),
     }
 
 
@@ -140,6 +148,9 @@ COSMIC_PEANUT_PARAMS = {
     # Added after the PRD at the user's request: 2× MSAA for soft lines costs ~7.5 MB of GPU
     # memory at 1440p, so it can be switched off.
     "antialias": ("boolean", "Antialias soft lines", True, None, None, None),
+    # Added after the PRD: classic is the original look, pixel for pixel; cinematic adds HDR
+    # lines, bloom, filmic tone mapping, prefiltered lines and lens character (README → Look).
+    "look": ("select", "Look", "classic", None, None, ["classic", "cinematic"]),
 }
 
 
@@ -177,6 +188,20 @@ def test_cosmic_peanut_manifest_matches_prd():
     assert got == COSMIC_PEANUT_PARAMS
     assert [p["id"] for p in v["params"]] == list(got)
     assert {p["id"]: p.get("step") for p in v["params"]}["travel"] == 0.5
+
+
+def test_every_cosmic_peanut_visualizer_has_the_same_look_param_after_antialias():
+    for v in _manifest("cosmic-peanut")["visualizers"]:
+        ids = [p["id"] for p in v["params"]]
+        assert ids[ids.index("antialias") + 1] == "look", v["id"]
+        (look,) = [p for p in v["params"] if p["id"] == "look"]
+        assert look == {
+            "id": "look",
+            "type": "select",
+            "label": "Look",
+            "options": ["classic", "cinematic"],
+            "default": COSMIC_PEANUT_PARAMS["look"][2],
+        }
 
 
 def test_mobius_has_cosmic_peanuts_params_plus_width_beat_track_and_length():
@@ -662,3 +687,511 @@ def test_tetraballs_manifest():
     assert params["bounce"]["default"] == 1
     for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
+
+
+def test_lattice_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "lattice"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Lattice",
+        "src/lattice.js",
+        "webgl2",
+        "thumbs/lattice.jpg",
+    )
+    # One line, and original wording: no artist's name or print titles in the UI.
+    assert v["description"] and "\n" not in v["description"]
+    assert "escher" not in json.dumps(v).lower()
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "speed",
+        "reactivity",
+        "thickness",
+        "fog",
+        "palette",
+        "background",
+        "look",
+        "quality",
+        "structure",
+    ]
+    # lib/lattice-look.js LOOKS / DEFAULT_LOOK: classic is the original shading, byte for byte.
+    look = params["look"]
+    assert (look["label"], look["type"]) == ("Look", "select")
+    assert look["options"] == ["classic", "cinematic"]
+    assert look["default"] in look["options"]
+    # lib/structures.js STRUCTURE_OPTIONS: one entry per structure file (the seam for new ones).
+    assert params["structure"]["type"] == "select"
+    assert params["structure"]["options"] == [
+        "cubic",
+        "octet",
+        "diamond",
+        "bitruncated",
+        "gyroid",
+        "schwarz-p",
+        "schwarz-d",
+        "sponge",
+        "kaleidoscope",
+    ]
+    # Each option's shader file (the TPMS share one, a define per surface).
+    shared = {"gyroid": "tpms", "schwarz-p": "tpms", "schwarz-d": "tpms"}
+    for name in params["structure"]["options"]:
+        f = f"shaders/lattice/structure-{shared.get(name, name)}.glsl"
+        assert (REPOS["builtin"] / f).is_file(), name
+    assert params["structure"]["default"] == "cubic"
+    # lib/lattice.js DEFAULT_SPEED: Reduce motion slows the flight only while Speed sits here.
+    speed = params["speed"]
+    assert (speed["type"], speed["min"], speed["default"]) == ("number", 0, 1)
+    assert speed["max"] >= 3
+    r = params["reactivity"]
+    assert (r["type"], r["min"], r["max"], r["default"]) == ("number", 0, 2, 1)
+    # lib/lattice.js THICKNESS (rod radius, cells).
+    t = params["thickness"]
+    assert (t["label"], t["min"], t["max"], t["default"]) == ("Rod thickness", 0.03, 0.12, 0.06)
+    fog = params["fog"]
+    assert (fog["min"], fog["max"], fog["default"]) == (0, 1, 0.5)
+    # lib/lattice.js PALETTES / QUALITIES.
+    assert params["palette"]["options"] == ["steel", "brass", "ink"]
+    assert params["palette"]["default"] == "steel"
+    assert params["background"]["options"] == ["fog", "none"]
+    assert params["background"]["default"] == "fog"
+    assert params["quality"]["options"] == ["low", "medium", "high"]
+    assert params["quality"]["default"] == "medium"
+    for f in (
+        "fullscreen.vert",
+        "lattice.frag",
+        "common.glsl",
+        "march.glsl",
+        "shade.glsl",
+        "post.frag",
+        "structure-cubic.glsl",
+        "structure-tentacle.glsl",
+        "brdf.glsl",
+        "bloom.frag",
+        "structure-tpms.glsl",
+        "structure-sponge.glsl",
+        "structure-kaleidoscope.glsl",
+    ):
+        assert (REPOS["builtin"] / "shaders/lattice" / f).is_file(), f
+
+
+def test_tentacle_lattice_manifest():
+    vs = {v["id"]: v for v in _manifest("builtin")["visualizers"]}
+    v, lattice = vs["tentacle-lattice"], vs["lattice"]
+    # Lattice's entry module and shaders; the variant is picked by ctx.id (lib/tentacle-lattice.js).
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Tentacle Lattice",
+        "src/lattice.js",
+        "webgl2",
+        "thumbs/tentacle-lattice.jpg",
+    )
+    assert v["description"] and "\n" not in v["description"]
+    assert "escher" not in json.dumps(v).lower()
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "speed",
+        "reactivity",
+        "length",
+        "sway",
+        "twitch",
+        "material",
+        "fog",
+        "palette",
+        "background",
+        "look",
+        "quality",
+    ]
+    # Lattice's params, less Rod thickness and Structure (it's fixed to "tentacle"), unchanged.
+    shared = {p["id"]: p for p in lattice["params"] if p["id"] not in ("thickness", "structure")}
+    for pid, spec in shared.items():
+        assert params[pid] == spec, pid
+    # lib/tentacle-lattice.js LENGTH, and Sway / Twitch 0–2 (Reduce motion calms Twitch at 1).
+    length = params["length"]
+    assert (length["label"], length["min"], length["max"], length["default"]) == (
+        "Tentacle length",
+        0.3,
+        0.48,
+        0.42,
+    )
+    for pid, label in (("sway", "Sway"), ("twitch", "Twitch")):
+        p = params[pid]
+        assert (p["label"], p["type"], p["min"], p["max"], p["default"]) == (
+            label,
+            "number",
+            0,
+            2,
+            1,
+        )
+    # lib/tentacle-lattice.js MATERIALS (Tentacube's presets after "auto").
+    assert params["material"]["options"] == ["auto", "chrome", "iridescent", "emissive", "obsidian"]
+    assert params["material"]["default"] == "auto"
+
+
+# The relief's params: Metamorphosis's, and the surfaces that have adopted it (Tile Horizon,
+# Endless Zoom, Tiled Sphere).
+RELIEF_PARAMS = ("relief", "light")
+TESS_VISUALIZERS = (
+    "metamorphosis",
+    "tile-horizon",
+    "endless-zoom",
+    "tiled-sphere",
+    "tiled-torus",
+    "poincare-disk",
+)
+
+
+def test_every_tessellation_visualizer_has_the_same_look_param_before_quality():
+    # lib/tess-look.js LOOKS / DEFAULT_LOOK: classic is the woodcut print as it was, byte for byte;
+    # cinematic lights it as a carved, inked, printed object (shaders/tess/look.glsl, post.frag).
+    for v in _manifest("builtin")["visualizers"]:
+        if v["id"] not in TESS_VISUALIZERS:
+            continue
+        ids = [p["id"] for p in v["params"]]
+        assert ids[-2:] == ["look", "quality"], v["id"]
+        (look,) = [p for p in v["params"] if p["id"] == "look"]
+        assert look == {
+            "id": "look",
+            "type": "select",
+            "label": "Look",
+            "options": ["classic", "cinematic"],
+            "default": "classic",
+        }, v["id"]
+    for name in ("look.glsl", "post.frag", "bloom.frag", "dof.frag"):
+        assert (REPOS["builtin"] / "shaders" / "tess" / name).is_file(), name
+
+
+def test_metamorphosis_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "metamorphosis"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Metamorphosis",
+        "src/metamorphosis.js",
+        "webgl2",
+        "thumbs/metamorphosis.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "symmetry",
+        "palette",
+        "reactivity",
+        "speed",
+        "morph",
+        "ink",
+        "hatching",
+        "relief",
+        "light",
+        "creatures",
+        "look",
+        "quality",
+    ]
+    # Relief (lib/tess-music.js RELIEF_DEFAULT; 0 is the flat print) and the raking light's
+    # direction round the view in degrees (LIGHT_DEFAULT: from the upper left).
+    rel = params["relief"]
+    assert (rel["type"], rel["label"], rel["min"], rel["max"], rel["default"]) == (
+        "number",
+        "Relief",
+        0,
+        1,
+        0.6,
+    )
+    li = params["light"]
+    assert (li["type"], li["label"], li["min"], li["max"], li["default"]) == (
+        "number",
+        "Light",
+        0,
+        360,
+        135,
+    )
+    # Creatures: the warp's abstract creatures (default, unchanged) or the bestiary's animal tiles
+    # by group (lib/bestiary.js GROUPS; lib/atlas.js creatureList). Fixed options, so designers
+    # adding species never edit the manifest.
+    c = params["creatures"]
+    assert (c["type"], c["label"], c["default"]) == ("select", "Creatures", "abstract")
+    assert c["options"] == ["abstract", "all", "fish", "birds", "reptiles", "mammals"]
+    for g in c["options"][2:]:
+        assert (REPOS["builtin"] / "tiles" / g / "index.json").is_file(), g
+    # Option order is lib/tess-music.js SYMMETRIES, lib/tess.js PALETTES, tess-music QUALITIES.
+    assert params["symmetry"]["options"] == ["p4", "p3"]
+    assert params["palette"]["options"] == ["ink", "dusk", "four-block", "ochre", "watercolour"]
+    assert params["quality"]["options"] == ["low", "medium", "high"]
+    r = params["reactivity"]
+    assert (r["min"], r["max"], r["default"]) == (0, 2, 1)
+    m = params["morph"]
+    assert (m["min"], m["max"]) == (0, 1)
+    h = params["hatching"]
+    assert (h["min"], h["max"]) == (0, 1)
+    # The palettes and the visualizer's name stay neutral (original work, no artist's name).
+    text = json.dumps(v).lower()
+    assert "escher" not in text
+    for name in (
+        "shaders/tess/tess.glsl",
+        "shaders/tess/metamorphosis.frag",
+        "shaders/tess/paper.frag",
+    ):
+        assert (REPOS["builtin"] / name).is_file(), name
+
+
+def test_tile_horizon_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "tile-horizon"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Tile Horizon",
+        "src/tile-horizon.js",
+        "webgl2",
+        "thumbs/tile-horizon.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    # Metamorphosis's params with its Relief and Light (the carved block, raised off the floor),
+    # plus the floor's camera (lib/tess-floor.js maps them, 0-1).
+    assert list(params) == [
+        "symmetry",
+        "palette",
+        "reactivity",
+        "speed",
+        "morph",
+        "ink",
+        "hatching",
+        "relief",
+        "light",
+        "height",
+        "tilt",
+        "fog",
+        "look",
+        "quality",
+    ]
+    (meta,) = [m for m in _manifest("builtin")["visualizers"] if m["id"] == "metamorphosis"]
+    for p in meta["params"]:
+        if p["id"] == "creatures":  # Metamorphosis-only for now
+            continue
+        assert params[p["id"]] == p, p["id"]
+    for name in ("height", "tilt", "fog"):
+        assert (params[name]["type"], params[name]["min"], params[name]["max"]) == ("number", 0, 1)
+    # Original work: no artist's name, artwork title or trademark anywhere in its strings.
+    text = json.dumps(v).lower()
+    for word in ("escher", "droste"):
+        assert word not in text
+    for name in ("shaders/tess/tess.glsl", "shaders/tess/tile-horizon.frag"):
+        assert (REPOS["builtin"] / name).is_file(), name
+
+
+def test_endless_zoom_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "endless-zoom"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Endless Zoom",
+        "src/endless-zoom.js",
+        "webgl2",
+        "thumbs/endless-zoom.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    # Metamorphosis's params, Relief and Light included (the carved block through the zoom; Relief
+    # 0 is the flat print), plus the surface's own before Quality.
+    (m,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "metamorphosis"]
+    shared = [p for p in m["params"] if p["id"] not in ("quality", "creatures", "look")]
+    assert [p["id"] for p in shared][-2:] == list(RELIEF_PARAMS)
+    assert v["params"][: len(shared)] == shared
+    assert list(params)[len(shared) :] == ["spiral", "zoom", "direction", "look", "quality"]
+    # Option order is lib/tess-zoom.js SPIRALS and DIRECTIONS (default DEFAULT_SPIRAL).
+    assert params["spiral"]["options"] == ["none", "gentle", "medium", "strong"]
+    assert params["spiral"]["default"] == "gentle"
+    assert params["direction"]["options"] == ["in", "out"]
+    z = params["zoom"]
+    assert (z["label"], z["min"], z["max"], z["default"]) == ("Zoom speed", 0, 2, 1)
+    # Original work: no artist's name, artwork titles or trademarked names in UI strings.
+    text = json.dumps(v).lower()
+    for word in ("escher", "droste", "print gallery"):
+        assert word not in text, word
+    for name in ("shaders/tess/endless-zoom.frag", "shaders/tess/tess.glsl"):
+        assert (REPOS["builtin"] / name).is_file(), name
+
+
+def test_tiled_sphere_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "tiled-sphere"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Tiled Sphere",
+        "src/tiled-sphere.js",
+        "webgl2",
+        "thumbs/tiled-sphere.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    # p4 only (the cube-sphere's edges are quarter turns), so no Symmetry param.
+    assert list(params) == [
+        "view",
+        "palette",
+        "reactivity",
+        "speed",
+        "morph",
+        "ink",
+        "hatching",
+        "relief",
+        "light",
+        "look",
+        "quality",
+    ]
+    # The carved block lifting off the globe: Metamorphosis's Relief (0 is the flat print, as
+    # before relief) and Light, the same definitions.
+    (meta,) = [m for m in _manifest("builtin")["visualizers"] if m["id"] == "metamorphosis"]
+    for p in meta["params"]:
+        if p["id"] in RELIEF_PARAMS:
+            assert params[p["id"]] == p, p["id"]
+    # Option order is lib/sphere-view.js VIEWS, lib/tess.js PALETTES, tess-music QUALITIES.
+    assert params["view"]["options"] == ["outside", "inside", "auto"]
+    assert params["view"]["default"] == "auto"
+    assert params["palette"]["options"] == ["ink", "dusk", "four-block", "ochre", "watercolour"]
+    assert params["quality"]["options"] == ["low", "medium", "high"]
+    r = params["reactivity"]
+    assert (r["min"], r["max"], r["default"]) == (0, 2, 1)
+    assert "\n" not in v["description"] and len(v["description"]) < 200
+    text = json.dumps(v).lower()
+    assert "escher" not in text
+    for name in (
+        "shaders/tess/tess.glsl",
+        "shaders/tess/sphere.frag",
+        "shaders/tess/paper.frag",
+    ):
+        assert (REPOS["builtin"] / name).is_file(), name
+
+
+def test_tiled_torus_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "tiled-torus"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Tiled Torus",
+        "src/tiled-torus.js",
+        "webgl2",
+        "thumbs/tiled-torus.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "view",
+        "symmetry",
+        "thickness",
+        "wave",
+        "travel",
+        "detail",
+        "spin",
+        "twist",
+        "palette",
+        "reactivity",
+        "speed",
+        "morph",
+        "ink",
+        "hatching",
+        "relief",
+        "light",
+        "look",
+        "quality",
+    ]
+    # The carved block riding the waves (lib/torus-relief.js; lib/torus.js mapParams): Relief 0 is
+    # the smooth print as before relief, Light the raking light's direction round the view.
+    rel, li = params["relief"], params["light"]
+    assert (rel["type"], rel["label"], rel["min"], rel["max"], rel["default"]) == (
+        "number",
+        "Relief",
+        0,
+        1,
+        0.6,
+    )
+    assert (li["type"], li["label"], li["min"], li["max"], li["default"]) == (
+        "number",
+        "Light",
+        0,
+        360,
+        135,
+    )
+    (meta,) = [m for m in _manifest("builtin")["visualizers"] if m["id"] == "metamorphosis"]
+    for pid in RELIEF_PARAMS:
+        assert params[pid] == {p["id"]: p for p in meta["params"]}[pid], pid
+    # Option order is lib/torus.js VIEWS, lib/tess-music.js SYMMETRIES, lib/tess.js PALETTES,
+    # tess-music QUALITIES; Thickness is lib/torus.js THICKNESS.
+    assert params["view"]["options"] == ["auto", "outside", "inside"]
+    assert params["symmetry"]["options"] == ["p4", "p3"]
+    assert params["palette"]["options"] == ["ink", "dusk", "four-block", "ochre", "watercolour"]
+    assert params["quality"]["options"] == ["low", "medium", "high"]
+    # Medium by default: at high the inside view misses 60 fps at 1440p (NOTES: quiet-machine pass).
+    assert params["quality"]["default"] == "medium"
+    t = params["thickness"]
+    assert (t["min"], t["max"], t["default"]) == (0.2, 0.5, 0.36)
+    # lib/torus.js mapParams: Wave height 0–1, Travel time TRAVEL (s a lap round the tube), Detail 0–1.
+    w = params["wave"]
+    assert (w["label"], w["min"], w["max"], w["default"]) == ("Wave height", 0, 1, 0.7)
+    tr = params["travel"]
+    assert (tr["label"], tr["min"], tr["max"], tr["default"]) == ("Travel time", 1, 8, 4)
+    d = params["detail"]
+    assert (d["label"], d["min"], d["max"], d["default"]) == ("Detail", 0, 1, 0.15)
+    # Spin: turns a minute round the tube (signed); Twist: half-turns a lap (lib/torus.js).
+    sp = params["spin"]
+    assert (sp["label"], sp["min"], sp["max"], sp["default"]) == ("Spin", -2, 2, 1)
+    tw = params["twist"]
+    assert (tw["label"], tw["min"], tw["max"], tw["default"]) == ("Twist", 0, 2, 0)
+    r = params["reactivity"]
+    assert (r["min"], r["max"], r["default"]) == (0, 2, 1)
+    m = params["morph"]
+    assert (m["min"], m["max"]) == (0, 1)
+    h = params["hatching"]
+    assert (h["min"], h["max"]) == (0, 1)
+    text = json.dumps(v).lower()
+    assert "escher" not in text
+    for name in (
+        "shaders/tess/tess.glsl",
+        "shaders/tess/torus.frag",
+        "shaders/tess/torus-disp.frag",
+        "shaders/tess/paper.frag",
+    ):
+        assert (REPOS["builtin"] / name).is_file(), name
+
+
+def test_poincare_disk_manifest():
+    (v,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "poincare-disk"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Poincaré Disk",
+        "src/poincare-disk.js",
+        "webgl2",
+        "thumbs/poincare-disk.jpg",
+    )
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "scene",
+        "camera",
+        "spin",
+        "tiling",
+        "palette",
+        "reactivity",
+        "speed",
+        "morph",
+        "ink",
+        "hatching",
+        "relief",
+        "light",
+        "look",
+        "quality",
+    ]
+    # Relief and Light as Metamorphosis's (the kites carved like a woodblock; 0 is the print as it
+    # was before relief, byte for byte).
+    (meta,) = [m for m in _manifest("builtin")["visualizers"] if m["id"] == "metamorphosis"]
+    for pid in RELIEF_PARAMS:
+        assert params[pid] == {p["id"]: p for p in meta["params"]}[pid], pid
+    # Option order is lib/tess-disk.js TILINGS, lib/tess.js PALETTES, tess-music QUALITIES.
+    assert params["tiling"]["options"] == ["{7,3}", "{5,4}", "{4,5}", "{6,4}"]
+    assert params["tiling"]["default"] == "{7,3}"
+    # lib/disk3d.js SCENES and CAMERAS; the sphere scene is the default, flat the print alone.
+    assert params["scene"]["options"] == ["flat", "sphere"]
+    assert params["scene"]["default"] == "sphere"
+    assert params["camera"]["default"] == "auto"
+    assert params["camera"]["options"] == ["auto", "still"]
+    sp = params["spin"]
+    assert (sp["min"], sp["max"], sp["default"]) == (0, 2, 1)
+    assert params["palette"]["options"] == ["ink", "dusk", "four-block", "ochre", "watercolour"]
+    assert params["quality"]["options"] == ["low", "medium", "high"]
+    r = params["reactivity"]
+    assert (r["min"], r["max"], r["default"]) == (0, 2, 1)
+    for pid in ("morph", "hatching"):
+        assert (params[pid]["min"], params[pid]["max"]) == (0, 1)
+    # Original work: no artist's name or artwork titles in any string.
+    text = json.dumps(v).lower()
+    for banned in ("escher", "circle limit"):
+        assert banned not in text
+    for name in (
+        "shaders/tess/tess.glsl",
+        "shaders/tess/disk.frag",
+        "shaders/tess/disk.glsl",
+        "shaders/tess/disk3d.frag",
+        "shaders/tess/sphere.glsl",
+        "shaders/tess/paper.frag",
+        "src/lib/tess-disk.js",
+        "src/lib/disk3d.js",
+    ):
+        assert (REPOS["builtin"] / name).is_file(), name

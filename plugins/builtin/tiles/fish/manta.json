@@ -1,0 +1,104 @@
+{
+  "format": 1,
+  "name": "Manta ray",
+  "group": "fish",
+  "type": "TTTTTT",
+  "notes": "A manta ray from above, a school all gliding up (+y). Built like the tern: the head (e3) with its two cephalic fins at V3 and V4 is the tail end (e0) moved up, so the short tail sits in the mouth notch of the manta ahead. The corners and edges are mirror-symmetric about x = 0.25: e2 is e1 with v negated, so each wing's concave trailing edge (e1) is the other wing's convex leading edge (e4). White shoulder patches as on a reef manta.",
+  "corners": {
+    "v1": [0.5, 0.0],
+    "v2": [1.75, 0.45],
+    "v3": [0.5, 0.9]
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[0.08, 0.08], [0.24, -0.06], [0.4, -0.24], [0.45, -0.58], [0.5, -0.7], [0.55, -0.58], [0.6, -0.24], [0.76, -0.06], [0.92, 0.08]]
+    },
+    "e1": {
+      "smooth": [[0.18, 0.1], [0.45, 0.17], [0.72, 0.1], [0.9, 0.02]]
+    },
+    "e2": {
+      "smooth": [[0.18, -0.1], [0.45, -0.17], [0.72, -0.1], [0.9, -0.02]]
+    }
+  },
+  "art": [
+    {
+      "part": "patch",
+      "fill": {
+        "smooth": [[0.62, 0.62], [0.9, 0.68], [1.2, 0.62], [0.95, 0.56], [0.7, 0.5]]
+      }
+    },
+    {
+      "part": "patch",
+      "fill": {
+        "smooth": [[-0.12, 0.62], [-0.4, 0.68], [-0.7, 0.62], [-0.45, 0.56], [-0.2, 0.5]]
+      }
+    },
+    {
+      "part": "ridge",
+      "stroke": {
+        "smooth": [[0.25, 0.46], [0.25, 0.25], [0.25, 0.02]]
+      },
+      "width": [0.02, 0.01]
+    },
+    {
+      "part": "ridge",
+      "stroke": {
+        "smooth": [[0.5, 0.58], [0.9, 0.5], [1.4, 0.48]]
+      },
+      "width": [0.014, 0.006]
+    },
+    {
+      "part": "ridge",
+      "stroke": {
+        "smooth": [[0.0, 0.58], [-0.4, 0.5], [-0.9, 0.48]]
+      },
+      "width": [0.014, 0.006]
+    },
+    {
+      "part": "horn",
+      "stroke": {
+        "smooth": [[0.47, 0.88], [0.42, 0.78], [0.36, 0.72]]
+      },
+      "width": [0.016, 0.008]
+    },
+    {
+      "part": "horn",
+      "stroke": {
+        "smooth": [[0.03, 0.88], [0.08, 0.78], [0.14, 0.72]]
+      },
+      "width": [0.016, 0.008]
+    },
+    {
+      "part": "eye",
+      "circle": [0.47, 0.74, 0.03]
+    },
+    {
+      "part": "eye",
+      "circle": [0.03, 0.74, 0.03]
+    },
+    {
+      "part": "pupil",
+      "circle": [0.475, 0.74, 0.015]
+    },
+    {
+      "part": "pupil",
+      "circle": [0.025, 0.74, 0.015]
+    }
+  ],
+  "colours": {
+    "patch": "light",
+    "ridge": "cut",
+    "horn": "ink",
+    "eye": "paper",
+    "pupil": "ink"
+  },
+  "height": {
+    "dome": 0.35,
+    "parts": {
+      "patch": 0.1,
+      "ridge": -0.2,
+      "horn": 0.2,
+      "eye": 0.4
+    }
+  }
+}

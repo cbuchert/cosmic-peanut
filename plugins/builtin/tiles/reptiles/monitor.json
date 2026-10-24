@@ -1,0 +1,192 @@
+{
+  "format": 1,
+  "name": "Monitor lizard",
+  "group": "reptiles",
+  "type": "TGTG",
+  "notes": "Same layout as the crocodile (it morphs with it and the gharial), on a slimmer tile. The right hind leg sits further back so its mirrored dent and the left hind leg's dent pinch a neck behind the small head; rows of pale rosettes (kept inside the outline by the generator) and a dark stripe behind the eye.",
+  "corners": {
+    "w": 2.0,
+    "h": 0.47,
+    "s": 0.25
+  },
+  "edges": {
+    "e0": {
+      "smooth": [[0.15, -0.02], [0.21, -0.005], [0.19, -0.045], [0.165, -0.09], [0.225, -0.095], [0.29, -0.01], [0.4, -0.005], [0.545, 0.005], [0.575, 0.12], [0.635, 0.11], [0.615, 0.06], [0.625, 0.005], [0.71, -0.005], [0.75, -0.06], [0.8, -0.11], [0.85, -0.09], [0.8, -0.005], [0.895, 0.005], [0.93, 0.08], [0.98, 0.09], [0.995, 0.045], [0.975, 0.0]]
+    },
+    "e1": {
+      "smooth": [[0.2925, -0.2699], [0.4834, -0.5088], [0.6733, -0.7057], [0.8059, -0.6351], [0.7653, -0.3589], [0.6076, -0.1023], [0.6542, 0.0501]]
+    }
+  },
+  "art": [
+    {
+      "part": "bands",
+      "stroke": {
+        "smooth": [[0.2, 0.025], [0.4, 0.05], [0.6, 0.12]]
+      },
+      "width": [0.008, 0.02]
+    },
+    {
+      "part": "rosette",
+      "circle": [0.5, 0.34, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [0.68, 0.1, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [0.77, 0.22, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [0.86, 0.1, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [0.95, 0.22, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [0.86, 0.34, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [1.04, 0.1, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [1.04, 0.34, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [1.22, 0.34, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [1.4, 0.1, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [1.49, 0.22, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [1.4, 0.34, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [1.58, 0.1, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [1.67, 0.22, 0.042]
+    },
+    {
+      "part": "rosette",
+      "circle": [1.58, 0.34, 0.042]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [0.5, 0.34, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [0.68, 0.1, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [0.77, 0.22, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [0.86, 0.1, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [0.95, 0.22, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [0.86, 0.34, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [1.04, 0.1, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [1.04, 0.34, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [1.22, 0.34, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [1.4, 0.1, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [1.49, 0.22, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [1.4, 0.34, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [1.58, 0.1, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [1.67, 0.22, 0.02]
+    },
+    {
+      "part": "rosette-c",
+      "circle": [1.58, 0.34, 0.02]
+    },
+    {
+      "part": "stripe",
+      "stroke": {
+        "smooth": [[2.13, 0.185], [2.0, 0.23], [1.9, 0.235]]
+      },
+      "width": [0.018, 0.01]
+    },
+    {
+      "part": "eye",
+      "circle": [2.14, 0.225, 0.032]
+    },
+    {
+      "part": "eye",
+      "circle": [2.17, 0.105, 0.034]
+    },
+    {
+      "part": "pupil",
+      "circle": [2.145, 0.225, 0.015]
+    },
+    {
+      "part": "pupil",
+      "circle": [2.175, 0.105, 0.016]
+    },
+    {
+      "part": "nostril",
+      "circle": [2.42, 0.19, 0.013]
+    }
+  ],
+  "colours": {
+    "bands": "shade",
+    "rosette": "accent",
+    "rosette-c": "shade",
+    "stripe": "ink",
+    "eye": "paper",
+    "pupil": "ink",
+    "nostril": "ink"
+  },
+  "height": {
+    "dome": 0.3,
+    "parts": {
+      "rosette": 0.4,
+      "eye": 0.4
+    }
+  }
+}
