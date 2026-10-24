@@ -3,6 +3,81 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tessellations: the bestiary carved in relief (2026-10-23)
+
+Metamorphosis no longer forces Relief to 0 while Creatures shows animals: each animal is a block
+bevelled along its own outline, its top domed and its fins, bills and shells raised and its scales,
+feathers and seams carved by the species' `height` hints, the art printed on top in ink as before.
+The beat waves, onset pops and the figure/ground card turns move each animal as a whole (its ring,
+hash and card axis come from its own centre and id), with the abstract tiles' timing and easing.
+
+- **Height channel** (`atlas-bake.frag`, mirrored by `lib/atlas.js hintAt`): the dome (0 at the
+  outline, `dome` at DOME_REACH 0.35 in, tile frame) plus the art parts in painter's order, each now
+  eased in over ART_RAMP 0.02 inside its edge (`mix(h, part, smoothstep(0, ART_RAMP, −sd))`) instead
+  of replacing the height outright. So the field has no step (a march and its normals need that), and
+  in a morph a part eroding away sinks rather than vanishing; the dome blends with the morph weight.
+  Tested: no step at a part's edge, and through a compatible morph and a change of tile type at 60 fps
+  no frame moves the block more than a quarter of a part's height (an eighth of the tallest block).
+- **The carved block** (`atlas.glsl tessAtlasPlate`, `lib/atlas.js atlasBlock`): RELIEF_BLOCK ×
+  Relief × profile(outline distance) × (1 + ATLAS_HINT · hint), ATLAS_HINT 0.5. The profile is the
+  abstract tiles' (bevel to dome by `u_tRelief.y`), so the groove stays at the floor and the bevel
+  follows the outline; the hint only scales the top. dh/dp: the profile's slope along the baked inward
+  normal plus the hint's gradient by central differences a texel (or a pixel, if wider) apart. At a
+  change of tile type everything (block, lifts, pops, cards) is multiplied by 1 − the print's dip, so
+  the swap of outlines and tile ids lands flat instead of jumping.
+- **Bound**: `reliefBound(…, block)` and `createTessState` option `reliefBlock` (default 1): the
+  march starts above the tallest animal. Metamorphosis passes `atlasBlockMax(max hintMax)` over the
+  selection (tortoise: dome 1 + rings 1 → 2 RELIEF_BLOCKs), so it holds through every morph.
+- **Its own programs (byte identity)**: the first version branched on `u_tMotif` inside
+  `tessPlate`/`tessShadeRelief`; WebKit's compiler then contracted the warp path's arithmetic
+  differently and abstract relief stills changed by 1 LSB in 1–9 bytes. So the animals' relief is a
+  compile-time variant: `tess.glsl` dispatches `tessRelief`/`tessShadeRelief` to `tessAtlasRelief`/
+  `tessAtlasShadeRelief` under `#ifdef TESS_ATLAS_RELIEF`, and `lib/tess-gl.js` compiles that pair (print
+  and height pass) the first time `render(s, setSurface, 1)` runs with relief on. The warp's programs
+  are textually unchanged. `TessPlate`, `tessPlate`, `tessRelief` and `tessShadeRelief` keep their
+  signatures and behaviour.
+- **Identity** (`run.py --shots`, still=150 after the backdrop warm-up page, `cmp` against 37ec0e2):
+  Relief 0 with `fish/koi`, `birds/puffin`, `reptiles/tortoise`, `mammals/orca`, `fish`, `birds`
+  and `all`, black and light, are byte-identical (the plain program is untouched); `abstract` at Relief
+  0, 0.6 (default) and 1 with p3 too; Tile Horizon, Endless Zoom, Tiled Sphere, Tiled Torus and
+  Poincaré Disk too.
+- **Texture units** are pinned by `src/metamorphosis.test.js`, which runs the visualizer on a
+  recording fake WebGL2 (sources preprocessed, so only live samplers count): at every draw no sampler
+  reads the framebuffer it writes, the relief pass reads the height the height pass just wrote on
+  HEIGHT_UNIT (3), and the atlas sits on 1–2 in both relief passes (setting HEIGHT_UNIT to 1 fails it).
+- **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`, GPU shared with five other agents,
+  two alternating sessions): `all` with relief and Morph 1 (morphing most of the time) p50 6–11 ms,
+  p99 14–23 ms, 58.8 fps; `all` at the default Morph p50 5–10, p99 7–21; Metamorphosis abstract with
+  relief in the same sessions p50 9–19, p99 17–31 (one window at 50 fps under load); `all` flat p50
+  3–6. The animals cost no more than the abstract relief: no warp, and the bake only on changes.
+  Flash check (10 Hz strobe) with `all`: ≤ 1 /s at 5 %, Reduce flashing on and off.
+- **Known**: a turning card's cut sides show the same coarse-height fringe as the abstract tiles';
+  thin strokes (under ~2·ART_RAMP wide) never reach their full height. Untested on the M1.
+
+**Seam: carved animals on any surface.** A surface that has adopted relief gets them by also taking
+the atlas motif; nothing else changes in its shader:
+
+```glsl
+#define TESS_ATLAS            // before `// #include tess` (tess-gl.js splices atlas.glsl in)
+// …the surface's existing relief code: tessRelief(p, S) to displace or march,
+// tessShadeRelief(p, S, plate, detail) to print and light — S must be the real dp/dpixel,
+// since the atlas filters with it.
+```
+
+```js
+const tess = await createTessPipeline(ctx, "shaders/tess/<surface>.frag", { relief: true });
+const atlas = await createAtlas(ctx);              // lib/atlas-gl.js
+atlas.setLibrary(await loadBestiary(ctx.assets, ctx.log));
+// frame(): creatures.step / blendShapes / atlas.bake on c.changed (see metamorphosis.js), then
+const s = state.step(audio, dt, { …, relief, reliefBlock: atlasOn ? atlasBlockMax(hint) : 1 });
+tess.render(s, (gl, u) => { …; atlasOn ? atlas.bind(gl, u, s, palette, creatures.dip) : atlas.unbind(gl, u); },
+  atlasOn ? 1 : 0);                                // 1 selects the carved-animal relief programs
+```
+
+The state should run as p3 while the atlas shows (all three class colours), and `u_tRing` /
+`TESS_RING` and `TESS_FLIP_DIR` work on the animals' plane centres as on the abstract tiles'.
+A surface that displaces geometry reads `tessRelief(p, S).x` exactly as before.
+
 ## Lattice shading: the cinematic look (2026-10-23)
 
 Lattice and Tentacle Lattice gain **Look**: `classic` (the default) or `cinematic`.
@@ -256,9 +331,9 @@ checked and previewed by `uv run python -m tools.tiles`.
   58.8 fps. Three renders per vsync still hold 58.8 fps: 2–5 ms per frame, bakes included.
   Abstract in the same session: p50 7–13 ms. Untested on the M1.
 - **With relief (integration, 2026-10-23):** the atlas hook (`tessArt`) sits in `tessPrintFill`,
-  the print tail `tessPrint` and `tessShadeRelief` share. Relief carves the abstract creatures
-  only: while the bestiary shows, Metamorphosis passes relief 0 (flat print, as before relief).
-  Texture units: print target 0, atlas field 1 and art 2 (set on every program, relief ones
+  the print tail `tessPrint` and `tessShadeRelief` share. Relief carved the abstract creatures
+  only at first (Metamorphosis passed relief 0 while the bestiary showed); see "the bestiary carved
+  in relief" above for the animals. Texture units: print target 0, atlas field 1 and art 2 (set on every program, relief ones
   included), relief height 3 (`HEIGHT_UNIT`, was 1, which aliased the atlas field).
 
 ## Lattice camera: smooth, with turns on the beat (2026-10-22)

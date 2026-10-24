@@ -103,8 +103,12 @@ thin fins that neighbours squeeze.
 | `accent` | a palette colour no tile class is using: patches, beaks, wing bars |
 | `shade` / `light` | the fill pushed towards ink or towards paper: bellies, mantles, shells |
 
-**Height** (optional) is a relief hint for surfaces that light the print: `dome` is 0–1, and
-`parts` holds −1 (carved) to 1 (raised) per art part.
+**Height** (optional) is the relief hint Metamorphosis carves with when Relief is on: `dome` is 0–1
+(how high the body rises towards its middle), and `parts` holds −1 (carved) to 1 (raised) per art
+part, an absolute level on the body (painter's order: a part drawn on top of another sets its own
+level, so nested plates can step up, e.g. a tortoise's shell 0.6, plates 0.7, rings 1.0). Each part
+eases to its level over 0.02 inside its edge, so strokes thinner than ~0.04 stay lower than their
+hint. The body's bevel always follows the outline; parts only shape its top.
 
 ## The four types
 

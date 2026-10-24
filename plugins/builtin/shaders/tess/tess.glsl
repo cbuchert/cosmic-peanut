@@ -12,7 +12,9 @@
 // centre c from u_tRing.xy over u_tRing.z. Optional hook: define TESS_CLASS(cls, c) to recolour a
 // tile from its regular class and centre (0–2, an index into u_tCls; e.g. a surface whose charts
 // meet with a turn that swaps the classes); the default keeps cls. Optional: define TESS_ATLAS to
-// get the bestiary's animal tiles as a second motif (shaders/tess/atlas.glsl, u_tMotif).
+// get the bestiary's animal tiles as a second motif (shaders/tess/atlas.glsl, u_tMotif); with
+// TESS_RELIEF too, lib/tess-gl.js renders motif 1 with programs that also define TESS_ATLAS_RELIEF,
+// in which tessRelief / tessShadeRelief carve the animals.
 //
 // Mirrors src/lib/tess.js (tested there): the symmetric displacement field (tessField ↔
 // fieldAt), the regular tile test (tessTile ↔ tileAt). Plane units: the lattice (p4: unit
