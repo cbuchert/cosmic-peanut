@@ -343,6 +343,11 @@ vec2 tessFlipDir(vec2 c) {
 #ifndef TESS_FLIP_DIR
 #define TESS_FLIP_DIR(c) tessFlipDir(c)
 #endif
+// Optional hook: the cell a tile's lift variation and pops hash (default its own); a surface
+// whose seams show one tile through two plane copies maps both to one key (Tiled Torus).
+#ifndef TESS_CELL_KEY
+#define TESS_CELL_KEY(cell) (cell)
+#endif
 
 float tessRamp(float x, float w, out float slope) {
   float u = clamp(x / w, 0.0, 1.0);
@@ -401,7 +406,7 @@ TessPlate tessPlate(vec2 p) {
   float th = 3.14159265 * fade;
   float sn = sin(th);
   float cs = cos(th);
-  float lift = u_tRelief.x * (tessLiftAt(ring) * (1.0 - LIFT_VARY + 2.0 * LIFT_VARY * tessHash12(r.t.cell * 0.731 + 3.7)) + tessPopAt(r.t.cell, ring));
+  float lift = u_tRelief.x * (tessLiftAt(ring) * (1.0 - LIFT_VARY + 2.0 * LIFT_VARY * tessHash12(TESS_CELL_KEY(r.t.cell) * 0.731 + 3.7)) + tessPopAt(TESS_CELL_KEY(r.t.cell), ring));
   r.face = cs < 0.0 ? 1.0 : 0.0;
   r.pit = 0.0;
   float ac = 1.0;
