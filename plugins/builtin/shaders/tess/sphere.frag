@@ -48,6 +48,8 @@ uniform vec2 u_tHeightTexel;   // 1 / its size
 uniform float u_dispK;         // world units per plane unit of height (lib/sphere-view.js reliefScale)
 uniform vec3 u_rlight;         // towards the raking light, world, unit (lib/sphere-view.js viewLight)
 #define ATLAS_MARGIN 0.06      // plane units of each chart beyond its face's edges, for filtering
+#define FINE_TEXELS 1.5        // the bracket's walk for the first crossing: about this many texels a step,
+#define FINE_STEPS 8           // at most this many
 
 int sphFaceOf(vec3 d) {
   vec3 a = abs(d);
@@ -160,6 +162,21 @@ void main() {
     hit = true;
   }
   if (hit) {
+    // Grazing near the limb a coarse step spans several texels, and the jittered samples picked
+    // different crossings in neighbouring pixels (a corner clipped or not): grain on the cut
+    // sides. Walk the bracket again in steps of about FINE_TEXELS for its first crossing.
+    int m = int(clamp(ceil((t1 - t0) * span / FINE_TEXELS), 1.0, float(FINE_STEPS)));
+    if (m > 1) {
+      float ta = t0;
+      float dt = (t1 - t0) / float(m);
+      for (int i = 1; i < FINE_STEPS; i++) {
+        if (i >= m) break;
+        float t = ta + dt;
+        if (solid(mix(PA, PB, t), sg) <= 0.0) { t1 = t; break; }
+        ta = t;
+      }
+      t0 = ta;
+    }
     for (int i = 0; i < 5; i++) {
       float t = 0.5 * (t0 + t1);
       if (solid(mix(PA, PB, t), sg) <= 0.0) t1 = t; else t0 = t;

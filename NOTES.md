@@ -27,6 +27,13 @@ before/after interleaved in one session (3 rounds, medians), GPU shared with ano
   shading already has (`leanedH`, shared with the height pass): mask `pl.h − leanedH(pl)`,
   slope RELIEF_SLOPE / ‖J‖ along the outline distance's gradient. No extra plate evaluation.
   The geometry (where rays land) is still the map's.
+- **Tiled Sphere, grain on cut sides near the limb**: grazing rays cross many height texels,
+  the march caps at 12 jittered steps, so a step spans several texels and neighbouring pixels'
+  jittered samples found different crossings (a corner clipped or not). The bracket the coarse
+  march found is now walked again in steps of ~1.5 texels (≤ 8, only where it is wider) for its
+  first crossing before bisecting. Against a dense unjittered reference (4 samples a texel, 10
+  bisections), pixels off by > 24/255, outside at still=150: 44583 → 10697 (the rest at the
+  very limb). p50 / p99 outside 4 / 5 → 4 / 5 ms, inside 11 / 12 → 11 / 13 ms.
 
 ## Shader compile check (2026-10-23)
 
