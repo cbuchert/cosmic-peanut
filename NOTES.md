@@ -509,6 +509,8 @@ vec3 tessRelief(vec2 p, mat2 S);   // height (plane units, 0 … u_tRelief.z) an
 vec4 tessShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail);
 // r: tile, J, blend, h, grad (dh/dp), prof, face (0 front, 1 back), pit; detail = fine carving
 // optional hook: #define TESS_FLIP_DIR(c) …  (unit direction across a card's axis; default radial)
+// optional hook: #define TESS_CELL_KEY(cell) …  (the cell a tile's lift and pops hash; default
+//   itself; Tiled Torus maps a tile seen across its seams to one key)
 ```
 
 A surface either **displaces geometry** with `tessRelief(p, S).x` along its normal (floor, torus,
@@ -715,7 +717,94 @@ vs 1 at the same frame, twist, p3 twist 2).
   gets overwritten by other agents, keep scripts in your own folder.
 - Spin / twist: `SPIN`, `REDUCED_SPIN`, `twistTurns`, `planePoint(…, tw)` in `src/lib/torus.js`;
   camera `fv` is the spin; uniform `u_twist`. Tiles only: keep the displacement free of them.
-- Left: adopting the relief engine once it's merged.
+- Relief: adopted, see below.
+
+**Relief (2026-10-23).** The tiles are the engine's carved blocks riding the waves (Relief 0–1,
+default 0.6; Light 0–360°, default 135). `src/lib/torus-relief.js` holds the math, mirrored by
+`torus.frag` and tested in `torus-relief.test.js`.
+
+- **Combined displacement:** surface at tube distance k + disp + side × rel. The waves are
+  unchanged. rel is the block's height turned into world units at the local plane scale
+  (`RELIEF_SCALE` 2 × 2π(1 + k cos φ)/lx, so the block keeps its proportions × 2), capped at
+  `RELIEF_CAP` 0.25 k. It is raised towards the viewer: outward outside, inward inside, where
+  the sign flips under the full paper fade.
+- **Height pass:** the pipeline's `TESS_HEIGHT_PASS` target, used as a map over the tiles' own
+  coordinates (a, b) = (θ/2π + fu, t + fv), with plane point (lx a, ly(b + tw a)). The map repeats
+  exactly in both (wrap set to REPEAT on `HEIGHT_UNIT` in the surface callback), and the relief
+  spins and flows with the tiles while `disp()` never sees it (tested).
+- **Cliffs:** the engine's blocks are cliffs, which a sphere tracer can't bound. The bake caps
+  each tile at `SLOPE_CAP` (2) × its outline distance over the warp's largest stretch ‖J‖, so
+  cut sides lean and every tile meets the groove floor at its outline.
+- **Plane slope bound:** `SLOPE_CAP + h × WARP_LOG_SLOPE` (14). This is **empirical**: the
+  measured excess is ≤ 10.7 h over p4/p3 morphs of every family, at Relief 0.6 and 1 with stacked
+  lifts, pops and cards. It is tested on a JS mirror of the bake.
+- **Step safety:** `reliefSlope` turns the plane bound into a world bound on the shell k ± D
+  (twist shear, the ρ ratio, the gradient of the scale), and `reliefStep` adds the waves' slope
+  (`waveSlope`; `stepFactor(…, extra)` widens the shell). Tested against the numeric gradient of
+  dispAt + the bilinear baked map, outside and inside, p4 and p3 with twist. At relief 0 the
+  factor is `stepFactor(h, amp, k)` exactly as before.
+- **March, three tiers in the shell:**
+  1. Above the relief's shell: the waves' bound.
+  2. Above the block's *local ceiling*: the waves' bound, step ≤ `STEP_REACH` 0.05. The ceiling
+     (`localCeiling`) comes from the music alone: lift bins × 1.3, pops in band and a card if
+     the front turns, over the rings a step can reach (`ringWindow`, `RING_REACH` 0.6 plane
+     units, measured ≤ 0.3). Tested above every tile height under real music.
+  3. Below it: the combined factor with ω 1.8, for `RELIEF_STEPS_IN` 24 / `RELIEF_STEPS_OUT` 64
+     steps.
+
+  Inside, a ray that spends its tier-3 budget stops short (never past) and is projected like a
+  spent ray. Outside, it continues at the waves' factor; only there can a step clip a cut side's
+  edge. Outside gets 2 × the Quality steps, and outside rays still spent in the shell (skimming
+  the blocks at the silhouette) are inked as outline. Without the budget, inside cost 18–31 ms.
+- **Closure:** a tile cut by the seams has two cells, so its lift and pop hash would differ. The
+  new engine hook `TESS_CELL_KEY(cell)` (identity by default, two call sites in `tessPlate`) maps
+  it to `torusCellKey`, its copy in one fundamental domain of (T1, T2) = ((lx, tw ly), (0, ly)).
+  Tested exact for p4/p3 with twist, and on the real warped tiles either side of θ = ±π. Cards
+  turn about an axis across the ring (`TESS_FLIP_DIR` = ±x away from the camera's azimuth).
+- **Fronts:** beat lifts, heave, pops and cards ride `TESS_RING`, so they travel round the ring
+  from the camera.
+- **Shading:**
+  - Print from `tessShadeRelief` at the hit, with S from the waves' tangent plane.
+  - Normal from the plate's analytic gradient, or from the map on leaned cut sides (map lower
+    than the plate); cut sides are darkened.
+  - Light is lightDir in the view frame. It drives the waves' raking term and the outside
+    diffuse light; a 4-tap soft shadow is cast by the blocks and the grooves are darker.
+- **Clearance:** inside, the nearest wall is k − 0.45 k (waves) − 0.25 k (relief) ≥ 0.3 k for
+  every Thickness (tested).
+- **Byte-identical at Relief 0:** `run.py --shots` (still=150, after the backdrop warm-up page),
+  `p.relief=0` against 37ec0e2 extracted with `git archive`. `cmp`-identical over black and
+  light, outside and inside (`p.view=inside`).
+- **Motion** (`motion_hook.py`, `reduce=0`, synth music; Relief 0.6 vs the old build):
+  | | old | relief |
+  | --- | --- | --- |
+  | whole frame, loud | 0.0146 | 0.0160 |
+  | whole frame, beat ratio | 1.00 | 1.05 |
+  | Speed 0, loud | 0.0139 | 0.0152 |
+  | Speed 0, beat ratio | 1.00 | 1.06 |
+  | inside, loud | 0.0328 | 0.0344 |
+  | torus region (0.3–0.7 × 0.3–0.85, Speed 0), loud | 0.0395 | 0.0376 |
+  | torus region, beat ratio | 1.005 | 1.09 |
+
+  The beat-locked response is clearly up; mean motion only a little, because the waves dominate
+  it. An earlier build with steeper cut sides (`SLOPE_CAP` 3, no budget) measured loud 0.0182
+  but cost 17–31 ms.
+- **Cost** (WebKit, 2560×1440, Quality high, `sync=1`, interleaved, GPU shared with other agents):
+
+  | | p50 | p99 | fps |
+  | --- | --- | --- | --- |
+  | outside | 13–15 ms | 16–21 ms | 58.8 |
+  | inside, steady (after an 8 s warm-up) | 14 ms | 16 ms | 58.8 |
+  | Metamorphosis, same runs | 8 ms | 10–14 ms | 58.8 |
+  | Relief 0, outside | 5–7 ms | | |
+  | Relief 0, inside | 7–9 ms | | |
+
+  The tier-3 march is the cost: probes put the shading at about 1–2 ms and the shadow at about
+  2 ms. Flash check: 0 /s at 5 %, 1 /s at 2 %, Reduce flashing on and off.
+- **Known:**
+  - Leaned cut sides are bilinear at height-pass resolution, so they look ragged close up inside.
+  - Thin near-miss ink arcs can show beyond lifted blocks at the bottom silhouette.
+  - The ‖J‖ excess bound is measured, not proven.
+  - Untested on the M1.
 
 ## Tessellations: Tiled Sphere (2026-10-22)
 
