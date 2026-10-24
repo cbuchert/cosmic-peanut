@@ -17,6 +17,10 @@
  * near, treble far), onsets pop single tiles, and the figure/ground front tips the tiles over
  * like cards, away from the camera. The relief fades out with distance well before the horizon.
  * Relief 0 is the flat floor, unchanged.
+ *
+ * Look (lib/tess-look.js): cinematic lights the block with print materials and horizon AO
+ * (shaders/tess/look.glsl), focuses on the floor a few heights ahead (depth of field, eased and
+ * held under Reduce motion) and fogs towards a slightly cooler paper at the horizon.
  */
 import { createTessPipeline } from "./lib/tess-gl.js";
 import {
@@ -31,16 +35,25 @@ import {
   marchTop,
   reliefScale,
 } from "./lib/tess-floor.js";
+import { createFocus } from "./lib/tess-look.js";
 import { createTessState, reliefParam, renderScale, symmetryName } from "./lib/tess-music.js";
 
 /** Focal length in half-short-side units (~32° half the short side's field of view). */
 const FOCAL = 1.6;
 /** Ring 1 at this fraction of the fog distance (where the floor is mostly paper). */
 const RING_SPAN = 0.6;
+/**
+ * Cinematic depth of field: focus on the floor this many camera heights ahead; the blur far
+ * away and its cap up close (full-resolution px on a 1440-px-high canvas). Near floor softens
+ * towards the bottom edge, the far floor towards the horizon.
+ */
+const FOCUS_AHEAD = 4;
+const DOF_FAR = 3;
+const DOF_CAP = 6;
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
-  const tess = await createTessPipeline(ctx, "shaders/tess/tile-horizon.frag", { relief: true });
+  const tess = await createTessPipeline(ctx, "shaders/tess/tile-horizon.frag", { relief: true, dof: true });
   const state = createTessState();
   const camera = createFloorCamera();
   const opts = {
@@ -65,6 +78,9 @@ export default async function create(ctx) {
   let hsPrint = 1;
 
   tess.resize(renderScale(ctx.params.quality));
+  await tess.setLook(ctx.params.look, ctx.params.quality);
+  const focus = createFocus(1);
+  let focused = false;
 
   /** @type {import('./lib/tess-gl.js').SetSurface} */
   const surface = (gl, u) => {
@@ -112,6 +128,18 @@ export default async function create(ctx) {
       floorLight(Number(p.light), camera.yaw, light);
       hsPrint = 0.5 * Math.min(ctx.size.width, ctx.size.height) * renderScale(p.quality);
 
+      // Cinematic: focus on the floor a few heights ahead (its depth along the view), eased;
+      // Reduce motion holds it (no focus pulling).
+      const f = camera.fwd;
+      const ahead = FOCUS_AHEAD * camera.h * Math.hypot(f[0], f[1]) - camera.h * f[2];
+      if (!focused) focus.reset(ahead);
+      focused = true;
+      focus.step(ahead, time.dt, ctx.reduceMotion);
+      const px = ctx.size.height / 1440;
+      const lr = light[0] * camera.right[0] + light[1] * camera.right[1] + light[2] * camera.right[2];
+      const lu = light[0] * camera.up[0] + light[1] * camera.up[1] + light[2] * camera.up[2];
+      const lh = Math.hypot(lr, lu) || 1;
+      tess.setFocus(focus.distance, DOF_FAR * px, DOF_CAP * px, lr / lh, lu / lh);
       tess.render(s, surface);
     },
 
@@ -121,6 +149,7 @@ export default async function create(ctx) {
 
     params(changed) {
       if ("quality" in changed) tess.resize(renderScale(ctx.params.quality));
+      if ("look" in changed || "quality" in changed) tess.setLook(ctx.params.look, ctx.params.quality);
     },
 
     pointer(e) {

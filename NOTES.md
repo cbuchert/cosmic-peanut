@@ -3,6 +3,132 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tessellations: a cinematic Look (2026-10-24)
+
+All six tessellation visualizers gain **Look** (`classic` | `cinematic`, before Quality). The tested
+pieces are `lib/tess-look.js`; the shading is `shaders/tess/look.glsl`, the post passes
+`dof.frag`, `bloom.frag` and `post.frag`; `lib/tess-gl.js` compiles and runs them.
+
+- **Classic is byte-identical** to d206d99: `run.py --shots` (still=150, after the backdrop
+  warm-up page, black and light), exact `cmp`, 40 stills at the default Look and 40 with an
+  explicit `p.look=classic`: all six at the default relief and at Relief 0, Tiled Sphere and Tiled
+  Torus inside and outside, the disk's flat scene, Metamorphosis's bestiary (`all`) and Relief 1.
+  Every new shader line is under `TESS_CINEMATIC` (or `TESS_EXACT_SIDES`, below), and classic
+  makes no new GL calls except one no-op uniform. Cinematic objects are created on first use.
+- **Default stays classic.** The stills don't clearly win across palettes (scratchpad
+  `shots/tess-look-*.png`, classic left). Cinematic gives real depth — focus on the floor and the
+  coin, soft near and far, satin glints on the carved bevels, grooves that read deeper, brown end
+  grain on the cut sides — but the print loses some of its crispness: depth of field softens the
+  key-block lines in the foreground, the satin lobe lifts the darkest inks a little (ink, dusk),
+  and on the flat surfaces (Metamorphosis, Endless Zoom) the two are hard to tell apart. Better on
+  Tile Horizon and the disk's skim; a different character elsewhere.
+- **Materials** (look.glsl `tessLookShade`, one function for every relief surface; each passes its
+  classic ambient, key share and flat N·L, and the diffuse terms are normalised by their value on
+  the flat surface, so a flat top in full light prints at its palette colour):
+  - Ink (tile colours, the key block): Burley's diffuse (Burley 2012) plus a satin GGX lobe (Walter
+    et al. 2007; height-correlated Smith, Heitz 2014; Schlick's Fresnel, F0 0.045, rising only to
+    0.3 at grazing: a full Fresnel hazed the far floor), perceptual roughness 0.55.
+  - Paper where the cuts show it (`g_tessPaper`, set by `tessPrintFill`): Green's wrap diffuse
+    (GPU Gems 2004, ch. 16), no specular. The composite lights the paper's fibres too: one
+    difference of the fibre noise along the key light's screen direction (faint, 0.03).
+  - Cut sides: end grain (`tessEndGrain`: rings and pores, faded before they alias), a brown pear
+    a little stained by the palette's mean, lit by the side's own normal. Only where there is a
+    side (`tessWood`).
+- **AO** (`tessHorizonAO`, after Bavoil & Sainz 2008): horizon search on the surface's own height
+  map through the hook `TESS_AO_HEIGHT(offset)` (plane units in, plane units out), the tangent's
+  slope as the starting horizon, falloff 1 − r²/R², radius 0.12 plane units (disk: 0.06 world /
+  0.03 disk units). Micro-shadowing hides some of the key in the grooves too (Chan, SIGGRAPH 2018:
+  saturate(|N·L| + 2ao² − 1)). The surfaces' soft raking shadows are kept, capped at the
+  Quality's step count.
+- **Depth of field** (dof.frag): a gather on the final colour with the signed circle of confusion
+  the surface writes to alpha (thin lens, Potmesil & Chakravarty 1981; `tessCoC`), after
+  Jimenez's scatter-as-gather (SIGGRAPH 2014): a golden-angle spiral over the pixel's own disk, a
+  sample counts where its disk reaches the pixel, samples behind are clipped to the pixel's disk
+  (a sharp subject never smears into the blur behind it), in-focus pixels read one tap. Focus
+  (`createFocus`, critically damped, reset on the first frame, held under Reduce motion: no focus
+  pulling): Tile Horizon the floor 4 camera heights ahead (blur 3 px far, cap 6, at 1440p); Tiled
+  Sphere the wall ahead inside, opening with the push (3 / 6); Tiled Torus the tube wall ahead
+  (`tubeWallAhead`), opening with the dive (4 / 7); Poincaré Disk's sphere scene the coin (5 / 10).
+  None on the flat surfaces. Known: a blurred near object doesn't spill over a sharp one behind
+  it (the gather is over the pixel's own disk, no tile max).
+- **Atmosphere**: `tessAtmos` fogs to the paper, a touch cooler and lighter with depth (the floor's
+  horizon and sky, the torus tube, the disk's coin and wall).
+- **Post**: bloom only above the paper (Karis's soft knee at 1.0 ± 0.06; every palette colour is
+  below), through the Lattice's chain (`lib/lattice-bloom.js`, its own `bloom.frag`), added at
+  0.35; the tone curve is the identity up to 0.93 (above watercolour's paper, 0.922, so every
+  palette prints as it is) and an exponential shoulder to white, C¹ (after Hable's piecewise
+  filmic curves). The canvas stays opaque (the paper covers it). Nothing global reacts to the
+  beat: exposure, bloom, focus and aperture are fixed or eased on the camera only.
+- **The card-flip fringe, fixed in the engine for both Looks.** The relief march reads the
+  height pass (0.35 of the print), so a cut side is a ramp a texel wide; a turning card's tall
+  sides showed it as a sawtooth. `tess.glsl` `tessRefineHit` searches the ray again against the
+  exact block (4 steps, 5 bisections) where the map's hit is off it, on cards mid-turn only
+  (`tessTurning`), and the side faces out across the outline. Surfaces define
+  `TESS_RAY_SOLID(t)`: Metamorphosis, Endless Zoom, Tiled Sphere (Tile Horizon and the disk's
+  sphere scene already refined their own). Classic draws a `TESS_EXACT_SIDES` variant of the
+  relief print only while `s.flipping` (its resting frames are the old programs, so the stills
+  above stay identical; the first version, a uniform branch in the same program, changed them);
+  cinematic gates it on `u_tFlip`. Run everywhere it first cost +6–7 ms at rest and 18 / 53 ms
+  in a flip (Metamorphosis / Sphere inside); gated: flips 10–11 / 12 ms, as before (10 / 11).
+  Not done: Tiled Torus (its sides are leaned on purpose; the map is its geometry) and the disk's
+  flat scene.
+- **Cost** (WebKit, 2560×1440, `sync=1`, one render per rAF, classic and cinematic interleaved,
+  3 rounds of 4 s, min / median p50 and min p99 in ms; the GPU was shared with another agent,
+  load ~3, and WebKit's timer is 1 ms):
+
+  | High (default) | classic p50 / p99 | cinematic p50 / p99 |
+  | --- | --- | --- |
+  | Metamorphosis | 9 / 11 | 10 / 12 |
+  | Tile Horizon | 13 / 15 | 14–15 / 17 |
+  | Endless Zoom | 8–9 / 11 | 10 / 12 |
+  | Tiled Sphere outside | 5–6 / 8 | 6–7 / 10 |
+  | Tiled Sphere inside | 10–11 / 12 | 13 / 15 |
+  | Tiled Torus outside | 16 / 19 | 18 / 21 |
+  | Tiled Torus inside | 17–18 / 20 | 19 / 22 |
+  | Poincaré Disk (sphere) | 10 / 12 | 12 / 13 |
+  | Poincaré Disk (flat) | 5 / 6 | 6 / 8 |
+  | During a card flip: Metamorphosis, Sphere inside, Zoom | 10–11, 12, 13 | 13, 15, 14 |
+
+  Cinematic costs 1–3 ms more. Medium: Torus outside 11 → 11–12, inside 11–12 → 12–13, Horizon
+  8–9 → 10, Sphere inside 6–7 → 8–9; low: Torus 5–6 → 6–7, Horizon 5–7 → 6–7. Tiled Torus at
+  high is over 16.7 ms in both Looks under this load (its notes: 13–15); cinematic adds ~2 ms
+  there, so medium is the fallback. Probes: AO ~1 ms, bloom ~1 ms, DoF ~1–2 ms on the 3D
+  surfaces. **Knobs** for the quiet-machine pass: `lib/tess-look.js` `SAMPLES` (AO directions ×
+  steps 4×2 / 3×2 / 2×2, DoF taps 16 / 10 / 6, shadow steps 8 / 6 / 4 per Quality), the surfaces'
+  `DOF_FAR` / `DOF_CAP`, look.glsl `AO_RADIUS`, tess.glsl `TESS_REFINE_STEPS` / `_BISECT`,
+  `BLOOM_GAIN`.
+- **Checks**: flash (`--flash`, 10 Hz strobe) in both Looks: ≤ 3 /s at 2 %, ≤ 1 /s at 5 %, Reduce
+  flashing on and off (classic the same). Param flips (`run.py`) and Look flipped both ways at
+  runtime with Quality, Relief, views, scenes and creatures, resize, dispose: no errors.
+- **Tests**: `tess-look.test.js` (Look mapping, tone curve monotone / identity under the knee /
+  C¹, opaque alpha, bloom prefilter, signed CoC, focus easing and Reduce-motion hold, sample
+  tables, focus subjects); `metamorphosis.test.js` and `tile-horizon.test.js` on the fake WebGL2
+  (now `lib/fake-gl.test-helper.js`): classic draws exactly its passes, the cinematic pass order,
+  no feedback, the DoF target chain, the exact-sides switch; manifests. The compile check lists
+  the cinematic, exact-sides and post programs.
+- **Not test-first**: the GLSL (checked by stills, the compile test and the harness).
+
+**The Look seam** (a new surface):
+
+```glsl
+// before `// #include tess`, if it marches a height map (exact sides while cards turn):
+#if !defined(TESS_HEIGHT_PASS) && (defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC))
+float myRaySolid(float t);            // exact block height − the ray's height at t
+#define TESS_RAY_SOLID(t) myRaySolid(t)
+#endif
+// after its heightAt(): #ifdef TESS_CINEMATIC  #define TESS_AO_HEIGHT(o) heightAt(g_p + (o))  #endif
+// #include look
+// main (cinematic): tessLookShade(c, g_tessPaper, wall, tessWood(wall, P, px), N, N0, V, L,
+//   shadow, tessHorizonAO(h, grad, R, jit), amb, key, nl0); tessAtmos(col, fog, depth);
+//   o.a = tessCoC(view depth) on a { dof: true } pipeline.
+```
+
+```js
+const tess = await createTessPipeline(ctx, surface, { relief: true, dof: true });
+await tess.setLook(ctx.params.look, ctx.params.quality);   // and in params() on look/quality
+tess.setFocus(depth, blurPx, capPx, lightScreenX, lightScreenY); // per frame (full-res px)
+```
+
 ## Tessellation surfaces: artifact fixes (2026-10-23)
 
 Surface shaders only (no engine change); Relief 0 runs the untouched plain programs. Stills:

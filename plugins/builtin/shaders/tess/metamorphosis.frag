@@ -15,6 +15,13 @@ in vec2 v_uv;
 out vec4 o;
 
 #define TESS_ATLAS
+#if defined(TESS_RELIEF) && !defined(TESS_HEIGHT_PASS) && (defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC))
+// The ray (A at the height bound, B at the floor) for the engine's exact cut sides (tessRefineHit).
+vec3 g_rA;
+vec3 g_rB;
+mat2 g_rS;
+#define TESS_RAY_SOLID(t) (tessRelief(mix(g_rA.xy, g_rB.xy, t), g_rS).x - mix(g_rA.z, g_rB.z, t))
+#endif
 // #include tess
 
 uniform vec2 u_res;     // target size (px)
@@ -37,8 +44,15 @@ float heightAt(vec2 p) {
   vec2 uv = 0.5 + 0.5 * sh * min(u_res.x, u_res.y) / u_res;
   return texture(u_tHeight, uv).r * u_tRelief.z;
 }
+#ifdef TESS_CINEMATIC
+// The cinematic Look's horizon AO reads the height map round the shading point g_aoP.
+vec2 g_aoP;
+#define TESS_AO_HEIGHT(o) heightAt(g_aoP + (o))
+#define AO_RADIUS 0.12
 #endif
 #endif
+#endif
+// #include look
 
 void main() {
   float hs = 0.5 * min(u_res.x, u_res.y);
@@ -85,15 +99,43 @@ void main() {
   vec4 c = tessShadeRelief(P.xy, S, pl, detail);
   // The fine carving's slope from its screen derivatives (gouges cut, features raised).
   vec2 gd = inverse(transpose(S)) * vec2(dFdx(detail), dFdy(detail));
+#if defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC)
+  // Off the exact block (the map's ramp at a cut side), while cards turn: find the side exactly
+  // (tessRefineHit) and print there; a hit under a block's top is its cut side.
+  float under = 0.0;
+  if (TESS_REFINE_ON && tessTurning(pl) && abs(P.z - pl.h) > 0.004) {
+    g_rA = A;
+    g_rB = B;
+    g_rS = S;
+    float span = 2.0 * texel / max(length(B.xy - A.xy), 1e-6);
+    float tr = tessRefineHit(max(0.0, t1 - span), min(1.0, t1 + span));
+    if (tr >= 0.0) {
+      P = mix(A, B, tr);
+      S = R * (u_zoom / hs) * ((u_camD - P.z) / (u_camD - zRef));
+      c = tessShadeRelief(P.xy, S, pl, detail);
+      gd = vec2(0.0);
+      under = dot(pl.grad, pl.grad) > 1e-8 ? smoothstep(0.004, 0.014, pl.h - P.z) : 0.0;
+    }
+  }
+  vec3 N = normalize(vec3(-(pl.grad + gd), 1.0));
+  float wall = max(smoothstep(0.004, 0.014, P.z - pl.h), under);
+#else
   vec3 N = normalize(vec3(-(pl.grad + gd), 1.0));
   // Where the ray met the side of a taller neighbour the wall's normal comes from the field.
   float wall = smoothstep(0.004, 0.014, P.z - pl.h);
+#endif
   if (wall > 0.0) {
     vec2 e = vec2(texel, 0.0);
     vec2 g = vec2(heightAt(P.xy + e.xy) - heightAt(P.xy - e.xy), heightAt(P.xy + e.yx) - heightAt(P.xy - e.yx));
     vec3 Nw = normalize(vec3(-g, 0.25 * length(g) + 1e-4));
+#if defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC)
+    // On an exact cut side it faces out across the tile's outline.
+    if (under > 0.0) Nw = normalize(vec3(-normalize(pl.grad), 0.15));
+#endif
     N = normalize(mix(N, Nw, wall));
+#ifndef TESS_CINEMATIC
     c.rgb *= 1.0 - 0.45 * wall;                  // the block's cut side, in the shade of its top
+#endif
   }
 
   vec3 L = vec3(R * u_light.xy, u_light.z);
@@ -101,6 +143,9 @@ void main() {
   float shadow = 1.0;
   float reach = max(H - P.z, 0.0) / L.z;
   int ns = int(clamp(ceil(reach * length(L.xy) / texel / 4.0), 0.0, 8.0));
+#ifdef TESS_CINEMATIC
+  ns = tessShadowSteps(ns);
+#endif
   for (int i = 1; i <= 8; i++) {
     if (i > ns) break;
     float t = reach * ((float(i) - jit) / float(ns)) + texel;
@@ -109,12 +154,22 @@ void main() {
     shadow = min(shadow, clamp(0.5 + 6.0 * clear / t, 0.0, 1.0));
   }
   shadow = smoothstep(0.0, 1.0, shadow);
+#ifdef TESS_CINEMATIC
+  // Physically based print materials under the same light (look.glsl): satin ink, paper in the
+  // cuts, end grain on the cut sides, horizon AO from the height map.
+  vec3 V = normalize(E - P);
+  g_aoP = P.xy;
+  float ao = tessHorizonAO(P.z, pl.grad, AO_RADIUS, jit);
+  float px = sqrt(abs(determinant(S)));
+  o = vec4(tessLookShade(c.rgb, g_tessPaper, wall, tessWood(wall, P, px), N, vec3(0.0, 0.0, 1.0), V, L, shadow, ao, 0.36, 0.64, L.z), 1.0);
+#else
   float diff = max(dot(N, L), 0.0) / L.z;        // a flat top in full light prints as it is
   float ao = 0.72 + 0.28 * smoothstep(0.0, zRef, P.z);
   float shade = 0.36 + 0.64 * min(diff * shadow, 1.6);
   vec3 V = normalize(E - P);
   float sheen = pow(max(dot(reflect(-L, N), V), 0.0), 24.0) * shadow * 0.08;
   o = vec4(c.rgb * shade * ao + sheen, 1.0);
+#endif
 #else
   o = tessShade(u_O + R * s * u_zoom, R * (u_zoom / hs));
 #endif

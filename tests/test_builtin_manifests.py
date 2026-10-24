@@ -827,6 +827,34 @@ def test_tentacle_lattice_manifest():
 # The relief's params: Metamorphosis's, and the surfaces that have adopted it (Tile Horizon,
 # Endless Zoom, Tiled Sphere).
 RELIEF_PARAMS = ("relief", "light")
+TESS_VISUALIZERS = (
+    "metamorphosis",
+    "tile-horizon",
+    "endless-zoom",
+    "tiled-sphere",
+    "tiled-torus",
+    "poincare-disk",
+)
+
+
+def test_every_tessellation_visualizer_has_the_same_look_param_before_quality():
+    # lib/tess-look.js LOOKS / DEFAULT_LOOK: classic is the woodcut print as it was, byte for byte;
+    # cinematic lights it as a carved, inked, printed object (shaders/tess/look.glsl, post.frag).
+    for v in _manifest("builtin")["visualizers"]:
+        if v["id"] not in TESS_VISUALIZERS:
+            continue
+        ids = [p["id"] for p in v["params"]]
+        assert ids[-2:] == ["look", "quality"], v["id"]
+        (look,) = [p for p in v["params"] if p["id"] == "look"]
+        assert look == {
+            "id": "look",
+            "type": "select",
+            "label": "Look",
+            "options": ["classic", "cinematic"],
+            "default": "classic",
+        }, v["id"]
+    for name in ("look.glsl", "post.frag", "bloom.frag", "dof.frag"):
+        assert (REPOS["builtin"] / "shaders" / "tess" / name).is_file(), name
 
 
 def test_metamorphosis_manifest():
@@ -849,6 +877,7 @@ def test_metamorphosis_manifest():
         "relief",
         "light",
         "creatures",
+        "look",
         "quality",
     ]
     # Relief (lib/tess-music.js RELIEF_DEFAULT; 0 is the flat print) and the raking light's
@@ -922,6 +951,7 @@ def test_tile_horizon_manifest():
         "height",
         "tilt",
         "fog",
+        "look",
         "quality",
     ]
     (meta,) = [m for m in _manifest("builtin")["visualizers"] if m["id"] == "metamorphosis"]
@@ -951,10 +981,10 @@ def test_endless_zoom_manifest():
     # Metamorphosis's params, Relief and Light included (the carved block through the zoom; Relief
     # 0 is the flat print), plus the surface's own before Quality.
     (m,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "metamorphosis"]
-    shared = [p for p in m["params"] if p["id"] not in ("quality", "creatures")]
+    shared = [p for p in m["params"] if p["id"] not in ("quality", "creatures", "look")]
     assert [p["id"] for p in shared][-2:] == list(RELIEF_PARAMS)
     assert v["params"][: len(shared)] == shared
-    assert list(params)[len(shared) :] == ["spiral", "zoom", "direction", "quality"]
+    assert list(params)[len(shared) :] == ["spiral", "zoom", "direction", "look", "quality"]
     # Option order is lib/tess-zoom.js SPIRALS and DIRECTIONS (default DEFAULT_SPIRAL).
     assert params["spiral"]["options"] == ["none", "gentle", "medium", "strong"]
     assert params["spiral"]["default"] == "gentle"
@@ -989,6 +1019,7 @@ def test_tiled_sphere_manifest():
         "hatching",
         "relief",
         "light",
+        "look",
         "quality",
     ]
     # The carved block lifting off the globe: Metamorphosis's Relief (0 is the flat print, as
@@ -1041,6 +1072,7 @@ def test_tiled_torus_manifest():
         "hatching",
         "relief",
         "light",
+        "look",
         "quality",
     ]
     # The carved block riding the waves (lib/torus-relief.js; lib/torus.js mapParams): Relief 0 is
@@ -1122,6 +1154,7 @@ def test_poincare_disk_manifest():
         "hatching",
         "relief",
         "light",
+        "look",
         "quality",
     ]
     # Relief and Light as Metamorphosis's (the kites carved like a woodblock; 0 is the print as it

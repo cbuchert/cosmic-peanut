@@ -159,8 +159,16 @@ float relAt(float theta, float phi) {
   float tf = atan(a * sin(0.5 * phi), cos(0.5 * phi)) / PI;
   return reliefW(reliefH(reliefAB(theta, tf)), cos(phi));
 }
+#ifdef TESS_CINEMATIC
+// The cinematic Look's horizon AO reads the height map round the map point g_aoAB: an offset o in
+// plane units is (o.x / lx, o.y / ly − tw o.x / lx) in (a, b).
+vec2 g_aoAB;
+#define TESS_AO_HEIGHT(o) reliefH(g_aoAB + vec2((o).x / u_lxy.x, (o).y / u_lxy.y - u_twist * (o).x / u_lxy.x))
+#define AO_RADIUS 0.12
 #endif
 #endif
+#endif
+// #include look
 
 // The waves' displacement, from the map torus-disp.frag bakes each frame (one bilinear tap;
 // u = θ / 2π, v = age: laps round the tube from the hole, both wrapping).
@@ -453,7 +461,9 @@ void main() {
     if (wall > 0.0) {
       vec2 gc = (RELIEF_SLOPE / max(jNorm(pl.J), 1e-6)) * (transpose(pl.J) * pl.t.n);
       gH = mix(gH, gc.x * gx + gc.y * gy, wall);
+#ifndef TESS_CINEMATIC
       col *= 1.0 - 0.4 * wall;                           // a cut side, in the shade of its top
+#endif
     }
     bool capped = sc * Hm >= u_rel.y;
     vec3 gRel = capped ? vec3(0.0) : sc * gH - (u_rel.x * u_k * X.y / q * Hm) * gPhi;
@@ -483,9 +493,25 @@ void main() {
       }
       shadow = smoothstep(0.0, 1.0, shadow);
     }
+#ifdef TESS_CINEMATIC
+    // Physically based print materials (look.glsl) under the raking light outside and the lamp
+    // at the camera inside, horizon AO from the map, the waves' raking term as before.
+    {
+      vec3 Nc = u_side * nR;                             // towards the camera's side
+      vec3 N0c = u_side * normalize(n0 - gDisp);
+      g_aoAB = ab;
+      float ao = tessHorizonAO(Hm, pl.grad, AO_RADIUS, fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))));
+      float px = sqrt(abs(determinant(S)));
+      vec3 wood = tessWood(wall, vec3(p, Hm), px);
+      vec3 outC = tessLookShade(col, g_tessPaper, wall, wood, Nc, N0c, -rd, L, 0.5 + 0.5 * shadow, ao, 0.64, 0.42, 1.0) * (0.86 + 0.14 * (w / q));
+      vec3 inC = tessLookShade(col, g_tessPaper, wall, wood, Nc, N0c, -rd, -rd, 1.0, ao, 0.62, 0.45, 1.0);
+      col = mix(outC, inC, u_mix) * clamp(1.0 + 1.8 * relief, 0.45, 1.5);
+    }
+#else
     float top = max(u_tRelief.x * RELIEF_BLOCK, 1e-4);
     float ao = 0.8 + 0.2 * smoothstep(0.0, top, Hm);
     col *= mix(outLit, inLit, u_mix) * clamp(1.0 + 1.8 * relief, 0.45, 1.5) * (0.5 + 0.5 * shadow) * ao;
+#endif
     // Outside, a ray that skims the blocks along the silhouette can run out of steps before it
     // passes them; it is projected onto the surface like any spent ray, and inked as the
     // outline it is grazing (the misses beyond ink the other side).
@@ -512,12 +538,20 @@ void main() {
     col = mix(col, u_tInk, crest * smoothstep(0.02, 0.2, u_amp / max(u_k, 1e-3)));
 
     float fog = clamp((1.0 - exp(-t * t * 0.55)) / (1.0 - exp(-FOG_END * FOG_END * 0.55)), 0.0, 1.0);
+#ifdef TESS_CINEMATIC
+    col = tessAtmos(col, fog * u_mix, fog);              // down the tube: paper, a touch cooler far
+#else
     col = mix(col, mix(paper, u_tAvg, 0.25), fog * u_mix);
+#endif
   } else {
     // Paper, with the silhouette cut in ink where the ray grazed the torus.
     col = mix(paper, u_tInk, tessBand(minPx, 0.8 * u_tInkW * fpx) * (1.0 - u_mix));
   }
   col = mix(col, paper, u_fade);
+#ifdef TESS_CINEMATIC
+  o = vec4(col, tessCoC(hit ? t * dot(rd, u_fwd) : 1e6));
+#else
   o = vec4(col, 1.0);
+#endif
 }
 #endif

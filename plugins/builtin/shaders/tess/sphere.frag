@@ -29,6 +29,11 @@ out vec4 o;
 #ifdef TESS_RELIEF
 #define TESS_FLIP_DIR(c) sphFlipDir(c)
 #define TESS_CELL(cell, c) sphCell(c)
+#if !defined(TESS_HEIGHT_PASS) && (defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC))
+// The engine's exact cut sides (tessRefineHit): the exact block minus the ray's height at t.
+float sphRaySolid(float t);
+#define TESS_RAY_SOLID(t) sphRaySolid(t)
+#endif
 #endif
 // #include tess
 
@@ -80,8 +85,30 @@ float solid(vec3 P, float sg) {
   float r = length(P);
   return sg * (r - 1.0) - u_dispK * heightAt(P);
 }
+#if defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC)
+// The ray through the shell (sphere frame) from g_rPA to g_rPB, the tiles' side g_rSg.
+vec3 g_rPA;
+vec3 g_rPB;
+float g_rSg;
+float sphRaySolid(float t) {
+  vec3 P = mix(g_rPA, g_rPB, t);
+  vec3 d = normalize(P);
+  g_face = sphFaceOf(d);
+  return u_dispK * tessRelief(sphChart(g_face, d), mat2(1e-4)).x - g_rSg * (length(P) - 1.0);
+}
+#endif
+#ifdef TESS_CINEMATIC
+// The cinematic Look's horizon AO reads the height map round the direction g_aoD: an offset o in
+// plane units along the face chart's axes (g_aoU, g_aoV) turns the direction by o · π / 2N.
+vec3 g_aoD;
+vec3 g_aoU;
+vec3 g_aoV;
+#define TESS_AO_HEIGHT(o) heightAt(g_aoD + ((o).x * g_aoU + (o).y * g_aoV) * (1.5707963 / u_N))
+#define AO_RADIUS 0.12
 #endif
 #endif
+#endif
+// #include look
 
 #if defined(TESS_HEIGHT_PASS)
 void main() {
@@ -197,7 +224,11 @@ void main() {
   // The paper round the sphere skips the print (most of the frame outside). Only quads straddling
   // the silhouette mix the two, where the print's fine-carving derivatives barely show.
   if (cover <= 0.0) {
+#ifdef TESS_CINEMATIC
+    o = vec4(mix(bg, paper, u_veil), tessCoC(1e6));
+#else
     o = vec4(mix(bg, paper, u_veil), 1.0);
+#endif
     return;
   }
 
@@ -220,20 +251,65 @@ void main() {
   vec4 c = tessShadeRelief(p, S, pl, detail);
   // The fine carving's slope from its screen derivatives (gouges cut, features raised).
   vec2 gd = abs(determinant(S)) > 1e-14 ? inverse(transpose(S)) * vec2(dFdx(detail), dFdy(detail)) : vec2(0.0);
+#if defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC)
+  // Off the exact block (the map's ramp at a cut side), while cards turn: find the side exactly
+  // (tessRefineHit) and print there; a hit under a block's top is its cut side.
+  float under = 0.0;
+  float hp0 = sg * (r - 1.0) / max(u_dispK, 1e-6);
+  if (TESS_REFINE_ON && tessTurning(pl) && hit && u_dispK > 0.0 && abs(hp0 - pl.h) > 0.004) {
+    g_rPA = PA;
+    g_rPB = PB;
+    g_rSg = sg;
+    float span = 2.0 * texel / max(acos(clamp(dot(normalize(PA), normalize(PB)), -1.0, 1.0)), 1e-6);
+    float tr = tessRefineHit(max(0.0, t1 - span), min(1.0, t1 + span));
+    if (tr >= 0.0) {
+      P = mix(PA, PB, tr);
+      r = length(P);
+      dir = P / r;
+      g_face = sphFaceOf(dir);
+      F = u_frame[g_face];
+      w = dot(dir, F[0]);
+      su = dot(dir, F[1]);
+      sv = dot(dir, F[2]);
+      p = 0.5 * u_N * (1.0 + atan(vec2(su, sv) / w) / 0.785398163);
+      ju = kk / (w * w + su * su) * (w * F[1] - su * F[0]);
+      jv = kk / (w * w + sv * sv) * (w * F[2] - sv * F[0]);
+      S = mat2(dot(ju, dhx), dot(jv, dhx), dot(ju, dhy), dot(jv, dhy));
+      c = tessShadeRelief(p, S, pl, detail);
+      gd = vec2(0.0);
+      under = dot(pl.grad, pl.grad) > 1e-8 ? smoothstep(0.004, 0.014, pl.h - sg * (r - 1.0) / u_dispK) : 0.0;
+    } else {
+      g_face = sphFaceOf(dir);
+    }
+  }
+#endif
   vec2 gr = pl.grad + gd;
   vec3 n0 = sg * dir;                                // the skin's normal, on the camera's side
   vec3 N = normalize(n0 - u_dispK * (gr.x * ju + gr.y * jv));
   float hp = sg * (r - 1.0) / max(u_dispK, 1e-6);    // the hit's height over the skin, plane units
   // Where the ray met the side of a taller neighbour the wall's normal comes from the height field.
+#if defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC)
+  float wall = u_dispK > 0.0 ? max(smoothstep(0.004, 0.014, hp - pl.h), under) : 0.0;
+#else
   float wall = u_dispK > 0.0 ? smoothstep(0.004, 0.014, hp - pl.h) : 0.0;
+#endif
   if (wall > 0.0) {
     vec3 tu = normalize(F[1] - dir * su);
     vec3 tv = normalize(F[2] - dir * sv);
     float e = 2.0 * texel;
     vec2 g = vec2(heightAt(dir + e * tu) - heightAt(dir - e * tu), heightAt(dir + e * tv) - heightAt(dir - e * tv));
     vec3 Nw = normalize(-(g.x * tu + g.y * tv) + n0 * (0.25 * length(g) + 1e-4));
+#if defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC)
+    // On an exact cut side it faces out across the tile's outline.
+    if (under > 0.0) {
+      vec2 gn = normalize(pl.grad);
+      Nw = normalize(-(gn.x * normalize(ju) + gn.y * normalize(jv)) + n0 * 0.15);
+    }
+#endif
     N = normalize(mix(N, Nw, wall));
+#ifndef TESS_CINEMATIC
     c.rgb *= 1.0 - 0.45 * wall;                      // the block's cut side, in the shade of its top
+#endif
   }
 
   vec3 L = u_rot * u_rlight;
@@ -243,6 +319,9 @@ void main() {
   float reach = up > 0.05 ? max(A - sg * (r - 1.0), 0.0) / up : 0.0;
   float tw = texel;                                  // a texel, world (on the unit sphere)
   int ns = int(clamp(ceil(reach / tw / 4.0), 0.0, 8.0));
+#ifdef TESS_CINEMATIC
+  ns = tessShadowSteps(ns);
+#endif
   for (int i = 1; i <= 8; i++) {
     if (i > ns) break;
     float t = reach * ((float(i) - jit) / float(ns)) + tw;
@@ -259,9 +338,22 @@ void main() {
   float ndv = abs(dot(dir, dr));
   float limb = inside ? 0.82 + 0.18 * ndv : 1.0 - 0.38 * pow(1.0 - ndv, 2.0);
 
+#ifdef TESS_CINEMATIC
+  // Physically based print materials (look.glsl), horizon AO from the charts' heights, the
+  // circle of confusion (depth along the view) in alpha.
+  g_aoD = dir;
+  g_aoU = normalize(F[1] - dir * su);
+  g_aoV = normalize(F[2] - dir * sv);
+  ao = tessHorizonAO(hp, pl.grad, AO_RADIUS, jit);
+  float px = sqrt(abs(determinant(S)));
+  vec3 col = tessLookShade(c.rgb, g_tessPaper, wall, tessWood(wall, vec3(p, hp), px), N, n0, -dr, L, shadow, ao, 0.42, 0.58, max(up, 0.5)) * limb;
+  col = mix(bg, col, cover);
+  o = vec4(mix(col, paper, u_veil), tessCoC(seg ? mix(tA, tB, t1) * dot(rd, u_cam[2]) : 1e6));
+#else
   vec3 col = c.rgb * shade * ao * limb + sheen;
   col = mix(bg, col, cover);
   o = vec4(mix(col, paper, u_veil), 1.0);
+#endif
 }
 #else
 void main() {
@@ -310,6 +402,10 @@ void main() {
     col *= lit * limb;
   }
   col = mix(bg, col, cover);
+#ifdef TESS_CINEMATIC
+  o = vec4(mix(col, paper, u_veil), tessCoC(disc > 0.0 ? (inside ? -b + sq : -b - sq) * dot(rd, u_cam[2]) : 1e6));
+#else
   o = vec4(mix(col, paper, u_veil), 1.0);
+#endif
 }
 #endif

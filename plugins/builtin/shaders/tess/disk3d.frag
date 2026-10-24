@@ -33,6 +33,7 @@ float diskRing(vec2 c) { return clamp(2.0 * atanh(min(c.x, 0.9999999)) / u_ringR
 #define DISK_IMPACT
 // #include disk
 
+
 uniform vec2 u_res;           // target size (px)
 uniform vec3 u_eye;           // camera (world; the coin at the origin)
 uniform mat3 u_cam;           // camera basis: right, up, forward
@@ -48,6 +49,15 @@ uniform vec2 u_lift;          // ripple and spectrum-heave heights (world units)
 uniform vec2 u_Iw;            // the impact on the face now (disk units)
 uniform vec2 u_treble;        // shimmer strength, time
 uniform float u_fog;
+
+#if defined(TESS_CINEMATIC) && defined(TESS_RELIEF) && !defined(TESS_HEIGHT_PASS)
+// The cinematic Look's horizon AO reads the face's height map (world units) round g_aoW (disk
+// units); offsets are world units on the face.
+vec2 g_aoW;
+#define TESS_AO_HEIGHT(o) diskHeightAt(g_aoW + (o) / u_coinG.x)
+#define AO_RADIUS 0.06
+#endif
+// #include look
 
 const float PI = 3.14159265;
 
@@ -254,6 +264,7 @@ vec3 shadeFace(vec2 w, float eta, float sc, mat2 Jpx, float side, vec3 pw, vec3 
   vec2 grad = vec2(0.0);
   float ao = 1.0;
   float wall = 0.0;
+  float paperW = 0.0;
   if (u_kLift.z > 0.0) {
     float e = 0.004;
     grad += u_kLift.z * vec2(faceHeight(w + vec2(e, 0.0)) - faceHeight(w - vec2(e, 0.0)),
@@ -277,7 +288,15 @@ vec3 shadeFace(vec2 w, float eta, float sc, mat2 Jpx, float side, vec3 pw, vec3 
     ao = mix(1.0, 0.72 + 0.28 * r.prof, r.kPx * min(1.0, u_tRelief.x / 0.25));
     float hk = r.h + u_kLift.z * faceHeight(w);
     wall = smoothstep(0.004, 0.014, (eta - hk) / max(r.scale, 1e-5)) * r.kPx;
+#ifdef TESS_CINEMATIC
+    // Cinematic (look.glsl): bare end grain on the cut sides, horizon AO from the height map.
+    base = mix(base, tessWood(wall, vec3(w * u_coinG.x, eta) / max(r.scale, 1e-5), px * u_coinG.x / max(r.scale, 1e-5)), wall);
+    g_aoW = w;
+    ao = mix(1.0, tessHorizonAO(eta, grad, AO_RADIUS, jit), r.kPx * min(1.0, u_tRelief.x / 0.25));
+    paperW = g_tessPaper * shown;
+#else
     base *= 1.0 - 0.45 * wall;
+#endif
     // Treble glints along the gouges.
     float x = g_dk.dist / 0.03;
     float idx = floor(x);
@@ -303,6 +322,9 @@ vec3 shadeFace(vec2 w, float eta, float sc, mat2 Jpx, float side, vec3 pw, vec3 
     float top = u_kH.x + u_kH.y;
     float reach = max(top - eta, 0.0) / Lf.z;
     int ns = int(clamp(ceil(reach * length(Lf.xy) / texel / 4.0), 0.0, 8.0));
+#ifdef TESS_CINEMATIC
+    ns = tessShadowSteps(ns);
+#endif
     vec3 P = vec3(w, eta);
     for (int i = 1; i <= 8; i++) {
       if (i > ns) break;
@@ -316,6 +338,10 @@ vec3 shadeFace(vec2 w, float eta, float sc, mat2 Jpx, float side, vec3 pw, vec3 
   // The coin's light as before, times the carving's: a facet against a flat top in the same light.
   float nl0 = max(dot(N0, u_light), 0.0);
   float rel = max(dot(N, u_light), 0.0) * shadow / max(nl0, 0.25);
+#ifdef TESS_CINEMATIC
+  // Paper in the cuts takes the light round its fibres (Green's wrap, look.glsl).
+  rel = mix(rel, tessWrap(dot(N, u_light), PAPER_WRAP) * shadow / tessWrap(max(nl0, 0.25), PAPER_WRAP), paperW);
+#endif
   float carve = 0.4 + 0.6 * min(rel, 1.6);
   float nv = max(dot(N, V), 1e-3);
   float fr = 0.04 + 0.96 * pow(1.0 - nv, 5.0);
@@ -553,7 +579,11 @@ void main() {
       col += aniso * (0.6 + 0.4 * streak) * vec3(1.0, 0.95, 0.85) * 0.9;
       col = mix(col, wallCheap(pw, reflect(rd, N)), 0.35 * fr + 0.1);
     }
+#ifdef TESS_CINEMATIC
+    col = tessAtmos(col, 1.0 - exp(-th * u_fog), 1.0 - exp(-th * u_fog));
+#else
     col = mix(col, u_tPaper, 1.0 - exp(-th * u_fog));
+#endif
   } else {
     // The sphere wall: the cube-sphere print on matte paper with a little tooth, in the fog.
     g_surf = 1;
@@ -563,11 +593,19 @@ void main() {
     float tooth = tessNoise(wp * 23.0) - 0.5;
     col *= 0.84 + 0.12 * max(dot(n, u_light), 0.0) + 0.06 * tooth;
     col = mix(col, u_tPaper, 0.28);                     // the wall stays quiet: matte paper
+#ifdef TESS_CINEMATIC
+    col = tessAtmos(col, 1.0 - exp(-tw * u_fog), 1.0 - exp(-tw * u_fog));
+#else
     col = mix(col, u_tPaper, 1.0 - exp(-tw * u_fog));
+#endif
     // The coin's outline, a key-block line round its silhouette.
     float line = 1.0 - smoothstep(0.6, 1.6, closest / pix / fpx);
     col = mix(col, u_tInk, line * 0.85);
   }
+#ifdef TESS_CINEMATIC
+  o = vec4(col, tessCoC((hit ? th : tw) * dot(rd, u_cam[2])));
+#else
   o = vec4(col, 1.0);
+#endif
 }
 #endif

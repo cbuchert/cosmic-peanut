@@ -23,6 +23,7 @@
 import { faceCells, sphereTables } from "./lib/cube-sphere.js";
 import { cameraAt, cameraBasis, createDrag, createPush, fillOptions, reliefScale, sphereFrame, threeClassColors, viewLight, viewName } from "./lib/sphere-view.js";
 import { createTessPipeline } from "./lib/tess-gl.js";
+import { createFocus, sphereWallAhead } from "./lib/tess-look.js";
 import { createTessState, LIGHT_DEFAULT, renderScale } from "./lib/tess-music.js";
 import { MAX_TILE_COLORS, paletteOf } from "./lib/tess.js";
 
@@ -45,9 +46,17 @@ const unit = (v) => {
   return [v[0] / l, v[1] / l, v[2] / l];
 };
 
+/**
+ * Cinematic depth of field inside the dome: focus on the wall straight ahead; the blur far away
+ * and its cap (full-resolution px on a 1440-px-high canvas). It opens with the push through the
+ * skin (none outside, where the floating sphere is the whole subject).
+ */
+const DOF_FAR = 3;
+const DOF_CAP = 6;
+
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
-  const tess = await createTessPipeline(ctx, "shaders/tess/sphere.frag", { relief: true });
+  const tess = await createTessPipeline(ctx, "shaders/tess/sphere.frag", { relief: true, dof: true });
   const state = createTessState();
   const tab = sphereTables(CELLS);
   const push = createPush();
@@ -71,6 +80,9 @@ export default async function create(ctx) {
   let blendPhase = 0;
 
   tess.resize(renderScale(ctx.params.quality));
+  await tess.setLook(ctx.params.look, ctx.params.quality);
+  const focus = createFocus(1);
+  let focused = false;
 
   /** @type {import('./lib/tess-gl.js').SetSurface} */
   const surface = (gl, u) => {
@@ -128,6 +140,17 @@ export default async function create(ctx) {
         nTiles = paletteOf(palName, pal);
       }
       threeClassColors(pal, nTiles, s.shift, cls, clsNext);
+      // Cinematic: focus on the wall ahead (inside) or the sphere's near side (outside), eased;
+      // Reduce motion holds it. Depth of field opens with the push inside.
+      const ahead = sphereWallAhead(basis[0], basis[1], basis[2], basis[9], basis[10], basis[11]);
+      if (!focused) focus.reset(ahead);
+      focused = true;
+      focus.step(ahead, dt, ctx.reduceMotion);
+      const px = (ctx.size.height / 1440) * w;
+      const lr = rlight[0] * basis[3] + rlight[1] * basis[4] + rlight[2] * basis[5];
+      const lu = rlight[0] * basis[6] + rlight[1] * basis[7] + rlight[2] * basis[8];
+      const lh = Math.hypot(lr, lu) || 1;
+      tess.setFocus(focus.distance, DOF_FAR * px, DOF_CAP * px, lr / lh, lu / lh);
       tess.render(s, surface);
     },
 
@@ -141,6 +164,7 @@ export default async function create(ctx) {
 
     params(changed) {
       if ("quality" in changed) tess.resize(renderScale(ctx.params.quality));
+      if ("look" in changed || "quality" in changed) tess.setLook(ctx.params.look, ctx.params.quality);
     },
 
     dispose() {

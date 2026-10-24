@@ -236,6 +236,12 @@ vec4 tessAtlasShade(vec2 p, mat2 S);
 // its after-shift colour): gouges, features, the atlas art, the key block's outlines and the
 // fade to the mean. q seeds the ink-spread grain. marks returns the
 // gouge (x) and feature (y) coverage, for a surface that carves them (relief).
+#ifdef TESS_CINEMATIC
+// The cinematic Look's materials (look.glsl) need to know what each pixel of the print is: set by
+// tessPrintFill, the share of paper showing where the cuts reach it (a dark tile's gouges and
+// features); the rest is ink (the tile's colour block and the key block).
+float g_tessPaper = 0.0;
+#endif
 vec4 tessPrintFill(Tile t, vec3 fill, float fade, float pxq, float tileSize, float dpx, float m, vec2 q, out vec2 marks) {
   float fpx = 1.0 / u_tPxScale;                    // full-resolution px in target px
   bool dark = dot(fill, vec3(0.2126, 0.7152, 0.0722)) < 0.18;
@@ -274,6 +280,10 @@ vec4 tessPrintFill(Tile t, vec3 fill, float fade, float pxq, float tileSize, flo
 
   // Tiles too small to print fade to their mean.
   col = mix(u_tAvg, col, smoothstep(3.0 * fpx, 10.0 * fpx, tileSize));
+#ifdef TESS_CINEMATIC
+  g_tessPaper = dark ? max(marks.x * min(1.0, u_tHatch * 1.6), marks.y) * (1.0 - tessBand(dpx, u_tInkW * spread * fpx)) *
+                       smoothstep(3.0 * fpx, 10.0 * fpx, tileSize) : 0.0;
+#endif
   return vec4(col, 1.0);
 }
 
@@ -504,4 +514,46 @@ vec4 tessShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail) {
   detail = (FEATURE_RAISE * marks.y - GOUGE_DEPTH * marks.x) * u_tRelief.x * k;
   return col;
 }
+
+#if defined(TESS_RAY_SOLID) && (defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC))
+// Exact cut sides. A surface that marches its ray through the height pass's map sees each cut side
+// as a ramp a map texel wide (the map is HEIGHT_SCALE of the print), so where the march lands off
+// the exact block — a turning card's sides above all, edge-on and tall — its sides show a fringe.
+// tessRefineHit searches the ray again against the exact block, from ray parameter lo to hi in
+// TESS_REFINE_STEPS steps, then bisects: TESS_RAY_SOLID(t) is the surface's exact block height
+// minus the ray's height at t (≥ 0: at or under the block). Returns the hit, or −1 if the bracket
+// holds none. Only the pixels a surface sends here pay for it, and only while cards turn:
+// classic's TESS_EXACT_SIDES variant is what lib/tess-gl.js draws then (its resting frames come
+// from the programs exactly as they were); the cinematic programs carry it behind u_tFlip.
+// TESS_REFINE_ON is the surface's gate.
+#define TESS_REFINE_STEPS 4
+#define TESS_REFINE_BISECT 5
+#ifdef TESS_CINEMATIC
+uniform float u_tFlip;            // 1 while cards turn (lib/tess-gl.js)
+#define TESS_REFINE_ON (u_tFlip > 0.5)
+#else
+#define TESS_REFINE_ON true
+#endif
+// A card mid-turn (the figure/ground front over its ring): only there is the search worth it.
+bool tessTurning(TessPlate r) {
+  float f = clamp((u_tInvert.x - TESS_RING(r.t.centre)) / u_tInvert.y + 0.5, 0.0, 1.0);
+  return f > 0.0 && f < 1.0;
+}
+float tessRefineHit(float lo, float hi) {
+  float a = lo;
+  for (int i = 1; i <= TESS_REFINE_STEPS; i++) {
+    float t = mix(lo, hi, float(i) / float(TESS_REFINE_STEPS));
+    if (TESS_RAY_SOLID(t) >= 0.0) {
+      float b = t;
+      for (int j = 0; j < TESS_REFINE_BISECT; j++) {
+        float m = 0.5 * (a + b);
+        if (TESS_RAY_SOLID(m) >= 0.0) b = m; else a = m;
+      }
+      return b;
+    }
+    a = t;
+  }
+  return -1.0;
+}
+#endif
 #endif
