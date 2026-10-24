@@ -3,6 +3,68 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tessellation surfaces: artifact fixes (2026-10-23)
+
+Surface shaders only (no engine change); Relief 0 runs the untouched plain programs. Stills:
+scratchpad `shots/tess-fix-*.png`. Frame times: WebKit, 2560×1440, Quality high, `sync=1`,
+before/after interleaved in one session (3 rounds, medians), GPU shared with another agent.
+
+- **Tiled Torus, ink arcs past the silhouette** (outside, relief): rays skimming the lifted
+  blocks spent their steps still pixels above them and were projected onto the surface and inked
+  as outline, drawing thin arcs beyond the silhouette and a white wedge at the hole's rim. Now a
+  spent outside ray still more than 1 px clear (its last sample's distance) searches the rest of
+  its chord through the bounding sphere in 24 even steps; a crossing (the hole's far wall) is
+  bisected and shaded as a hit, none is a miss inked from its closest approach like any other.
+- **Tiled Torus, budget clipping** (outside, relief): past its 64 steps under the blocks an
+  outside ray steps by the waves' bound, which can carry it through a cut side's edge; it was
+  shaded where it landed, inside the block. A hit after the budget that lands more than eps deep
+  now bisects (6) back to the crossing. Against a reference march with no budget (4000 steps),
+  pixels off by > 24/255 at still=150: 3749 → 1883 (the rest are sub-tile grazing detail at the
+  hole's rim). Cost: only those few pixels.
+- **Tiled Torus, ragged cut sides close up** (inside, relief): the sides' shade mask and normal
+  came from the height map (a texel is ~20 px in the close-up), so the dark bands had lumpy,
+  texel-kinked edges. They now come from the exact leaned block at the hit, from the plate the
+  shading already has (`leanedH`, shared with the height pass): mask `pl.h − leanedH(pl)`,
+  slope RELIEF_SLOPE / ‖J‖ along the outline distance's gradient. No extra plate evaluation.
+  The geometry (where rays land) is still the map's.
+- **Tiled Sphere, grain on cut sides near the limb**: grazing rays cross many height texels,
+  the march caps at 12 jittered steps, so a step spans several texels and neighbouring pixels'
+  jittered samples found different crossings (a corner clipped or not). The bracket the coarse
+  march found is now walked again in steps of ~1.5 texels (≤ 8, only where it is wider) for its
+  first crossing before bisecting. Against a dense unjittered reference (4 samples a texel, 10
+  bisections), pixels off by > 24/255, outside at still=150: 44583 → 10697 (the rest at the
+  very limb). p50 / p99 outside 4 / 5 → 4 / 5 ms, inside 11 / 12 → 11 / 13 ms.
+- **Tile Horizon, edge-on cards as a band of tall blocks; jagged far silhouettes**: a card turning
+  edge-on is a sliver CARD_RISE tall; far off, where a height texel is a sizeable part of a tile,
+  the map smeared a row of them into a band of tall bare walls, and lifted tiles' silhouettes
+  stepped with the texels. The block is now band-limited to the map (`floorBlock`, used by the
+  height pass and the exact height alike): a feature rises at most SIDE_RISE (0.15) plane units
+  per map texel of ground from its outline (over ‖J‖, so a squeezed card counts its real
+  width). Near the camera a texel is tiny and the sides stand as before; far off they lean over
+  a few texels, which the map holds, so turning cards read as tilted cards in their colours and
+  the far silhouettes are smoother (a few leaned sides there shade as grey smudges). The exact
+  side refinement now runs only on steps over WALL_EPS + 0.1 × SIDE_RISE: leaned sides no
+  longer need it, which more than pays for the rest.
+- **Tile Horizon, striation on cut sides**: a march step spans up to 3 map texels and the
+  interleaved-gradient jitter (which runs mostly along x) made neighbouring pixels find different
+  crossings where a step clips a side: vertical striation. The bracket is walked again a texel a
+  step (≤ 4) for its first crossing before bisecting. With the band limit, p50 / p99 at `rep=4`
+  (4 renders a frame, so GPU time dominates): 19.9 / 24.4 → 18.1 / 21.5 ms; at `rep=1` 13 / 15
+  → 14 / 16 ms in an earlier, noisier pair (1 ms is the timer's step).
+- **Poincaré Disk, the rim's olive band** (shows at Relief 0 too, so Relief 0 changes at the rim
+  only): kites under 10 → 3 px fade to the palette's mean (four-block: olive) before turning to
+  ink under 1.6 → 0.6 px, a wide muddy band. A tiny kite is mostly outline (the ink keeps its px
+  width), so the disk now darkens that mean towards ink by the outline's share, RIM_INK (1.6) ×
+  ink width / kite size (`diskRimFade` in disk.glsl, used by disk.frag and disk3d.frag's face
+  and print): the detail fades through a darkening tone into the ink rim. Elsewhere unchanged
+  (kites over 10 px are untouched). p50 / p99 sphere 11 / 13 → 11 / 13 ms, flat 5 / 7 → 5 / 6.
+- **Poincaré Disk, fringes on far cut sides** (sphere scene, relief): in the skim a ray crosses
+  a far kite's crest in under one of the face march's jittered 3-texel steps, so some pixels
+  caught it and their neighbours didn't: hairs along the far tops and sides (the exact
+  refinement doesn't run there, the far kites' steps being small). The march now steps every
+  1.5 texels (≤ 32). Smaller hairs remain at the farthest kites. Skim (forced by a private
+  hook), `rep=3`: 10.0 / 11.2 → 10.3 / 11.7 ms per frame; default camera 9.3 / 10.0 → 9.2 / 9.7.
+
 ## Shader compile check (2026-10-23)
 
 - **Why**: a merge left a stray `#endif` in `tess.glsl` and every suite stayed green; nothing

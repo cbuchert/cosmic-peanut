@@ -51,6 +51,8 @@ uniform float u_fog;    // ground distance where the floor is paper
 #define STEP_GROUND 0.08
 #define STEP_TEXELS 3.0
 #define MARCH_MAX 32
+#define FINE_TEXELS 1.0   // the bracket's walk for its first crossing, map texels a step,
+#define FINE_STEPS 4      // at most this many
 #define HEIGHT_SCALE 0.35
 uniform sampler2D u_tHeight;  // height / u_rel.y over the map's frame
 uniform vec2 u_tHeightTexel;  // 1 / its size
@@ -74,12 +76,39 @@ mat2 floorS(vec3 d, float z) {
 // Height scale × the fade by distance (lib/tess-floor.js reliefScale, reliefFade).
 float floorK(vec2 p) { return u_rel.x * (1.0 - smoothstep(u_fadeR.x, u_fadeR.y, length(p - u_cam.xy))); }
 
+// The block, band-limited to the height map: a feature may rise at most SIDE_RISE plane units
+// per map texel of ground from its outline. Far off a texel is a sizeable part of a tile, and
+// a card turning edge-on there (squeezed to a sliver, standing CARD_RISE tall) was smeared by the
+// map into a band of tall blocks, and lifted tiles' silhouettes stepped with the texels; now
+// they lean over a few texels, which the map holds. Near the camera a texel is tiny and the
+// sides stand as before. Both the height pass and the exact height (floorH) use it.
+#define SIDE_RISE 0.15
+float jNorm(mat2 J) {
+  float tt = dot(J[0], J[0]) + dot(J[1], J[1]);
+  float dt = determinant(J);
+  return sqrt(0.5 * (tt + sqrt(max(0.0, tt * tt - 4.0 * dt * dt))));
+}
+// Plane units per map texel on the ground at p (worst axis).
+float floorTexel(vec2 p) {
+  vec3 v = vec3(p - u_cam.xy, -u_cam.z);
+  mat2 S = floorS(v * (u_focal / max(dot(v, u_fwd), 1e-6)), 0.0);
+  return max(length(S[0]), length(S[1])) / HEIGHT_SCALE;
+}
+// The cap's slope (height per plane unit across the outline) for a tile at p.
+float floorCapSlope(TessPlate r, vec2 p) { return SIDE_RISE / (jNorm(r.J) * floorTexel(p)); }
+// The band-limited height (plane units, before floorK) of the block at p.
+float floorBlock(vec2 p, mat2 S) {
+  TessPlate r = tessPlate(p);
+  return min(r.h * tessReliefFade(r.J, S), floorCapSlope(r, p) * r.t.dist);
+}
+
 #ifndef TESS_HEIGHT_PASS
 #define WALL_EPS 0.004
 #define WALL_TEXELS 4.0
 #define WALL_STEPS 6
+#define WALL_LEAN 0.1
 // The exact height (plane units) at a ground point, as the height pass writes it.
-float floorH(vec2 p, mat2 S) { return tessRelief(p, S).x * floorK(p); }
+float floorH(vec2 p, mat2 S) { return floorBlock(p, S) * floorK(p); }
 
 // The map's uv of the ground under a point: its footprint, seen from the camera.
 vec2 floorUV(vec3 P) {
@@ -111,7 +140,7 @@ void main() {
   if (down > 0.0) {
     vec2 p = u_cam.xy + (u_cam.z / down) * d.xy;
     float k = floorK(p);
-    if (k > 0.0) h = tessRelief(p, floorS(d, 0.0)).x * k;
+    if (k > 0.0) h = floorBlock(p, floorS(d, 0.0)) * k;
   }
   o = vec4(h / max(u_rel.y, 1e-6), 0.0, 0.0, 1.0);
 #elif defined(TESS_RELIEF)
@@ -144,6 +173,23 @@ void main() {
       t0 = t;
     }
     if (hit) {
+      // A step spans up to STEP_TEXELS map texels, and with the jitter neighbouring pixels found
+      // different crossings where a step clips a side or a card's edge: grain and striation on
+      // the cut sides. Walk the bracket again a texel a step for its first crossing.
+      float bt = length((floorUV(E + d * t0) - floorUV(E + d * t1)) / u_tHeightTexel);
+      int m = int(clamp(ceil(bt / FINE_TEXELS), 1.0, float(FINE_STEPS)));
+      if (m > 1) {
+        float ta = t0;
+        float ds = (t1 - t0) / float(m);
+        for (int i = 1; i < FINE_STEPS; i++) {
+          if (i >= m) break;
+          float t = ta + ds;
+          vec3 P = E + d * t;
+          if (heightAt(P.xy) >= P.z) { t1 = t; break; }
+          ta = t;
+        }
+        t0 = ta;
+      }
       for (int i = 0; i < 5; i++) {
         float t = 0.5 * (t0 + t1);
         vec3 P = E + d * t;
@@ -156,7 +202,9 @@ void main() {
       vec3 P = E + d * t1;
       mat2 S = floorS(d, P.z);
       float fp = max(length(S[0]), length(S[1]));
-      if (abs(floorH(P.xy, S) - P.z) > WALL_EPS) {
+      // (A side band-limited to lean over a few texels the map holds as it is: refining it was
+      // most of the band limit's cost. Only a step well over the map's texel error is refined.)
+      if (abs(floorH(P.xy, S) - P.z) > WALL_EPS + WALL_LEAN * SIDE_RISE) {
         float dt = WALL_TEXELS * fp / HEIGHT_SCALE / max(lenXY, 1e-6);
         float lo = max(tA, t1 - dt);
         float hi = min(tB, t1 + dt);
@@ -196,6 +244,12 @@ void main() {
   TessPlate pl;
   float detail;
   vec4 c = tessShadeRelief(P.xy, S, pl, detail);
+  // Band-limited as the map is (floorBlock): where the cap holds, its slope.
+  float capS = floorCapSlope(pl, P.xy);
+  if (pl.pit < 0.5 && capS * pl.t.dist < pl.h) {
+    pl.h = capS * pl.t.dist;
+    pl.grad = capS * (transpose(pl.J) * pl.t.n);
+  }
   pl.h *= k;
   pl.grad *= k;
   detail *= k;

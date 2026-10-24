@@ -112,7 +112,7 @@ void main() {
       c = tessPrintFill(r.k.t, fill, r.face, r.k.pxq, tileSize, r.k.dpx, 0.0, 0.5 * r.k.t.uv, marks);
     }
     float shown = smoothstep(0.6 * fpx, 1.6 * fpx, tileSize);
-    col = mix(u_tInk, c.rgb, shown);
+    col = mix(u_tInk, diskRimFade(c.rgb, tileSize, fpx), shown);
     grad = (r.grad + diskDetail(r, marks, R, Jpx, tileSize, fpx)) * shown;
     ao = mix(1.0, 0.72 + 0.28 * r.prof, r.kPx * min(1.0, u_tRelief.x / 0.25));
     // Where the ray met the side of a taller neighbour: the block's cut side, in the shade of its top.
@@ -155,7 +155,7 @@ void main() {
   float tileSize = rw < 1.0 ? 0.5 * u_kiteA * u_disk.z * (1.0 - rw * rw) : 0.0;
   vec3 col = u_tInk;
   // Tiles below about a pixel print as ink (the crowded rim); don't fold for them.
-  if (tileSize > 0.6 * fpx) col = mix(u_tInk, diskShade(w, u_disk.z, mat2(1.0), tileSize).rgb, smoothstep(0.6 * fpx, 1.6 * fpx, tileSize));
+  if (tileSize > 0.6 * fpx) col = mix(u_tInk, diskRimFade(diskShade(w, u_disk.z, mat2(1.0), tileSize).rgb, tileSize, fpx), smoothstep(0.6 * fpx, 1.6 * fpx, tileSize));
   // The disk's edge, antialiased, onto the paper.
   col = mix(u_tPaper, col, clamp((1.0 - rw) * u_disk.z + 0.5, 0.0, 1.0));
   o = vec4(col, 1.0);

@@ -286,6 +286,19 @@ DiskKite diskKite(vec2 w, float R, mat2 Jpx) {
   return dk;
 }
 
+// The rim: the print fades kites under 10 → 3 px to the palette's mean (tessPrintFill), and
+// under 1.6 → 0.6 px to ink, so the four-block palette's olive mean stood as a wide, muddy band
+// between the detail and the ink. A tiny kite is mostly its outline (the ink keeps its width in
+// px as the kite shrinks), so its mean darkens towards ink with the outline's share of it, about
+// RIM_INK × the ink width over its size: the detail fades through a darkening tone into the ink
+// (1.6: all ink at 1.6 px, where the surfaces hand a kite over to ink).
+#define RIM_INK 1.6
+vec3 diskRimFade(vec3 col, float tileSize, float fpx) {
+  float mean = 1.0 - smoothstep(3.0 * fpx, 10.0 * fpx, tileSize);   // tessPrintFill's fade
+  float ink = clamp(RIM_INK * u_tInkW * fpx / max(tileSize, 1e-6), 0.0, 1.0);
+  return col + (mean * ink) * (u_tInk - u_tAvg);
+}
+
 vec4 diskShade(vec2 w, float R, mat2 Jpx, float tileSize) {
   DiskKite dk = diskKite(w, R, Jpx);
   return tessPrint(dk.t, dk.tf, dk.pxq, tileSize, dk.dpx, 0.0, 0.5 * dk.t.uv);
