@@ -100,11 +100,10 @@ void main() {
   // The fine carving's slope from its screen derivatives (gouges cut, features raised).
   vec2 gd = inverse(transpose(S)) * vec2(dFdx(detail), dFdy(detail));
 #if defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC)
-  // Off the exact block (the map's ramp at a cut side): find the side exactly (tessRefineHit; in
-  // classic while cards turn, always in cinematic) and print there; a hit under a block's top is
-  // its cut side.
+  // Off the exact block (the map's ramp at a cut side), while cards turn: find the side exactly
+  // (tessRefineHit) and print there; a hit under a block's top is its cut side.
   float under = 0.0;
-  if (abs(P.z - pl.h) > 0.004) {
+  if (TESS_REFINE_ON && abs(P.z - pl.h) > 0.004) {
     g_rA = A;
     g_rB = B;
     g_rS = S;

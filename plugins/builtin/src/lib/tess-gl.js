@@ -225,6 +225,7 @@ export async function createTessPipeline(ctx, surface, { relief = false, dof = f
     gl.uniform4f(u.u_tRelief, s.relief, s.profile, s.reliefMax, s.flipHop);
     gl.uniform1fv(u.u_tLift, s.lift);
     gl.uniform4fv(u.u_tPop, s.pops);
+    gl.uniform1f(u.u_tFlip, s.flipping ? 1 : 0); // cinematic programs only (null elsewhere: a no-op)
   }
   /** @type {Promise<void> | null} */
   let pending = null;

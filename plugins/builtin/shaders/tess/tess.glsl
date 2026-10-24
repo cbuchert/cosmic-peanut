@@ -522,11 +522,18 @@ vec4 tessShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail) {
 // tessRefineHit searches the ray again against the exact block, from ray parameter lo to hi in
 // TESS_REFINE_STEPS steps, then bisects: TESS_RAY_SOLID(t) is the surface's exact block height
 // minus the ray's height at t (≥ 0: at or under the block). Returns the hit, or −1 if the bracket
-// holds none. Only the pixels a surface sends here pay for it. Compiled in the cinematic programs,
-// and in classic's TESS_EXACT_SIDES variant, which lib/tess-gl.js draws while cards turn, so
-// classic's resting frames come from their programs exactly as they were.
-#define TESS_REFINE_STEPS 6
-#define TESS_REFINE_BISECT 6
+// holds none. Only the pixels a surface sends here pay for it, and only while cards turn:
+// classic's TESS_EXACT_SIDES variant is what lib/tess-gl.js draws then (its resting frames come
+// from the programs exactly as they were); the cinematic programs carry it behind u_tFlip.
+// TESS_REFINE_ON is the surface's gate.
+#define TESS_REFINE_STEPS 5
+#define TESS_REFINE_BISECT 5
+#ifdef TESS_CINEMATIC
+uniform float u_tFlip;            // 1 while cards turn (lib/tess-gl.js)
+#define TESS_REFINE_ON (u_tFlip > 0.5)
+#else
+#define TESS_REFINE_ON true
+#endif
 float tessRefineHit(float lo, float hi) {
   float a = lo;
   for (int i = 1; i <= TESS_REFINE_STEPS; i++) {

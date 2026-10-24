@@ -210,11 +210,20 @@ describe("Metamorphosis: exact cut sides while cards turn", () => {
     expect(draws.filter(isRelief).every((d) => !isExact(d))).toBe(true);
   });
 
-  it("cinematic always has exact sides (its programs carry them), with no separate variant", async () => {
-    const { draws, run } = await setup({ look: "cinematic" });
-    run(3);
-    const print = draws.filter((d) => isCinematic(d) && isRelief(d));
-    expect(print.length).toBe(3);
-    expect(print.every((d) => !isExact(d) && d.program.fs.includes("TESS_RAY_SOLID"))).toBe(true);
+  it("cinematic carries exact sides in its own programs, switched on (u_tFlip) while cards turn", async () => {
+    const { draws, viz } = await setup({ look: "cinematic" });
+    const audio = /** @type {any} */ ({ bands: new Float32Array(64).fill(0.3), bpm: 0, beatPhase: 0, onset: false, onsetStrength: 0, centroid: 0.15, bassAtt: 1, silent: false });
+    const step = (/** @type {number} */ f) => viz.frame(audio, /** @type {any} */ ({ now: f / 60, dt: 1 / 60, frame: f }));
+    for (let f = 0; f < 3; f++) step(f);
+    const print = () => draws.filter((d) => isCinematic(d) && isRelief(d));
+    expect(print().length).toBe(3);
+    expect(print().every((d) => !isExact(d) && d.program.fs.includes("TESS_RAY_SOLID") && d.values.get("u_tFlip") === 0)).toBe(true);
+    audio.onset = true;
+    audio.onsetStrength = 1;
+    step(3);
+    audio.onset = false;
+    draws.length = 0;
+    for (let f = 4; f < 10; f++) step(f);
+    expect(print().every((d) => !isExact(d) && d.values.get("u_tFlip") === 1)).toBe(true);
   });
 });

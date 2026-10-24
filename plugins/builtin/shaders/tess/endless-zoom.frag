@@ -163,10 +163,10 @@ void main() {
   // plane slope turned into the screen frame (a similarity: slopes carry over, turned by arg α/z).
   vec2 gd = inverse(transpose(S)) * vec2(dFdx(detail), dFdy(detail));
 #if defined(TESS_EXACT_SIDES) || defined(TESS_CINEMATIC)
-  // Off the exact block (the map's ramp at a cut side): find the side exactly (tessRefineHit; in
-  // classic while cards turn, always in cinematic); a hit under a block's top is its cut side.
+  // Off the exact block (the map's ramp at a cut side), while cards turn: find the side exactly
+  // (tessRefineHit) and print there; a hit under a block's top is its cut side.
   float under = 0.0;
-  if (abs(Pz - pl.h) > 0.004) {
+  if (TESS_REFINE_ON && abs(Pz - pl.h) > 0.004) {
     g_rz0 = z0;
     g_rs = vec3(sA, sB, H);
     float span = 2.0 * texel / max(r0 * (exp(sB) - exp(sA)), 1e-6);

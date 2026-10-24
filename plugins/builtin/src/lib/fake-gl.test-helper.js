@@ -100,9 +100,10 @@ export function preprocess(src) {
   /** @type {{ on: boolean, taken: boolean }[]} */
   const stack = [];
   const on = () => stack.every((f) => f.on);
+  // `defined(X)` terms joined by !, &&, || and parentheses (anything else counts as false).
   const test = (/** @type {string} */ c) => {
-    const m = c.match(/^(!?)\s*defined\s*\(?\s*(\w+)\s*\)?$/);
-    return m ? defs.has(m[2]) !== (m[1] === "!") : false;
+    const e = c.replace(/defined\s*\(?\s*(\w+)\s*\)?/g, (_, n) => (defs.has(n) ? "1" : "0"));
+    return /^[01()!&|\s]+$/.test(e) ? Boolean(Function(`return ${e};`)()) : false;
   };
   /** @type {string[]} */
   const out = [];
