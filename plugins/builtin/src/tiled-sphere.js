@@ -11,11 +11,19 @@
  * from a pole like a terminator; drag orbits outside and looks round inside, easing back on
  * release (lib/sphere-view.js). p4 only: a p3 tiling would need an icosahedral net, whose
  * corners turn by 60°, which p3 cannot absorb. frame() allocates nothing.
+ *
+ * Relief (the engine's carved block, TESS_RELIEF): the tiles lift off the globe's skin along its
+ * normal, outward from outside and inward towards the camera from inside, cast soft shadows and
+ * catch a raking light (the Light param, round the view). Every beat sends a wave of lifting
+ * tiles from the pole like a terminator, the spectrum heaves the rings, onsets pop single tiles
+ * and the figure/ground front turns the tiles over like cards. The relief flattens while the camera
+ * pushes through the skin, so it keeps clear of the eye (lib/sphere-view.js reliefScale). Relief 0
+ * is the flat print, unchanged.
  */
 import { faceCells, sphereTables } from "./lib/cube-sphere.js";
-import { cameraAt, cameraBasis, createDrag, createPush, fillOptions, sphereFrame, threeClassColors, viewName } from "./lib/sphere-view.js";
+import { cameraAt, cameraBasis, createDrag, createPush, fillOptions, reliefScale, sphereFrame, threeClassColors, viewLight, viewName } from "./lib/sphere-view.js";
 import { createTessPipeline } from "./lib/tess-gl.js";
-import { createTessState, renderScale } from "./lib/tess-music.js";
+import { createTessState, LIGHT_DEFAULT, renderScale } from "./lib/tess-music.js";
 import { MAX_TILE_COLORS, paletteOf } from "./lib/tess.js";
 
 /** Lattice cells per face: 3 (6 tiles across a face, 24 round the sphere). */
@@ -39,12 +47,12 @@ const unit = (v) => {
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
-  const tess = await createTessPipeline(ctx, "shaders/tess/sphere.frag");
+  const tess = await createTessPipeline(ctx, "shaders/tess/sphere.frag", { relief: true });
   const state = createTessState();
   const tab = sphereTables(CELLS);
   const push = createPush();
   const drag = createDrag();
-  const opts = { symmetry: "p4", palette: "", reactivity: 1, speed: 1, morph: 0.7, ink: 1, hatching: 0.6, height: 1, reduceMotion: false, reduceFlashing: false };
+  const opts = { symmetry: "p4", palette: "", reactivity: 1, speed: 1, morph: 0.7, ink: 1, hatching: 0.6, height: 1, reduceMotion: false, reduceFlashing: false, relief: 0 };
   const pushIn = { view: "auto", stepped: false, reduceMotion: false };
   const cam = { dist: 0, fov: 0, veil: 0, inside: 0 };
   const basis = new Float32Array(12);
@@ -56,6 +64,8 @@ export default async function create(ctx) {
   const clsNext = new Float32Array(9);
   const poleW = unit(POLE);
   const light = unit(LIGHT);
+  const rlight = new Float32Array(3);
+  let dispK = 0;
   let palName = "";
   let nTiles = 3;
   let blendPhase = 0;
@@ -84,6 +94,9 @@ export default async function create(ctx) {
     gl.uniform1f(u.u_veil, cam.veil);
     gl.uniform1f(u.u_discR, cam.dist > 1 ? Math.tan(Math.asin(1 / cam.dist)) / Math.tan(cam.fov / 2) : 0);
     gl.uniform3f(u.u_light, light[0], light[1], light[2]);
+    // Relief programs only (null on the flat one: a no-op).
+    gl.uniform1f(u.u_dispK, dispK);
+    gl.uniform3fv(u.u_rlight, rlight);
   };
 
   return {
@@ -102,6 +115,9 @@ export default async function create(ctx) {
       // Drag orbits the sphere from outside and looks round from inside.
       const w = push.value;
       cameraBasis(cam.dist, drag.yaw * (1 - w), (ORBIT_PITCH + drag.pitch) * (1 - w), drag.yaw * w, drag.pitch * w, basis);
+      // The relief: plane units of height to world, flattened while the camera crosses the skin.
+      dispK = reliefScale(cam.dist, s.reliefMax, CELLS);
+      viewLight(Number(ctx.params.light ?? LIGHT_DEFAULT), basis, rlight);
 
       // The sphere turns with the glide (bass, the eased beat surge); its axis sways slowly.
       sphereFrame(SPIN * s.travel, TILT + TILT_SWAY * Math.sin(TILT_RATE * s.travel), rot);
