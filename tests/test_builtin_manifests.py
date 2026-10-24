@@ -1101,6 +1101,8 @@ def test_tiled_torus_manifest():
     assert params["symmetry"]["options"] == ["p4", "p3"]
     assert params["palette"]["options"] == ["ink", "dusk", "four-block", "ochre", "watercolour"]
     assert params["quality"]["options"] == ["low", "medium", "high"]
+    # Medium by default: at high the inside view misses 60 fps at 1440p (NOTES: quiet-machine pass).
+    assert params["quality"]["default"] == "medium"
     t = params["thickness"]
     assert (t["min"], t["max"], t["default"]) == (0.2, 0.5, 0.36)
     # lib/torus.js mapParams: Wave height 0–1, Travel time TRAVEL (s a lap round the tube), Detail 0–1.

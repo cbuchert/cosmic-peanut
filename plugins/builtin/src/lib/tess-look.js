@@ -148,8 +148,8 @@ export const SAMPLE_CAPS = Object.freeze({ aoDirs: 8, aoSteps: 4, dofTaps: 32, s
 
 /**
  * Per Quality: horizon-AO directions and steps per direction, depth-of-field gather taps, and
- * soft-shadow steps at most. The knobs for a performance pass: high is the default (1440p at
- * 60 fps is the target there), medium and low trade samples for time.
+ * soft-shadow steps at most. The knobs for a performance pass: each surface's default Quality
+ * holds 60 fps at 1440p (high, except Tiled Torus at medium), medium and low trade samples for time.
  */
 const SAMPLES = {
   low: Object.freeze({ aoDirs: 2, aoSteps: 2, dofTaps: 6, shadow: 4 }),
