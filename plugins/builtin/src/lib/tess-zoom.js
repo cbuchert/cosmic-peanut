@@ -9,8 +9,13 @@
  * (lib/tess.js drosteAlpha): V must be a lattice vector for the tiles to close, and the
  * metamorphosis blend wave (period BLEND_PERIOD lattice steps) must repeat over it too, or the
  * shapes would jump at the seam. Zooming moves log z along the real axis, i.e. p along α.
+ *
+ * Relief: the engine varies each tile's lift and picks its onset pops by a hash of its integer
+ * cell id, which one turn (and each wrap of O) shifts. The surface hashes a cell key instead
+ * (tess.glsl TESS_CELL_KEY): the id plus the wraps so far, reduced modulo one turn's shift, so a
+ * tile's height agrees across the seam and through the wraps.
  */
-import { BLEND_PERIOD, symmetryName } from "./tess-music.js";
+import { BLEND_PERIOD, LIGHT_DEFAULT, RELIEF_DEFAULT, symmetryName } from "./tess-music.js";
 
 /** Spiral param options: how far the lattice climbs per turn round the centre. */
 export const SPIRALS = ["none", "gentle", "medium", "strong"];
@@ -56,6 +61,10 @@ export const directionSign = (name) => (String(name) === "out" ? -1 : 1);
 export function createZoom() {
   const v = [0, 0];
   const z = {
+    /** Cell ids the wraps of O so far have shifted the tiles by, reduced by `seam` (`u_tCellKey.xy`). */
+    cellBase: [0, 0],
+    /** One turn's shift of the cell ids (seamCells, `u_tCellKey.zw`). */
+    seam: [0, 0],
     /** Plane offset O (`u_O`). */
     ox: 0,
     oy: 0,
@@ -70,6 +79,9 @@ export function createZoom() {
     step(travel, dt, o) {
       const g = o.group;
       spiralVector(o.spiral, v);
+      const f = cellsPerStep(g);
+      z.seam[0] = f * v[0];
+      z.seam[1] = f * v[1];
       const vx = v[0] * g.basis[0][0] + v[1] * g.basis[1][0];
       const vy = v[0] * g.basis[0][1] + v[1] * g.basis[1][1];
       z.alpha[0] = vy / (2 * Math.PI); // drosteAlpha, inlined to stay allocation-free
@@ -84,14 +96,51 @@ export function createZoom() {
       const det = b[0][0] * b[1][1] - b[1][0] * b[0][1];
       let la = (ox * b[1][1] - oy * b[1][0]) / det;
       let lb = (oy * b[0][0] - ox * b[0][1]) / det;
-      la -= BLEND_PERIOD * Math.floor(la / BLEND_PERIOD);
-      lb -= BLEND_PERIOD * Math.floor(lb / BLEND_PERIOD);
+      // Whole blend periods of lattice steps: the plane moves back by them, the cell ids too.
+      const wa = BLEND_PERIOD * Math.floor(la / BLEND_PERIOD);
+      const wb = BLEND_PERIOD * Math.floor(lb / BLEND_PERIOD);
+      la -= wa;
+      lb -= wb;
+      if (wa !== 0 || wb !== 0) cellKey(z.cellBase[0] + f * wa, z.cellBase[1] + f * wb, ZERO, z.seam, z.cellBase);
       z.ox = la * b[0][0] + lb * b[1][0];
       z.oy = la * b[0][1] + lb * b[1][1];
       return z;
     },
   };
   return z;
+}
+
+const ZERO = [0, 0];
+
+/** Cell ids per lattice step (tess.glsl tessTile: p4 half-unit squares, p3 3 × lattice point + rhombus). @param {import('./tess.js').Group} g */
+const cellsPerStep = (g) => (g.order === 4 ? 2 : 3);
+
+/**
+ * How far one turn round the centre (V = a e1 + b e2, spiralVector) shifts the engine's cell ids.
+ * @param {import('./tess.js').Group} g @param {unknown} spiral @param {number[]} out
+ */
+export function seamCells(g, spiral, out) {
+  spiralVector(spiral, out);
+  const f = cellsPerStep(g);
+  out[0] *= f;
+  out[1] *= f;
+  return out;
+}
+
+/**
+ * A tile's cell key (mirrors endless-zoom.frag zoomCellKey): its id plus the wraps' base, reduced
+ * modulo one turn's shift so that x is in [0, seam.x) (seam.x = a·cells per step > 0). Integers
+ * in, integers out; the + 0.5 keeps the floor clear of the GPU's inexact division.
+ * @param {number} cx @param {number} cy the engine's cell id @param {ArrayLike<number>} base
+ * @param {ArrayLike<number>} seam @param {number[]} out
+ */
+export function cellKey(cx, cy, base, seam, out) {
+  const kx = cx + base[0];
+  const ky = cy + base[1];
+  const n = Math.floor((kx + 0.5) / seam[0]);
+  out[0] = kx - n * seam[0];
+  out[1] = ky - n * seam[1];
+  return out;
 }
 
 /** Drag: furthest the vanishing point goes from the centre (screen units: half the short side). */
@@ -180,11 +229,13 @@ export const DEFAULT_SPIRAL = "gentle";
  * @property {string} symmetry @property {string} palette @property {number} reactivity
  * @property {number} speed @property {number} morph @property {number} ink
  * @property {number} hatching @property {string} spiral @property {number} zoomSpeed
- * @property {string} direction
+ * @property {string} direction @property {number} relief 0–1 (0: the flat print)
+ * @property {number} light the raking light's direction round the view (degrees)
  */
 
 /**
- * The visualizer's params (Metamorphosis's, plus spiral, zoom, direction) into `out`, clamped to
+ * The visualizer's params (Metamorphosis's, Relief and Light included, plus spiral, zoom,
+ * direction) into `out`, clamped to
  * the manifest's ranges; unknown options fall back. Allocates nothing.
  * @param {Record<string, unknown>} p ctx.params @param {ZoomParams} out
  */
@@ -199,5 +250,8 @@ export function readParams(p, out) {
   out.spiral = SPIRALS.includes(String(p.spiral)) ? String(p.spiral) : DEFAULT_SPIRAL;
   out.zoomSpeed = clamp(Number(p.zoom), 0, 2);
   out.direction = DIRECTIONS[directionSign(p.direction) > 0 ? 0 : 1];
+  out.relief = p.relief === undefined ? RELIEF_DEFAULT : clamp(Number(p.relief), 0, 1);
+  out.light = p.light === undefined ? LIGHT_DEFAULT : clamp(Number(p.light), 0, 360);
   return out;
 }
+
