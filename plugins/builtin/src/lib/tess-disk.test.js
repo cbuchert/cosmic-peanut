@@ -1,6 +1,7 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { mobiusApply, mobiusCompose } from "./hyperbolic.js";
+import { createIsometry, mobiusApply, mobiusCompose, mobiusTranslate } from "./hyperbolic.js";
+import { LIGHT_DEFAULT, RELIEF_DEFAULT } from "./tess-music.js";
 import { WARP_LIMIT } from "./tess.js";
 import {
   createDiskOptions,
@@ -16,6 +17,8 @@ import {
   diskGeometry,
   diskGroup,
   diskWarp,
+  faceCentre,
+  kiteIds,
   matIndex,
   matMul,
   readDiskParams,
@@ -49,7 +52,7 @@ describe("params", () => {
   const ctx = { size: { height: 1440 }, reduceMotion: true, reduceFlashing: false };
   it("reads the visualizer's params into the tess state's options, in place", () => {
     const o = createDiskOptions();
-    const p = { tiling: "{4,5}", palette: "ochre", reactivity: 1.5, speed: 0.5, morph: 0.3, ink: 1.2, hatching: 0.4, quality: "low", scene: "flat", camera: "still", spin: 1.6 };
+    const p = { tiling: "{4,5}", palette: "ochre", reactivity: 1.5, speed: 0.5, morph: 0.3, ink: 1.2, hatching: 0.4, quality: "low", scene: "flat", camera: "still", spin: 1.6, relief: 0.25, light: 300 };
     expect(readDiskParams(p, ctx, o)).toBe(o);
     expect(o).toEqual({
       scene: "flat",
@@ -67,7 +70,18 @@ describe("params", () => {
       height: 1440,
       reduceMotion: true,
       reduceFlashing: false,
+      // The carved kites (lib/disk-relief.js; 0 is the print as before relief) and the light.
+      relief: 0.25,
+      light: 300,
     });
+  });
+  it("maps Relief into 0–1 (default RELIEF_DEFAULT) and Light in degrees (default LIGHT_DEFAULT)", () => {
+    const o = createDiskOptions();
+    expect([readDiskParams({}, ctx, o).relief, o.light]).toEqual([RELIEF_DEFAULT, LIGHT_DEFAULT]);
+    expect(readDiskParams({ relief: 3, light: "x" }, ctx, o).relief).toBe(1);
+    expect(o.light).toBe(LIGHT_DEFAULT);
+    expect(readDiskParams({ relief: -1 }, ctx, o).relief).toBe(0);
+    expect(readDiskParams({ relief: 0 }, ctx, o).relief).toBe(0);
   });
   it("falls back to the defaults for unknown or missing values", () => {
     const o = readDiskParams({ tiling: "{9,9}" }, ctx, createDiskOptions());
@@ -75,6 +89,7 @@ describe("params", () => {
     expect([o.scene, o.camera, o.spin]).toEqual(["sphere", "auto", 1]);
     expect([o.reactivity, o.speed, o.morph, o.ink, o.hatching]).toEqual([1, 1, 0.7, 1, 0.6]);
     expect(o.palette).toBe("four-block");
+    expect([o.relief, o.light]).toEqual([0.6, 135]);
   });
 });
 
@@ -596,5 +611,155 @@ describe("the view: drift through the plane, drag to steer", () => {
     view.step(0.1, DT, 300, false);
     expect(view.m).toBe(m);
     expect(Math.hypot(view.centre[0], view.centre[1])).toBeLessThan(0.8);
+  });
+});
+
+describe.each(TILINGS)("kite ids of %s (the relief's per-kite identity)", (name) => {
+  const g = diskGroup(name);
+  const tiler = createDiskTiler(name);
+  const ids = kiteIds(name);
+  const t = createTile();
+  const n = createTile();
+
+  it("tabulates each kite's quotient id, as the fold finds it: one texel per matrix, one channel per quadrant", () => {
+    expect(ids).toBeInstanceOf(Uint16Array);
+    expect(ids.length).toBe(g.r ** 4 * 4);
+    expect(kiteIds(name)).toBe(ids); // cached
+    const rnd = rng(11);
+    for (let i = 0; i < 300; i++) {
+      const r = 0.95 * Math.sqrt(rnd());
+      const a = rnd() * 2 * Math.PI;
+      tiler.tileAt(r * Math.cos(a), r * Math.sin(a), null, t);
+      expect(ids[t.index * 4 + t.quad]).toBe(t.kite);
+    }
+  });
+
+  it("is one id per kite: a kite reached through either of its two diamonds (another matrix and quadrant) has one id", () => {
+    const rnd = rng(12);
+    let across = 0;
+    for (let i = 0; i < 4000; i++) {
+      const r = 0.8 * Math.sqrt(rnd());
+      const a = rnd() * 2 * Math.PI;
+      const x = r * Math.cos(a);
+      const y = r * Math.sin(a);
+      const e = 3e-3 * (1 - r * r);
+      tiler.tileAt(x, y, null, t);
+      tiler.tileAt(x + e * Math.cos(3 * a), y + e * Math.sin(3 * a), null, n);
+      const inside = (/** @type {typeof t} */ k) => Math.min(k.u, k.v, 1 - k.u, 1 - k.v) > 0.06;
+      if (!inside(t) || !inside(n)) continue;
+      // Away from the kite's edges a small step stays in the kite (uv moves a little)…
+      expect(Math.hypot(n.u - t.u, n.v - t.v)).toBeLessThan(0.05);
+      expect(n.kite).toBe(t.kite);
+      expect(ids[n.index * 4 + n.quad]).toBe(ids[t.index * 4 + t.quad]);
+      // …even where it crosses from one diamond to the other (the O–V line through the kite).
+      if (n.index !== t.index || n.quad !== t.quad) across++;
+    }
+    expect(across).toBeGreaterThan(3);
+  });
+});
+
+describe("a kite's centre back on the face (disk.glsl, for the turning cards' axes)", () => {
+  /** Complex helpers. */
+  const mul = (/** @type {number[]} */ a, /** @type {number[]} */ b) => [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]];
+  const div = (/** @type {number[]} */ a, /** @type {number[]} */ b) => {
+    const d = b[0] * b[0] + b[1] * b[1];
+    return [(a[0] * b[0] + a[1] * b[1]) / d, (a[1] * b[0] - a[0] * b[1]) / d];
+  };
+  it("inverts the face → frame isometry Φ from Φ(0), Φ(w) and Φ′(w) alone", () => {
+    const rnd = rng(5);
+    const out = new Float64Array(2);
+    for (let i = 0; i < 200; i++) {
+      // Φ(w) = (u w + o) / (1 + ō u w), a disk automorphism with Φ(0) = o.
+      const ua = rnd() * 2 * Math.PI;
+      const u = [Math.cos(ua), Math.sin(ua)];
+      const or = 0.9 * Math.sqrt(rnd());
+      const oa = rnd() * 2 * Math.PI;
+      const o = [or * Math.cos(oa), or * Math.sin(oa)];
+      const oc = [o[0], -o[1]];
+      const phi = (/** @type {number[]} */ w) => {
+        const uw = mul(u, w);
+        const nn = [uw[0] + o[0], uw[1] + o[1]];
+        const ou = mul(oc, uw);
+        return div(nn, [1 + ou[0], ou[1]]);
+      };
+      const wr = 0.9 * Math.sqrt(rnd());
+      const wa = rnd() * 2 * Math.PI;
+      const w = [wr * Math.cos(wa), wr * Math.sin(wa)];
+      const z = phi(w);
+      // Φ′(w) = u (1 − |o|²) / (1 + ō u w)².
+      const ou = mul(oc, mul(u, w));
+      const den = [1 + ou[0], ou[1]];
+      const dz = div([u[0] * (1 - or * or), u[1] * (1 - or * or)], mul(den, den));
+      const cr = 0.9 * Math.sqrt(rnd());
+      const ca = rnd() * 2 * Math.PI;
+      const wc = [cr * Math.cos(ca), cr * Math.sin(ca)];
+      const c = phi(wc);
+      faceCentre(z[0], z[1], o[0], o[1], dz[0], dz[1], c[0], c[1], out);
+      expect(out[0]).toBeCloseTo(wc[0], 8);
+      expect(out[1]).toBeCloseTo(wc[1], 8);
+    }
+  });
+});
+
+describe("the relief through the view's rebases (the tracked impact, the kite ids)", () => {
+  const tiler = createDiskTiler("{7,3}");
+  const a = createTile();
+  const b = createTile();
+  const z = new Float64Array(2);
+  const wq = new Float64Array(2);
+  const E = createIsometry();
+  const DT = 1 / 60;
+  it("a kite keeps its id and its distance from the impact as the plane is kicked and rebased", () => {
+    const view = createDiskView("{7,3}");
+    view.step(2.7, DT, 300, false);
+    mobiusApply(view.m, 0.25, -0.3, z);
+    view.tracked[0] = z[0];
+    view.tracked[1] = z[1];
+    // The previous beat's impact rides along too (its ripple runs out after the next beat).
+    mobiusApply(view.m, -0.4, 0.1, z);
+    view.trackedPrev[0] = z[0];
+    view.trackedPrev[1] = z[1];
+    const prev = createTile();
+    tiler.tileAt(z[0], z[1], null, prev, view.e0);
+    const rnd = rng(9);
+    // Face points, followed as the content under them moves with each kick.
+    const pts = Array.from({ length: 12 }, () => {
+      const r = 0.7 * Math.sqrt(rnd());
+      const t = rnd() * 2 * Math.PI;
+      return [r * Math.cos(t), r * Math.sin(t)];
+    });
+    const before = pts.map(([x, y]) => {
+      mobiusApply(view.m, x, y, z);
+      tiler.tileAt(z[0], z[1], null, a, view.e0, view.tracked);
+      return { kite: a.kite, cls: a.cls, trackD: a.trackD };
+    });
+    let rebased = 0;
+    for (let i = 0; i < 300; i++) {
+      const dx = Math.cos(0.01 * i);
+      const dy = Math.sin(0.01 * i);
+      const e0 = Int32Array.from(view.e0);
+      view.nudge(0.03, dx, dy);
+      if (view.e0.some((v, k) => v !== e0[k])) rebased++;
+      // T ← g ∘ T ∘ E: what was under w is now under E⁻¹(w), E⁻¹ sending 0 to r (dx, dy).
+      const r = Math.tanh(0.015);
+      mobiusTranslate(E, r * dx, r * dy);
+      for (const p of pts) {
+        mobiusApply(E, p[0], p[1], wq);
+        p[0] = wq[0];
+        p[1] = wq[1];
+      }
+    }
+    expect(rebased).toBeGreaterThan(3);
+    pts.forEach(([x, y], i) => {
+      if (Math.hypot(x, y) > 0.97) return; // carried off the face
+      mobiusApply(view.m, x, y, z);
+      tiler.tileAt(z[0], z[1], null, b, view.e0, view.tracked);
+      expect(b.kite).toBe(before[i].kite);
+      expect(b.cls).toBe(before[i].cls);
+      expect(b.trackD).toBeCloseTo(before[i].trackD, 5);
+    });
+    tiler.tileAt(view.trackedPrev[0], view.trackedPrev[1], null, b, view.e0);
+    expect(b.kite).toBe(prev.kite);
+    expect(b.u).toBeCloseTo(prev.u, 4);
   });
 });

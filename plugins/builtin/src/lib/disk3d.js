@@ -271,15 +271,16 @@ export const RIPPLE_REACH = 1.1;
 /**
  * The ripple's lift (0–1) of a tile at hyperbolic distance d from the impact, `age` s after the
  * beat (disk3d.frag rippleLift): the beat envelope's shape (an 80 ms smoothstep rise, gone by 0.9
- * beat), arriving d / RIPPLE_SPEED later, fading with distance.
- * @param {number} age @param {number} d @param {number} period beat length (s)
+ * beat), arriving d / RIPPLE_SPEED later, fading with distance (over `reach`; the carved kites'
+ * reach further, lib/disk-relief.js KITE_REACH).
+ * @param {number} age @param {number} d @param {number} period beat length (s) @param {number} [reach]
  */
-export function rippleLift(age, d, period) {
+export function rippleLift(age, d, period, reach = RIPPLE_REACH) {
   const a = age - d / RIPPLE_SPEED;
   if (a <= 0) return 0;
   const fall = Math.max(0.05, FALL * period - RISE);
   const env = a < RISE ? smooth(a / RISE) : 1 - smooth((a - RISE) / fall);
-  return env * Math.exp(-d / RIPPLE_REACH);
+  return env * Math.exp(-d / reach);
 }
 
 /**

@@ -1098,8 +1098,15 @@ def test_poincare_disk_manifest():
         "morph",
         "ink",
         "hatching",
+        "relief",
+        "light",
         "quality",
     ]
+    # Relief and Light as Metamorphosis's (the kites carved like a woodblock; 0 is the print as it
+    # was before relief, byte for byte).
+    (meta,) = [m for m in _manifest("builtin")["visualizers"] if m["id"] == "metamorphosis"]
+    for pid in RELIEF_PARAMS:
+        assert params[pid] == {p["id"]: p for p in meta["params"]}[pid], pid
     # Option order is lib/tess-disk.js TILINGS, lib/tess.js PALETTES, tess-music QUALITIES.
     assert params["tiling"]["options"] == ["{7,3}", "{5,4}", "{4,5}", "{6,4}"]
     assert params["tiling"]["default"] == "{7,3}"

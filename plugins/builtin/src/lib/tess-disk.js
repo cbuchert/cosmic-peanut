@@ -28,6 +28,7 @@ import {
   mobiusTranslate,
   tiling,
 } from "./hyperbolic.js";
+import { LIGHT_DEFAULT, RELIEF_DEFAULT } from "./tess-music.js";
 import { PALETTES, WARP_LIMIT } from "./tess.js";
 
 export const TILINGS = ["{7,3}", "{5,4}", "{4,5}", "{6,4}"];
@@ -220,6 +221,75 @@ export function diskGroup(name) {
   return (GROUPS[key] ??= buildGroup(key));
 }
 
+/** The four kites round an edge midpoint, as the quadrants see them: f, fρ⁻¹, fτ, f·ac. @param {DiskGroup} g */
+const quadElements = (g) => [
+  new Int32Array([1, 0, 0, 1]),
+  matMul(g.r, g.A, g.B, new Int32Array(4)),
+  matMul(g.r, g.C, g.B, new Int32Array(4)),
+  matMul(g.r, g.A, g.C, new Int32Array(4)),
+];
+
+/** @type {Record<string, Uint16Array>} */
+const IDS = {};
+
+/**
+ * Per matrix the fold can end on (unnormalized, as the shader has it), per quadrant: the id of
+ * that kite in the quotient (matIndex of its normalized matrix; the tiler's `kite`). Laid out as
+ * the colour table (r² × r² texels, RGBA16UI), for the relief: kites that share an edge differ, so
+ * a hash of the id varies each kite's lift and picks the kites an onset pops, and like the
+ * colours it stays put through the view's rebases. Cached. @param {unknown} name
+ */
+export function kiteIds(name) {
+  const key = TILINGS.includes(String(name)) ? String(name) : TILINGS[0];
+  if (IDS[key]) return IDS[key];
+  const g = diskGroup(key);
+  const { r } = g;
+  const quads = quadElements(g);
+  const ids = new Uint16Array(r ** 4 * 4);
+  const E = new Int32Array(4);
+  const K = new Int32Array(4);
+  for (let i = 0; i < r ** 4; i++) {
+    E[0] = Math.floor(i / r ** 3);
+    E[1] = Math.floor(i / r ** 2) % r;
+    E[2] = Math.floor(i / r) % r;
+    E[3] = i % r;
+    if ((((E[0] * E[3] - E[1] * E[2]) % r) + r) % r === 0) continue; // not in the group
+    for (let q = 0; q < 4; q++) ids[i * 4 + q] = matIndex(r, normalize(r, matMul(r, E, quads[q], K)));
+  }
+  return (IDS[key] = ids);
+}
+
+/**
+ * A point of the frame back on the face (disk.glsl diskKite, the turning cards' axes): Φ, the
+ * face → frame isometry, is z ↦ (u w + o) / (1 + ō u w) with o = Φ(0), and u follows from Φ′(w)
+ * at the pixel: u = Φ′(w) (1 − |o|²) / (1 − ō z)², z = Φ(w). Then Φ⁻¹(c) = (c − o) / (u (1 − ō c)).
+ * @param {number} zx @param {number} zy Φ(w) @param {number} ox @param {number} oy Φ(0)
+ * @param {number} dx @param {number} dy Φ′(w) @param {number} cx @param {number} cy the frame point
+ * @param {Float64Array | number[]} out
+ */
+export function faceCentre(zx, zy, ox, oy, dx, dy, cx, cy, out) {
+  // 1 − ō z, squared
+  let ar = 1 - (ox * zx + oy * zy);
+  let ai = -(ox * zy - oy * zx);
+  const sr = ar * ar - ai * ai;
+  const si = 2 * ar * ai;
+  const k = 1 - ox * ox - oy * oy;
+  const ss = sr * sr + si * si;
+  const ur = (k * (dx * sr + dy * si)) / ss;
+  const ui = (k * (dy * sr - dx * si)) / ss;
+  // u (1 − ō c)
+  ar = 1 - (ox * cx + oy * cy);
+  ai = -(ox * cy - oy * cx);
+  const qr = ur * ar - ui * ai;
+  const qi = ur * ai + ui * ar;
+  const nr = cx - ox;
+  const ni = cy - oy;
+  const qq = qr * qr + qi * qi;
+  out[0] = (nr * qr + ni * qi) / qq;
+  out[1] = (ni * qr - nr * qi) / qq;
+  return out;
+}
+
 // ---- Geometry: the edge-midpoint chart and the kites' uv ---------------------------------
 //
 // Every point of T lies in the "diamond" round its edge midpoint M: the four triangles T, aT,
@@ -355,7 +425,7 @@ export function diskGeometry(name) {
 }
 
 /** A tile result (createDiskTiler). */
-export const createTile = () => ({ cls: -1, quad: -1, kite: -1, u: 0, v: 0, odd: 0 });
+export const createTile = () => ({ cls: -1, quad: -1, kite: -1, u: 0, v: 0, odd: 0, index: -1, trackD: 1 });
 
 /**
  * The fold into the frame, as disk.frag does it: rotate into the sector, mirror into T, invert
@@ -441,23 +511,22 @@ export function createDiskTiler(name) {
   const { r } = g;
   const E = new Int32Array(4);
   const K = new Int32Array(4);
-  const quadEl = [
-    new Int32Array([1, 0, 0, 1]),
-    matMul(r, g.A, g.B, new Int32Array(4)),
-    matMul(r, g.C, g.B, new Int32Array(4)),
-    matMul(r, g.A, g.C, new Int32Array(4)),
-  ];
+  const quadEl = quadElements(g);
   const w = [0, 0];
   const pt = [0, 0];
+  const iso = createIsometry();
+  const tp = new Float64Array(2);
   return {
     /**
      * @param {number} x0 @param {number} y0 disk point
      * @param {Float32Array | null} amps the warp (createDiskWarp().amps), or null for the bare kites
      * @param {ReturnType<typeof createTile>} out
      * @param {ArrayLike<number>} [e0] the view's quotient record (createDiskView().e0)
+     * @param {ArrayLike<number> | null} [track] a tiling point folded alongside (the beat's
+     *   impact, disk.glsl iz): `trackD` is then its pseudo-distance from the kite's centre
      */
-    tileAt(x0, y0, amps, out, e0 = IDENTITY) {
-      const odd = folder.fold(x0, y0, e0, E, pt);
+    tileAt(x0, y0, amps, out, e0 = IDENTITY, track = null) {
+      const odd = folder.fold(x0, y0, e0, E, pt, track ? iso : null);
       const x = pt[0];
       const y = pt[1];
       // Chart: ζ = (z − m) / (1 − m z), then Klein, then the square.
@@ -487,9 +556,19 @@ export function createDiskTiler(name) {
       out.v = (h[3] * s + h[4] * t + h[5]) / hw;
       out.quad = quad;
       out.odd = odd;
-      out.cls = g.table[matIndex(r, E) * 4 + quad];
+      out.index = matIndex(r, E);
+      out.cls = g.table[out.index * 4 + quad];
       matMul(r, E, quadEl[quad], K);
       out.kite = matIndex(r, normalize(r, K));
+      if (track) {
+        mobiusApply(iso, track[0], track[1], tp);
+        const cx = geo.centres[2 * quad];
+        const cy = geo.centres[2 * quad + 1];
+        // |a − b| / |1 − ā b| (disk.glsl pdist)
+        const er = 1 - (tp[0] * cx + tp[1] * cy);
+        const ei = -(tp[0] * cy - tp[1] * cx);
+        out.trackD = Math.hypot(tp[0] - cx, tp[1] - cy) / Math.hypot(er, ei);
+      }
       return out;
     },
   };
@@ -665,6 +744,7 @@ export function createDiskView(name) {
     v.e0.set(E);
     mobiusCompose(m, g, m);
     mobiusApply(g, v.tracked[0], v.tracked[1], v.tracked);
+    mobiusApply(g, v.trackedPrev[0], v.trackedPrev[1], v.trackedPrev);
     // Re-project onto translate(T(0)) ∘ rotate(arg T′(0)).
     mobiusApply(m, 0, 0, c);
     const k = Math.hypot(c[0], c[1]);
@@ -691,6 +771,8 @@ export function createDiskView(name) {
     centre: new Float64Array(2),
     /** A tiling point carried through the rebases (the beat's impact), so it stays on its tile. */
     tracked: new Float64Array(2),
+    /** The previous beat's impact, carried the same way (its ripple runs out after the next beat). */
+    trackedPrev: new Float64Array(2),
     /** Direction the picture flows on screen (rad, y up). */
     flow: 0,
     /** @param {unknown} n Tiling option */
@@ -760,7 +842,7 @@ export function createDiskView(name) {
 // ---- Params ------------------------------------------------------------------------------
 
 /** Defaults of the number params (the manifest's). */
-const DEFAULTS = { reactivity: 1, speed: 1, morph: 0.7, ink: 1, hatching: 0.6 };
+const DEFAULTS = { reactivity: 1, speed: 1, morph: 0.7, ink: 1, hatching: 0.6, relief: RELIEF_DEFAULT, light: LIGHT_DEFAULT };
 const num = (/** @type {unknown} */ v, /** @type {number} */ d) => (Number.isFinite(Number(v)) && v !== undefined && v !== null && v !== "" ? Number(v) : d);
 
 /** The tess state's options plus the Tiling, filled in place by readDiskParams. */
@@ -782,6 +864,10 @@ export const createDiskOptions = () => ({
   height: 1,
   reduceMotion: false,
   reduceFlashing: false,
+  /** The carved kites 0–1 (lib/disk-relief.js): 0 is the print as it was before relief. */
+  relief: RELIEF_DEFAULT,
+  /** The key light's direction (degrees round the view or the scene's up axis). */
+  light: LIGHT_DEFAULT,
 });
 
 /**
@@ -807,5 +893,7 @@ export function readDiskParams(params, ctx, out) {
   out.height = ctx.size.height;
   out.reduceMotion = ctx.reduceMotion;
   out.reduceFlashing = ctx.reduceFlashing;
+  out.relief = Math.max(0, Math.min(1, num(params.relief, DEFAULTS.relief)));
+  out.light = num(params.light, DEFAULTS.light);
   return out;
 }
