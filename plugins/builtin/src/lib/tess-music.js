@@ -662,6 +662,8 @@ const toLinear = (c) => Math.pow(c, 2.2);
  * @property {number} height canvas height (px), for print weights
  * @property {boolean} reduceMotion @property {boolean} reduceFlashing
  * @property {number} [relief] 0–1, surfaces that carve the block (tess.glsl TESS_RELIEF); 0 = flat
+ * @property {number} [reliefBlock] the block's tallest top in RELIEF_BLOCKs, for the height bound
+ *   (default 1; with the bestiary's carved animals lib/atlas.js atlasBlockMax of the species shown)
  */
 
 /**
@@ -868,7 +870,7 @@ export function createTessState() {
       s.relief = reliefParam(o.relief ?? 0);
       s.flipHop = flipHop(o.reduceFlashing);
       s.flipping = inversion.active;
-      s.reliefMax = s.relief > 0 ? reliefBound(s.relief, top * (1 + LIFT_VARY), pop, s.flipping, s.flipHop) : 0;
+      s.reliefMax = s.relief > 0 ? reliefBound(s.relief, top * (1 + LIFT_VARY), pop, s.flipping, s.flipHop, o.reliefBlock ?? 1) : 0;
       return s;
     },
   };

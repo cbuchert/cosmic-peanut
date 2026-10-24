@@ -107,3 +107,146 @@ vec4 tessAtlasShade(vec2 p, mat2 S) {
   o.rgb = mix(o.rgb, u_tAvg, u_aDip);
   return o;
 }
+
+#ifdef TESS_ATLAS_RELIEF
+// ---- Relief: the animals carved (tess.glsl tessPlate / tessShadeRelief call these) ----------
+
+// The animal tile at plane point p (footprint S = dp/dpixel), its outline distance and inward
+// normal, and the bake's relief hint there with its gradient dh/dp (central differences a texel,
+// or a pixel when that is wider, apart; the hint is continuous, ~0 at every outline).
+Tile tessAtlasPlateTile(vec2 p, mat2 S, out float hint, out vec2 hintGrad) {
+  vec2 q = p * u_aInv;                     // tile frame
+  vec2 c = u_aLinv * q;                    // lattice
+  vec2 cell = floor(c);
+  vec2 f = c - cell;
+  mat2 G = u_aLinv * (S * u_aInv);         // d(lattice) / d(target px)
+  vec4 fld = textureGrad(u_aField, f, G[0], G[1]);
+  Tile t = tessAtlasTile(tessAtlasId(c), cell, q);
+  t.dist = fld.x;
+  t.n = length(fld.yz) > 1e-6 ? normalize(fld.yz) : vec2(0.0, 1.0);
+  hint = fld.w;
+  float e = max(length(u_aL[0]) / u_aRes.x, max(length(S[0]), length(S[1])) * u_aInv); // tile frame
+  vec2 ex = u_aLinv[0] * e;                // lattice step for +e along the tile frame's x…
+  vec2 ey = u_aLinv[1] * e;                // …and y
+  float hx = textureGrad(u_aField, f + ex, G[0], G[1]).w - textureGrad(u_aField, f - ex, G[0], G[1]).w;
+  float hy = textureGrad(u_aField, f + ey, G[0], G[1]).w - textureGrad(u_aField, f - ey, G[0], G[1]).w;
+  hintGrad = vec2(hx, hy) * (u_aInv / (2.0 * e));
+  return t;
+}
+
+void tessAtlasArtAt(vec2 p, mat2 S);
+#define ATLAS_HINT 0.5   // block per unit of relief hint on an animal's top (lib/atlas.js)
+
+// tess.glsl tessPlate for the animals (u_tMotif 1): the plane is unwarped, each animal lifts,
+// pops and turns over as a whole card (its ring and hash from its own centre and id), its bevel
+// follows its outline, and its top is raised and carved by the bake's relief hint (lib/atlas.js
+// atlasBlock: profile × (1 + ATLAS_HINT · hint), so the groove stays at the floor). Through a
+// change of tile type everything lays down with the print's dip, so the swap of outlines and
+// tile ids never jumps.
+TessPlate tessAtlasPlate(vec2 p, mat2 S, out vec2 at) {
+  TessPlate r;
+  float hint;
+  vec2 hg;
+  r.t = tessAtlasPlateTile(p, S, hint, hg);
+  r.m = 0.0;
+  r.J = mat2(1.0);
+  at = p;
+  float ring = TESS_RING(r.t.centre);
+  float fade = smoothstep(0.0, 1.0, clamp((u_tInvert.x - ring) / u_tInvert.y + 0.5, 0.0, 1.0));
+  float th = 3.14159265 * fade;
+  float sn = sin(th);
+  float cs = cos(th);
+  float lift = u_tRelief.x * (tessLiftAt(ring) * (1.0 - LIFT_VARY + 2.0 * LIFT_VARY * tessHash12(r.t.cell * 0.731 + 3.7)) + tessPopAt(r.t.cell, ring));
+  r.face = cs < 0.0 ? 1.0 : 0.0;
+  r.pit = 0.0;
+  float ac = 1.0;
+  float h = lift;
+  vec2 gq = vec2(0.0);   // dh/dp of the card's tilt
+  mat2 C = mat2(1.0);    // d(card point)/dp
+  if (sn > 1e-3) {
+    vec2 b = TESS_FLIP_DIR(r.t.centre);
+    ac = max(abs(cs), 0.02);
+    float x = dot(p - r.t.centre, b);
+    float xc = x / ac;
+    vec2 pc = p + b * (xc - x);
+    C = mat2(1.0) + outerProduct(b, b) * (1.0 / ac - 1.0);
+    Tile t2 = tessAtlasPlateTile(pc, C * S, hint, hg);
+    if (t2.cell != r.t.cell) {
+      r.pit = 1.0;
+      r.h = 0.0;
+      r.grad = vec2(0.0);
+      r.prof = 0.0;
+      return r;
+    }
+    r.t = t2;
+    at = pc;
+    float sg = cs >= 0.0 ? 1.0 : -1.0;
+    h += CARD_RISE * (sn * (CARD_HALF + u_tRelief.w) + clamp(xc, -CARD_HALF, CARD_HALF) * sn * sg);
+    gq = abs(xc) < CARD_HALF ? (CARD_RISE * sn * sg / ac) * b : vec2(0.0);
+    r.J = C;
+  }
+  float slope;
+  r.prof = tessProfile(r.t.dist, slope);
+  float blk = u_tRelief.x * RELIEF_BLOCK * ac;
+  float k = 1.0 + ATLAS_HINT * hint;
+  h += blk * r.prof * k;
+  r.grad = gq + blk * (C * ((slope * k) * r.t.n + (r.prof * ATLAS_HINT) * hg));
+  float lay = 1.0 - u_aDip;
+  h *= lay;
+  r.grad *= lay;
+  if (h <= 0.0) r.grad = vec2(0.0);
+  r.h = clamp(h, 0.0, u_tRelief.z);
+  return r;
+}
+
+// tess.glsl tessRelief for the animals: height and dh/dp.
+vec3 tessAtlasRelief(vec2 p, mat2 S) {
+  vec2 at;
+  TessPlate r = tessAtlasPlate(p, S, at);
+  float k = tessReliefFade(r.J, S);
+  return vec3(r.h * k, r.grad * k);
+}
+
+// tess.glsl tessShadeRelief for the animals: the print on the carved block at p, its plate, and
+// the fine carving (gouges cut) for the surface's normals.
+vec4 tessAtlasShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail) {
+  vec2 at;
+  r = tessAtlasPlate(p, S, at);
+  detail = 0.0;
+  mat2 M = r.J * S;
+  float pxq = sqrt(abs(determinant(M)));
+  float k = tessReliefFade(r.J, S);
+  r.h *= k;
+  r.grad *= k;
+  if (r.pit > 0.5) return vec4(mix(u_tInk, u_tPaper, 0.22), 1.0);
+  Tile t = r.t;
+  float dpx = t.dist / max(length(transpose(M) * t.n), 1e-9);
+  // No registration offset or cross-fade on the block: the card's face picks the colour.
+  int fc = TESS_CLASS(t.cls, t.centre);
+  vec3 fill = r.face > 0.5 ? u_tClsNext[fc] : u_tCls[fc];
+  tessAtlasArtAt(at, M);                 // the animal's art, at the card's point
+  vec2 marks;
+  vec4 col = tessPrintFill(t, fill, r.face > 0.5 ? 1.0 : 0.0, pxq, 0.5 / pxq, dpx, 0.0, p, marks);
+  col.rgb = mix(col.rgb, u_tAvg, u_aDip);
+  detail = -GOUGE_DEPTH * marks.x * u_tRelief.x * k;
+  return col;
+}
+
+// What tessPrint's art hook reads, for the animal's point p (plane) with footprint S: as
+// tessAtlasShade does for the flat print.
+void tessAtlasArtAt(vec2 p, mat2 S) {
+  vec2 q = p * u_aInv;
+  vec2 c = u_aLinv * q;
+  vec2 cell = floor(c);
+  mat2 G = u_aLinv * (S * u_aInv);
+  vec4 art = textureGrad(u_aArt, c - cell, G[0], G[1]);
+  ivec4 id = tessAtlasId(c);
+  vec2 an = length(art.yz) > 1e-6 ? normalize(art.yz) : vec2(0.0, 1.0);
+  float apx = art.x / max(length(transpose(S) * an), 1e-9);
+  vec2 across = q - an * (art.x * u_aInv + 1.5 * length(u_aL[0]) / u_aRes.x);
+  ivec4 id2 = tessAtlasId(u_aLinv * across);
+  g_aRole = id.w;
+  g_aRole2 = id2.xyz == id.xyz ? id2.w : id.w;
+  g_aCov = clamp(0.5 + apx, 0.0, 1.0);
+}
+#endif

@@ -327,3 +327,98 @@ export function createCreatures() {
 
   return c;
 }
+
+// ---- Relief: the bake's height channel and the carved animal (mirrors atlas-bake.frag and
+// tess.glsl's atlas relief; tested in atlas.test.js) ----
+
+/** How far (tile-frame units) the body's dome rises in from the outline (atlas-bake.frag). */
+export const DOME_REACH = 0.35;
+/** A part's height eases in over this much (tile frame) inside its edge (atlas-bake.frag ART_RAMP),
+ * so the height has no step there and a part eroding away sinks rather than vanishing. */
+export const ART_RAMP = 0.02;
+/** Block height per unit of relief hint on a tile's top (tess.glsl ATLAS_HINT). */
+export const ATLAS_HINT = 0.5;
+
+/**
+ * Signed distance (tile frame, negative inside) from (x, y) to one packed art primitive, as
+ * atlas-bake.frag primDist. @param {Float32Array} data @param {number} hdr header texel
+ * @param {number} x @param {number} y
+ */
+function primSd(data, hdr, x, y) {
+  const kind = Math.round(data[hdr * 4]);
+  const start = Math.round(data[hdr * 4 + 2]);
+  const n = Math.round(data[hdr * 4 + 3]);
+  const b = (hdr + 2) * 4;
+  if (kind === 2) {
+    const cx = 0.5 * (data[b] + data[b + 2]);
+    const cy = 0.5 * (data[b + 1] + data[b + 3]);
+    return Math.hypot(x - cx, y - cy) - 0.5 * (data[b + 2] - data[b]);
+  }
+  const segs = kind === 0 ? n : n - 1;
+  let bx = data[(kind === 0 ? start + n - 1 : start) * 4];
+  let by = data[(kind === 0 ? start + n - 1 : start) * 4 + 1];
+  let best = Infinity;
+  let bt = 0;
+  let inside = false;
+  for (let i = 0; i < segs; i++) {
+    const t = (start + (kind === 0 ? i : i + 1)) * 4;
+    const ax = data[t];
+    const ay = data[t + 1];
+    const abx = ax - bx;
+    const aby = ay - by;
+    const h = Math.min(1, Math.max(0, ((x - bx) * abx + (y - by) * aby) / Math.max(abx * abx + aby * aby, 1e-12)));
+    const vx = x - bx - abx * h;
+    const vy = y - by - aby * h;
+    const d = vx * vx + vy * vy;
+    if (d < best) {
+      best = d;
+      bt = (i + h) / Math.max(1, segs);
+    }
+    if (kind === 0 && ay > y !== by > y && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) inside = !inside;
+    bx = ax;
+    by = ay;
+  }
+  const d = Math.sqrt(best);
+  if (kind === 0) return inside ? -d : d;
+  const w0 = data[(hdr + 1) * 4];
+  const w1 = data[(hdr + 1) * 4 + 1];
+  return d - 0.5 * (w0 + (w1 - w0) * bt);
+}
+
+/**
+ * The bake's relief hint at base-frame point (x, y), `d` (tile frame) inside the outline: the
+ * body's dome plus the art's raised (+) or carved (−) parts in painter's order, set A eroded by
+ * erodeA under set B eroded by erodeB (atlas-bake.frag). @param {Float32Array} data packLibrary's
+ * @param {ArtSet} setA @param {ArtSet} setB @param {number} erodeA @param {number} erodeB
+ * @param {number} dome @param {number} d @param {number} x @param {number} y
+ */
+export function hintAt(data, setA, setB, erodeA, erodeB, dome, d, x, y) {
+  let art = 0;
+  for (let s = 0; s < 2; s++) {
+    const set = s === 0 ? setA : setB;
+    const erode = s === 0 ? erodeA : erodeB;
+    for (let i = 0; i < set.count; i++) {
+      const hdr = set.start + i * 3;
+      const sd = primSd(data, hdr, x, y) + erode;
+      if (sd < 0) art += (data[(hdr + 1) * 4 + 2] - art) * smooth(-sd / ART_RAMP);
+    }
+  }
+  const u = 1 - Math.min(d / DOME_REACH, 1);
+  return dome * (1 - u * u) + art;
+}
+
+/** The largest relief hint a species' bake can hold. @param {Species} sp */
+export function hintMax(sp) {
+  let top = 0;
+  for (const p of sp.art.prims) top = Math.max(top, p.height);
+  return sp.dome + top;
+}
+
+/**
+ * A carved animal's block height (× RELIEF_BLOCK × Relief) from its profile and relief hint
+ * (tess.glsl's atlas relief). @param {number} prof @param {number} hint @param {number} dip
+ */
+export const atlasBlock = (prof, hint, dip) => (1 - dip) * prof * (1 + ATLAS_HINT * hint);
+
+/** The block's bound for a hint bound (createTessState's `reliefBlock`). @param {number} hint */
+export const atlasBlockMax = (hint) => 1 + ATLAS_HINT * Math.max(0, hint);

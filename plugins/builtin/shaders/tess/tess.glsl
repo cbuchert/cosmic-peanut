@@ -12,7 +12,9 @@
 // centre c from u_tRing.xy over u_tRing.z. Optional hook: define TESS_CLASS(cls, c) to recolour a
 // tile from its regular class and centre (0–2, an index into u_tCls; e.g. a surface whose charts
 // meet with a turn that swaps the classes); the default keeps cls. Optional: define TESS_ATLAS to
-// get the bestiary's animal tiles as a second motif (shaders/tess/atlas.glsl, u_tMotif).
+// get the bestiary's animal tiles as a second motif (shaders/tess/atlas.glsl, u_tMotif); with
+// TESS_RELIEF too, lib/tess-gl.js renders motif 1 with programs that also define TESS_ATLAS_RELIEF,
+// in which tessRelief / tessShadeRelief carve the animals.
 //
 // Mirrors src/lib/tess.js (tested there): the symmetric displacement field (tessField ↔
 // fieldAt), the regular tile test (tessTile ↔ tileAt). Plane units: the lattice (p4: unit
@@ -444,13 +446,28 @@ float tessReliefFade(mat2 J, mat2 S) {
   return smoothstep(3.0, 10.0, 0.5 / max(pxq, 1e-9) * u_tPxScale);
 }
 
+#ifdef TESS_ATLAS_RELIEF
+// The bestiary's animals carved (atlas.glsl): a program compiled with TESS_ATLAS_RELIEF (lib/tess-gl.js
+// does it for a TESS_ATLAS surface while the atlas motif shows) carves them instead of the warp's
+// tiles, so the warp's programs stay exactly as they were.
+vec3 tessAtlasRelief(vec2 p, mat2 S);
+vec4 tessAtlasShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail);
+#endif
+
 vec3 tessRelief(vec2 p, mat2 S) {
+#ifdef TESS_ATLAS_RELIEF
+  return tessAtlasRelief(p, S);
+#else
   TessPlate r = tessPlate(p);
   float k = tessReliefFade(r.J, S);
   return vec3(r.h * k, r.grad * k);
+#endif
 }
 
 vec4 tessShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail) {
+#ifdef TESS_ATLAS_RELIEF
+  return tessAtlasShadeRelief(p, S, r, detail);
+#endif
   r = tessPlate(p);
   detail = 0.0;
   mat2 M = r.J * S;

@@ -553,6 +553,8 @@ export function reliefHeight(relief, t) {
  * Upper bound of reliefHeight over the plane: where a relief march starts.
  * @param {number} relief @param {number} liftMax largest lift now @param {number} popMax
  * @param {boolean} flipping a card is turning @param {number} hop
+ * @param {number} [block] the block's tallest top in RELIEF_BLOCKs (1; carved animals stand
+ *   taller where their relief hint raises them: lib/atlas.js atlasBlockMax)
  */
-export const reliefBound = (relief, liftMax, popMax, flipping, hop) =>
-  relief * (RELIEF_BLOCK + Math.max(0, liftMax) + Math.max(0, popMax)) + (flipping ? CARD_RISE * (2 * CARD_HALF + hop) : 0);
+export const reliefBound = (relief, liftMax, popMax, flipping, hop, block = 1) =>
+  relief * (RELIEF_BLOCK * block + Math.max(0, liftMax) + Math.max(0, popMax)) + (flipping ? CARD_RISE * (2 * CARD_HALF + hop) : 0);

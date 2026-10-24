@@ -2,7 +2,8 @@
 // The atlas bake: one period cell of a bestiary tiling (lib/bestiary.js), rendered into two
 // RGBA16F textures that the print pass samples (shaders/tess/atlas.glsl). Each texel is a point
 // f of the cell in lattice coordinates [0, 1)²; it finds the tile copy holding it, then writes
-//   o0: distance to the tile's outline (plane units), its unit gradient (inward), height
+//   o0: distance to the tile's outline (plane units), its unit gradient (inward), relief hint
+//       (the body's dome plus the art's raised or carved parts; lib/atlas.js hintAt mirrors it)
 //   o1: distance to the nearest visible edge of the interior art (plane units), its unit
 //       gradient (away from the edge), and the packed id: (copy·25 + (di+2)·5 + (dj+2))·8 + role
 // Runs only when the tile changes (lib/atlas-gl.js). Data layout: lib/atlas.js.
@@ -18,6 +19,8 @@ layout(location = 1) out vec4 o1;
 #define MAX_PRIMS 96
 #define MAX_PTS 256
 #define DATA_W 512
+#define DOME_REACH 0.35  // the dome tops out this far in from the outline (tile frame)
+#define ART_RAMP 0.02    // a part's height eases in over this much inside its edge (lib/atlas.js)
 
 uniform sampler2D u_bData;  // RGBA32F, NEAREST
 uniform int u_bN;           // outline points (data row 0)
@@ -174,7 +177,9 @@ void main() {
         dTop = -sd;
         gTop = -g;
         dAbove = 1e9;
-        hArt = h;
+        // Painter's order, eased in from the part's edge: no step for a march or its normals,
+        // and a part eroding away in a morph sinks instead of vanishing.
+        hArt = mix(hArt, h, smoothstep(0.0, ART_RAMP, -sd));
       } else if (sd < dAbove) {
         dAbove = sd;
         gAbove = g;
@@ -185,7 +190,7 @@ void main() {
   vec2 gArt = normalize(fwd * (dTop < dAbove ? gTop : gAbove));
 
   // Relief hint: a dome over the body, plus the art's raised or carved parts.
-  float height = u_bDome * (1.0 - pow(1.0 - min(d / 0.35, 1.0), 2.0)) + hArt;
+  float height = u_bDome * (1.0 - pow(1.0 - min(d / DOME_REACH, 1.0), 2.0)) + hArt;
 
   int id = hit * 25 + (hd.x + 2) * 5 + (hd.y + 2);
   o0 = vec4(d * u_bScale, n, height);

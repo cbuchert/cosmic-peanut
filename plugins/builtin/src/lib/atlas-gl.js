@@ -8,7 +8,11 @@
  *   atlas.setLibrary(species);                    // once per load (allocates)
  *   // frame(): only when the tile changes (creatures.changed):
  *   atlas.bake(shape, a, b, erodeA, erodeB, dome, moving);
- *   tess.render(s, (gl, u) => { …; atlas.bind(gl, u, s, dip); });
+ *   tess.render(s, (gl, u) => { …; atlas.bind(gl, u, s, palette, dip); }, 1);
+ *
+ * The render's third argument (motif 1) also carves the animals when the surface has relief
+ * (tess-gl.js compiles the TESS_ATLAS_RELIEF programs); the bake's height channel (field .w) is
+ * their relief hint, the dome plus each art part's level eased in from its edge.
  *
  * The bake is GPU-side and runs only when the tile changes: at ATLAS_MORPH_SIZE² while a morph
  * re-bakes every frame, at ATLAS_SIZE² (mipmapped) once it settles. Nothing is allocated per frame.

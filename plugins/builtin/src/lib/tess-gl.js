@@ -19,6 +19,12 @@
  * height pass into a HEIGHT_SCALE target (the surface writes tessRelief's height / u_tRelief.z to
  * red), then the relief program into the print target with that bound as `u_tHeight` (texel size
  * `u_tHeightTexel`); at relief 0 the plain program runs exactly as without relief.
+ *
+ * Carved animals: a surface that defines TESS_ATLAS passes `render(s, setSurface, 1)` while the
+ * atlas motif shows (its setSurface binds the atlas, lib/atlas-gl.js). With relief on, that frame
+ * runs a second pair of relief programs, compiled (on first use) with `TESS_ATLAS_RELIEF` too, in
+ * which tessRelief / tessShadeRelief carve the bestiary's tiles (shaders/tess/atlas.glsl); the
+ * warp's relief programs never carry that path, so they stay exactly as they were.
  */
 import { createProgram, createTarget } from "./gl.js";
 
@@ -73,25 +79,32 @@ export async function createTessPipeline(ctx, surface, { relief = false } = {}) 
   extra.forEach((n, i) => (files[n] = texts[i]));
   const src = spliceIncludes(surfFs, files);
   const prog = createProgram(gl, vs, src, surface);
-  const rel = relief
-    ? {
-        main: createProgram(gl, vs, withDefines(src, ["TESS_RELIEF"]), `${surface} (relief)`),
-        height: createProgram(gl, vs, withDefines(src, ["TESS_RELIEF", "TESS_HEIGHT_PASS"]), `${surface} (relief height)`),
-        target: createTarget(gl),
-      }
-    : null;
-  const paper = createProgram(gl, vs, paperFs, DIR + "paper.frag");
-  const u = prog.u;
-  if (atlas) {
-    // The atlas samplers live on units 1 and 2 (lib/atlas-gl.js binds them there); left on
-    // unit 0 they would alias the print target's texture and WebGL refuses the draw. The relief
-    // programs carry them too, and keep the height texture off them (HEIGHT_UNIT).
-    for (const pr of rel ? [prog, rel.main, rel.height] : [prog]) {
+  /** The atlas samplers live on units 1 and 2 (lib/atlas-gl.js binds them there); left on unit 0
+   * they would alias the print target's texture and WebGL refuses the draw. The relief programs
+   * carry them too, and keep the height texture off them (HEIGHT_UNIT). @param {{ program: WebGLProgram, u: Record<string, WebGLUniformLocation | null> }[]} prs */
+  const atlasUnits = (prs) => {
+    if (!atlas) return;
+    for (const pr of prs) {
       gl.useProgram(pr.program);
       gl.uniform1i(pr.u.u_aField, ATLAS_FIELD_UNIT);
       gl.uniform1i(pr.u.u_aArt, ATLAS_ART_UNIT);
     }
-  }
+  };
+  /** The relief pair (print and height pass) for a set of extra defines. @param {string[]} defs @param {string} label */
+  const reliefPair = (defs, label) => {
+    const pair = {
+      main: createProgram(gl, vs, withDefines(src, ["TESS_RELIEF", ...defs]), `${surface} (${label})`),
+      height: createProgram(gl, vs, withDefines(src, ["TESS_RELIEF", ...defs, "TESS_HEIGHT_PASS"]), `${surface} (${label} height)`),
+    };
+    atlasUnits([pair.main, pair.height]);
+    return pair;
+  };
+  const rel = relief ? { ...reliefPair([], "relief"), target: createTarget(gl) } : null;
+  /** The carved animals' relief pair, compiled the first time the atlas motif shows in relief. */
+  let relAtlas = /** @type {ReturnType<typeof reliefPair> | null} */ (null);
+  const paper = createProgram(gl, vs, paperFs, DIR + "paper.frag");
+  const u = prog.u;
+  atlasUnits([prog]);
   const vao = gl.createVertexArray();
   const target = createTarget(gl);
   let scale = 1;
@@ -141,28 +154,34 @@ export async function createTessPipeline(ctx, surface, { relief = false } = {}) 
     u,
     /** (Re)size the print target: render scale × canvas (call on ctx resize too). */
     resize,
-    /** @param {TessState} s @param {SetSurface} setSurface */
-    render(s, setSurface) {
+    /**
+     * @param {TessState} s @param {SetSurface} setSurface
+     * @param {number} [motif] 1 while a TESS_ATLAS surface shows the atlas motif (its animals are
+     *   carved in relief), else 0
+     */
+    render(s, setSurface, motif = 0) {
       const { width: w, height: h } = ctx.size;
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
       gl.bindVertexArray(vao);
 
       if (rel && s.relief > 0) {
-        const hu = rel.height.u;
+        if (atlas && motif === 1 && !relAtlas) relAtlas = reliefPair(["TESS_ATLAS_RELIEF"], "relief, atlas");
+        const pair = atlas && motif === 1 && relAtlas ? relAtlas : rel;
+        const hu = pair.height.u;
         gl.bindFramebuffer(gl.FRAMEBUFFER, rel.target.fbo);
         gl.viewport(0, 0, rel.target.width, rel.target.height);
-        gl.useProgram(rel.height.program);
+        gl.useProgram(pair.height.program);
         gl.uniform2f(hu.u_res, rel.target.width, rel.target.height);
         upload(hu, s, w);
         uploadRelief(hu, s);
         setSurface(gl, hu, rel.target.width, rel.target.height);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-        const ru = rel.main.u;
+        const ru = pair.main.u;
         gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
         gl.viewport(0, 0, target.width, target.height);
-        gl.useProgram(rel.main.program);
+        gl.useProgram(pair.main.program);
         gl.uniform2f(ru.u_res, target.width, target.height);
         upload(ru, s, w);
         uploadRelief(ru, s);
@@ -195,11 +214,12 @@ export async function createTessPipeline(ctx, surface, { relief = false } = {}) 
     },
     dispose() {
       target.dispose();
-      if (rel) {
-        rel.target.dispose();
-        gl.deleteProgram(rel.main.program);
-        gl.deleteProgram(rel.height.program);
+      for (const pair of [rel, relAtlas]) {
+        if (!pair) continue;
+        gl.deleteProgram(pair.main.program);
+        gl.deleteProgram(pair.height.program);
       }
+      rel?.target.dispose();
       gl.deleteVertexArray(vao);
       gl.deleteProgram(prog.program);
       gl.deleteProgram(paper.program);
