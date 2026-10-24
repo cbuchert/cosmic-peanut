@@ -359,7 +359,6 @@ vec2 tessFlipDir(vec2 c) {
 #ifndef TESS_CELL_KEY
 #define TESS_CELL_KEY(cell) (cell)
 #endif
-#endif
 
 float tessRamp(float x, float w, out float slope) {
   float u = clamp(x / w, 0.0, 1.0);
