@@ -14,6 +14,17 @@
 // undisplaced (θ, φ), so they ride the waves (which stay on the geometry: the spin and twist
 // move only the tiles); S and the normal come from the displaced surface
 // (ray differential × analytic gradients of θ and t: no seams at θ = ±π, φ = ±π or the edge).
+//
+// Relief (lib/tess-gl.js compiles this with TESS_RELIEF, and TESS_HEIGHT_PASS for the height
+// pass; src/lib/torus-relief.js mirrors and tests it): the tiles become the engine's carved
+// blocks, riding the waves. The height pass bakes the block's height over the torus's own
+// coordinates (a, b) = (θ/2π + fu, t(φ) + fv), so the relief spins and flows with the tiles while
+// the waves stay on the geometry; every cut side is leaned to a slope the march can bound. The
+// surface then sits at tube distance k + disp + side × rel, the block raised towards the viewer
+// (outward outside, inward inside the tube). Above the relief's shell the march steps by the
+// waves' bound; inside it by the combined one. The block is printed and lit from the engine's
+// own plate (crisp bevels), the leaned cut sides from the map, under the Light param's raking
+// light with a short soft shadow.
 precision highp float;
 
 in vec2 v_uv;
@@ -29,7 +40,51 @@ float torusRing(vec2 c) {
 }
 #define TESS_RING(c) torusRing(c)
 
+uniform float u_twist;  // turns of t per lap round the ring (whole tile periods: closes)
+
+#ifdef TESS_RELIEF
+// Cards turn about an axis across the ring: they squeeze along it, away from the camera's
+// azimuth both ways (the radial default would need a ring origin in the plane).
+vec2 torusFlipDir(vec2 c) {
+  return vec2(fract(c.x / u_lxy.x - u_ringO + 0.5) < 0.5 ? -1.0 : 1.0, 0.0);
+}
+#define TESS_FLIP_DIR(c) torusFlipDir(c)
+// A tile's lift variation and pops hash its cell; across the seams one tile has two cells, so
+// hash its copy in one fundamental domain (torus-relief.js cellKey).
+vec2 torusCellKey(vec2 cell);
+#define TESS_CELL_KEY(cell) torusCellKey(cell)
+#endif
+
 // #include tess
+
+#ifdef TESS_RELIEF
+vec2 torusCellKey(vec2 cell) {
+  if (u_tGroup == 0) {
+    // p4: copies (2 lx, 2 tw ly) and (0, 2 ly) apart
+    float l1x = 2.0 * u_lxy.x;
+    float l1y = floor(2.0 * u_twist * u_lxy.y + 0.5);
+    float l2 = 2.0 * u_lxy.y;
+    float n1 = floor((cell.x + 0.5) / l1x);
+    vec2 k = cell - n1 * vec2(l1x, l1y);
+    k.y -= floor((k.y + 0.5) / l2) * l2;
+    return k;
+  }
+  // p3: cell = 3 (a, b) + (class, 0); T1 = (nu − j, 2j), T2 = (−nv, 2nv) in (a, b), j = tw nv
+  float nu = u_lxy.x;
+  float nv = floor(u_lxy.y / S3 + 0.5);
+  float j = floor(u_twist * nv + 0.5);
+  float la = floor((cell.x + 0.5) / 3.0);
+  float kc = cell.x - 3.0 * la;
+  float lb = floor(cell.y / 3.0 + 0.5);
+  float n1 = floor((2.0 * la + lb + 0.5) / (2.0 * nu));
+  la -= n1 * (nu - j);
+  lb -= n1 * 2.0 * j;
+  float n2 = floor((lb + 0.5) / (2.0 * nv));
+  la += n2 * nv;
+  lb -= n2 * 2.0 * nv;
+  return vec2(3.0 * la + kc, 3.0 * lb);
+}
+#endif
 
 uniform vec2 u_res;     // target size (px)
 uniform vec3 u_cam;     // camera position, heading, up (orthonormal heading/up)
@@ -38,7 +93,6 @@ uniform vec3 u_up;
 uniform float u_tan;    // tan of half the vertical field of view
 uniform float u_k;      // tube radius (ring radius 1)
 uniform vec2 u_flow;    // tile flow along the ring (fu) and spin round the tube (fv), turns
-uniform float u_twist;  // turns of t per lap round the ring (whole tile periods: closes)
 uniform float u_side;   // +1 camera outside the tube, −1 inside
 uniform float u_mix;    // 0 outside look … 1 inside look (shading, fog)
 uniform float u_fade;   // paper dissolve while the camera crosses the wall
@@ -53,6 +107,59 @@ uniform float u_stepK;  // Lipschitz-safe step factor in the displaced shell (to
 // Inside, the fog reaches the paper haze completely at this distance; rays stop there.
 #define FOG_END 2.6
 
+#ifdef TESS_RELIEF
+// Lean every cut side to at most this slope (plane units up per unit across; torus-relief.js
+// SLOPE_CAP): the tile's height is capped at it × the distance to its outline.
+#define RELIEF_SLOPE 2.0
+// Steps a ray may take under the block's local ceiling at the combined (cut-side) factor, the
+// steep, slow part of the march. Inside the tube, where every ray grazes a wall, it then stops
+// short of the surface and is projected onto it. Outside, a ray that used them is skimming the
+// blocks (mostly at the silhouette): it carries on at the waves' factor, so it can pass and be
+// inked as a miss; only there may a step clip a cut side's edge.
+#define RELIEF_STEPS_IN 24
+#define RELIEF_STEPS_OUT 64
+uniform vec4 u_rel;     // world per plane unit on the centre circle (RELIEF_SCALE 2π / lx), cap,
+                        // relief shell (world), step factor inside it (reliefStep)
+uniform vec2 u_relWin;  // ring window of a step (turns, torus-relief.js ringWindow), STEP_REACH
+#ifndef TESS_HEIGHT_PASS
+uniform sampler2D u_tHeight;   // the height pass: block height / u_tRelief.z over (a, b), repeating
+uniform vec2 u_tHeightTexel;   // 1 / its size
+uniform vec3 u_light;          // towards the light, view frame (x right, y up, z towards the camera)
+
+// The map's coordinates: the tiles' own (they flow along the ring and spin round the tube).
+vec2 reliefAB(float theta, float tf) { return vec2(theta / (2.0 * PI) + u_flow.x, tf + u_flow.y); }
+float reliefH(vec2 ab) { return texture(u_tHeight, ab).r * u_tRelief.z; }
+// Plane height → world (torus-relief.js reliefWorld): the local plane scale, capped.
+float reliefW(float H, float cphi) { return min(u_rel.y, u_rel.x * (1.0 + u_k * cphi) * H); }
+// The tallest the block can be (plane units) on any tile a STEP_REACH step from a point at
+// a = θ/2π + fu can touch, from the music alone (torus-relief.js localCeiling): the rings in
+// the window's lift bins, the pops whose band reaches them, a card if the front turns them.
+float reliefCeiling(float a) {
+  float fo = abs(fract(a - u_ringO + 0.5) - 0.5);
+  float lo = 2.0 * max(0.0, fo - u_relWin.x);
+  float hi = min(1.0, 2.0 * (fo + u_relWin.x));
+  float n = float(TESS_LIFT_BINS - 1);
+  int i1 = int(min(n, ceil(hi * n)));
+  float top = -1e9;
+  for (int i = int(floor(lo * n)); i <= i1; i++) top = max(top, u_tLift[i]);
+  float pop = 0.0;
+  for (int k = 0; k < TESS_POP_SLOTS; k++) {
+    vec4 pp = u_tPop[k];
+    if (pp.x > 0.0 && lo < pp.y + POP_BAND && hi > pp.y - POP_BAND) pop += pp.x;
+  }
+  float lifted = top * (top > 0.0 ? 1.0 + LIFT_VARY : 1.0 - LIFT_VARY);
+  float hw = 0.5 * u_tInvert.y;
+  float card = (lo < u_tInvert.x + hw && hi > u_tInvert.x - hw) ? CARD_RISE * (2.0 * CARD_HALF + u_tRelief.w) : 0.0;
+  return max(0.0, u_tRelief.x * (RELIEF_BLOCK + lifted + pop) + card);
+}
+float relAt(float theta, float phi) {
+  float a = sqrt((1.0 - u_k) / (1.0 + u_k));
+  float tf = atan(a * sin(0.5 * phi), cos(0.5 * phi)) / PI;
+  return reliefW(reliefH(reliefAB(theta, tf)), cos(phi));
+}
+#endif
+#endif
+
 // The waves' displacement, from the map torus-disp.frag bakes each frame (one bilinear tap;
 // u = θ / 2π, v = age: laps round the tube from the hole, both wrapping).
 float disp(float theta, float phi) {
@@ -60,6 +167,22 @@ float disp(float theta, float phi) {
   return u_amp * texture(u_dispMap, uv).r;
 }
 
+#ifdef TESS_HEIGHT_PASS
+// The block's height over (a, b): texel centres (i + ½) / size, the plane point
+// (lx a, ly (b + tw a)), so the map repeats in both and closes like the tiling. Each tile is
+// capped at RELIEF_SLOPE × its distance to its outline (over the warp's largest stretch ‖J‖, a
+// lower bound of the plane distance): its cut sides lean, it meets the groove floor at its
+// outline, and a card's bed is the floor (torus-relief.js bakeHeight).
+void main() {
+  vec2 ab = gl_FragCoord.xy / u_res;
+  TessPlate r = tessPlate(vec2(u_lxy.x * ab.x, u_lxy.y * (ab.y + u_twist * ab.x)));
+  float tt = dot(r.J[0], r.J[0]) + dot(r.J[1], r.J[1]);
+  float dt = determinant(r.J);
+  float jn = sqrt(0.5 * (tt + sqrt(max(0.0, tt * tt - 4.0 * dt * dt))));
+  float h = r.pit > 0.5 ? 0.0 : min(r.h, RELIEF_SLOPE * r.t.dist / max(jn, 1e-6));
+  o = vec4(h / max(u_tRelief.z, 1e-6), 0.0, 0.0, 1.0);
+}
+#else
 void main() {
   float hs = 0.5 * u_res.y;
   vec2 s = (gl_FragCoord.xy - 0.5 * u_res) / hs;
@@ -96,10 +219,19 @@ void main() {
     // safe sphere and the last one don't overlap, the step may have jumped the surface, so go
     // back inside the last safe sphere and continue unrelaxed.
     float omega = 1.5;
+#ifdef TESS_RELIEF
+    int near = 0;                                       // steps taken under the block's ceiling
+#endif
     float prevR = 0.0;
     float stepLen = 0.0;
+    int steps = u_steps;
+#ifdef TESS_RELIEF
+    // Outside, rays skimming the blocks along the silhouette and the hole's rim need more steps
+    // (the march is cheap there: most of the view is paper or a short trace).
+    if (u_side > 0.0) steps = 2 * u_steps;
+#endif
     for (int i = 0; i < 320; i++) {
-      if (i >= u_steps) break;
+      if (i >= steps) break;
       vec3 X = u_cam + rd * t;
       float rho = length(X.xz);
       float w = rho - 1.0;
@@ -115,10 +247,39 @@ void main() {
         r = d0 - u_dmax;
         est = d0;
       } else {
+#ifdef TESS_RELIEF
+        float th = atan(X.z, X.x);
+        float ph = atan(X.y, w);
+        f = u_side * (q - u_k - disp(th, ph));
+        if (f > u_rel.z + eps) {
+          r = (f - u_rel.z) * u_stepK;                  // above the relief: the waves' bound
+          est = f - relAt(th, ph);                      // the silhouette ink's miss distance
+        } else {
+          // Above the block's local ceiling the waves' bound still holds, for a short step.
+          float relUp = reliefW(min(reliefCeiling(th / (2.0 * PI) + u_flow.x), u_tRelief.z), 1.0);
+          if (f > relUp + eps) {
+            r = min(u_relWin.y, (f - relUp) * u_stepK);
+            est = f - relAt(th, ph);
+          } else {
+            f -= relAt(th, ph);                         // the block, raised towards the camera
+            r = f * (near < RELIEF_STEPS_OUT ? u_rel.w : u_stepK);
+            if (omega > 1.0) omega = 1.8;               // its bound is loose: relax harder (a
+                                                        // failed step still backs into the last sphere)
+            est = f;
+            near++;
+          }
+        }
+#else
         f = u_side * (q - u_k - disp(atan(X.z, X.x), atan(X.y, w)));
         r = f * u_stepK;
         est = f;
+#endif
       }
+#ifdef TESS_RELIEF
+      // every sample is a point of the ray: the closest miss counts failed relaxed steps too
+      // (under the block they fail often, and those are the grazing samples)
+      minPx = min(minPx, est / max(t * pxAng, 1e-6));
+#endif
       bool fail = omega > 1.0 && r + prevR < stepLen;
       if (fail) {
         stepLen -= omega * stepLen;
@@ -131,21 +292,35 @@ void main() {
       prevR = r;
       t += stepLen;
       if (t > tEnd) break;
+#ifdef TESS_RELIEF
+      // A ray creeping along the block (grazing a cut side or a groove) stops after its budget,
+      // short of the surface but never past it, and is projected onto it below like a ray that
+      // ran out of steps.
+      if (u_side < 0.0 && near >= RELIEF_STEPS_IN) break;
+#endif
     }
   }
   // A ray that grazes the surface can run out of steps in the shell, just short of it: put its
   // end on the displaced surface (radially in the tube's cross-section) and shade that point, so
   // the fallback is still a point of the surface (inside, every ray ends on the wall).
   vec3 X = u_cam + rd * t;
+  bool spent = false;                                   // ran out of steps in the shell
   if (!hit && (u_side < 0.0 || (shell && t < tEnd))) {
     hit = true;
+    spent = true;
     if (shell) {
       float rho = length(X.xz);
       vec3 c = vec3(X.x / rho, 0.0, X.z / rho);
       vec3 rad = X - c;
       float q = length(rad);
       if (q > 1e-4) {
+#ifdef TESS_RELIEF
+        float th = atan(X.z, X.x);
+        float ph = atan(X.y, rho - 1.0);
+        X = c + rad / q * (u_k + disp(th, ph) + u_side * relAt(th, ph));
+#else
         X = c + rad / q * (u_k + disp(atan(X.z, X.x), atan(X.y, rho - 1.0)));
+#endif
         t = length(X - u_cam);
       }
     }
@@ -187,6 +362,63 @@ void main() {
             + (u_lxy.y * u_twist / (2.0 * PI)) * gTheta;
     mat2 S = mat2(dot(gx, dXx), dot(gy, dXx), dot(gx, dXy), dot(gy, dXy));
 
+#ifdef TESS_RELIEF
+    // The block: printed from the engine's plate at p (S from the waves' tangent plane), its
+    // slope from the plate where the map follows it, from the map on the cut sides the height
+    // pass leaned (there the map is lower than the plate).
+    TessPlate pl;
+    float detail;
+    col = tessShadeRelief(p, S, pl, detail).rgb;
+    vec2 ab = reliefAB(theta, tf);
+    float Hm = reliefH(ab);
+    float cphi = w / q;
+    float sc = u_rel.x * (1.0 + u_k * cphi);              // world per plane unit here
+    float dtf = sqrt(1.0 - u_k * u_k) / (2.0 * PI * (1.0 + u_k * cphi)); // dt/dφ
+    vec3 gH = pl.grad.x * gx + pl.grad.y * gy;           // ∇H, world, from the plate
+    float wall = smoothstep(0.002, 0.012, pl.h - Hm);
+    if (wall > 0.0) {
+      vec2 e = u_tHeightTexel;
+      float Ha = (reliefH(ab + vec2(e.x, 0.0)) - reliefH(ab - vec2(e.x, 0.0))) / (2.0 * e.x);
+      float Hb = (reliefH(ab + vec2(0.0, e.y)) - reliefH(ab - vec2(0.0, e.y))) / (2.0 * e.y);
+      gH = mix(gH, Ha * gTheta / (2.0 * PI) + Hb * dtf * gPhi, wall);
+      col *= 1.0 - 0.4 * wall;                           // a cut side, in the shade of its top
+    }
+    bool capped = sc * Hm >= u_rel.y;
+    vec3 gRel = capped ? vec3(0.0) : sc * gH - (u_rel.x * u_k * X.y / q * Hm) * gPhi;
+    vec3 nR = normalize(n0 - gDisp - u_side * gRel);     // the block on the waves
+    float relH = reliefW(Hm, cphi);
+
+    // The Light param's raking light (view frame → world), for the waves' and the block's tilt,
+    // a short soft shadow cast by the lifted blocks, and darker grooves.
+    vec3 L = normalize(u_light.x * right + u_light.y * u_up - u_light.z * u_fwd);
+    float outLit = (0.64 + 0.42 * max(dot(nR, L), 0.0)) * (0.86 + 0.14 * (w / q));
+    float inLit = 0.62 + 0.45 * abs(dot(nR, rd));
+    float relief = dot(nR - n0, L) * (u_side > 0.0 ? 1.0 : -1.0);
+    float shadow = 1.0;
+    float facing = dot(L, n0) * u_side;
+    if (u_rel.z > 1e-5 && facing > 0.05) {
+      float reach = max(u_rel.z - relH, 0.0) / max(facing, 0.25);
+      float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+      for (int i = 1; i <= 4; i++) {
+        float st = reach * (float(i) - jit) / 4.0 + 1e-3;
+        vec3 Y = X + L * st;
+        float ry = length(Y.xz);
+        float wy = ry - 1.0;
+        float th = atan(Y.z, Y.x);
+        float ph = atan(Y.y, wy);
+        float clear = u_side * (length(vec2(wy, Y.y)) - u_k - disp(th, ph)) - relAt(th, ph);
+        shadow = min(shadow, clamp(0.5 + 6.0 * clear / st, 0.0, 1.0));
+      }
+      shadow = smoothstep(0.0, 1.0, shadow);
+    }
+    float top = max(u_tRelief.x * RELIEF_BLOCK, 1e-4);
+    float ao = 0.8 + 0.2 * smoothstep(0.0, top, Hm);
+    col *= mix(outLit, inLit, u_mix) * clamp(1.0 + 1.8 * relief, 0.45, 1.5) * (0.5 + 0.5 * shadow) * ao;
+    // Outside, a ray that skims the blocks along the silhouette can run out of steps before it
+    // passes them; it is projected onto the surface like any spent ray, and inked as the
+    // outline it is grazing (the misses beyond ink the other side).
+    if (spent && u_side > 0.0) col = mix(col, u_tInk, 1.0 - u_mix);
+#else
     col = tessShade(p, S).rgb;
 
     // Soft light. Outside: from the upper left of the view, a little darker in the hole.
@@ -198,6 +430,7 @@ void main() {
     vec3 Lr = normalize(u_up * 0.8 - right * 0.6 - u_fwd * 0.15);
     float relief = dot(n - n0, Lr) * (u_side > 0.0 ? 1.0 : -1.0);
     col *= mix(outLit, inLit, u_mix) * clamp(1.0 + 1.8 * relief, 0.45, 1.5);
+#endif
 
     // Woodcut crests: ink contours of the displacement at two heights.
     vec2 dpx = vec2(dot(gDisp, dXx), dot(gDisp, dXy));
@@ -215,3 +448,4 @@ void main() {
   col = mix(col, paper, u_fade);
   o = vec4(col, 1.0);
 }
+#endif

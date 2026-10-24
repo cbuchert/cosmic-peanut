@@ -1025,8 +1025,27 @@ def test_tiled_torus_manifest():
         "morph",
         "ink",
         "hatching",
+        "relief",
+        "light",
         "quality",
     ]
+    # The carved block riding the waves (lib/torus-relief.js; lib/torus.js mapParams): Relief 0 is
+    # the smooth print as before relief, Light the raking light's direction round the view.
+    rel, li = params["relief"], params["light"]
+    assert (rel["type"], rel["label"], rel["min"], rel["max"], rel["default"]) == (
+        "number",
+        "Relief",
+        0,
+        1,
+        0.6,
+    )
+    assert (li["type"], li["label"], li["min"], li["max"], li["default"]) == (
+        "number",
+        "Light",
+        0,
+        360,
+        135,
+    )
     # Option order is lib/torus.js VIEWS, lib/tess-music.js SYMMETRIES, lib/tess.js PALETTES,
     # tess-music QUALITIES; Thickness is lib/torus.js THICKNESS.
     assert params["view"]["options"] == ["auto", "outside", "inside"]

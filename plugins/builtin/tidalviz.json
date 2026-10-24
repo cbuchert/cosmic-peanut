@@ -430,7 +430,7 @@
     {
       "id": "tiled-torus",
       "name": "Tiled Torus",
-      "description": "The interlocking woodcut tiles wrapped seamlessly around a torus, seen tumbling from outside or flown through from inside the tube: the waveform rolls out of the hole across the surface in waves, stamped larger on the beat, while the tiles spin round the tube (Twist streams them in a helix); bass carries them along the ring, phrase changes dive in and out and send a figure/ground inversion round it.",
+      "description": "The interlocking woodcut tiles wrapped seamlessly around a torus as a carved block under a raking light, seen tumbling from outside or flown through from inside the tube: the waveform rolls out of the hole across the surface in waves, stamped larger on the beat, while the tiles spin round the tube (Twist streams them in a helix); every beat sends a wave of lifting tiles round the ring, onsets pop single tiles, bass carries them along the ring, and phrase changes dive in and out and turn the tiles over like cards.",
       "author": "Tidalviz",
       "entry": "src/tiled-torus.js",
       "renderer": "webgl2",
@@ -450,6 +450,8 @@
         { "id": "morph", "type": "number", "label": "Morph", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
         { "id": "ink", "type": "number", "label": "Ink", "min": 0, "max": 2, "step": 0.05, "default": 1 },
         { "id": "hatching", "type": "number", "label": "Hatching", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "relief", "type": "number", "label": "Relief", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "light", "type": "number", "label": "Light", "min": 0, "max": 360, "step": 1, "default": 135 },
         { "id": "quality", "type": "select", "label": "Quality", "options": ["low", "medium", "high"], "default": "high" }
       ]
     },
