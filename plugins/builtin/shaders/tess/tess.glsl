@@ -444,13 +444,28 @@ float tessReliefFade(mat2 J, mat2 S) {
   return smoothstep(3.0, 10.0, 0.5 / max(pxq, 1e-9) * u_tPxScale);
 }
 
+#ifdef TESS_ATLAS_RELIEF
+// The bestiary's animals carved (atlas.glsl): a program compiled with TESS_ATLAS_RELIEF (lib/tess-gl.js
+// does it for a TESS_ATLAS surface while the atlas motif shows) carves them instead of the warp's
+// tiles, so the warp's programs stay exactly as they were.
+vec3 tessAtlasRelief(vec2 p, mat2 S);
+vec4 tessAtlasShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail);
+#endif
+
 vec3 tessRelief(vec2 p, mat2 S) {
+#ifdef TESS_ATLAS_RELIEF
+  return tessAtlasRelief(p, S);
+#else
   TessPlate r = tessPlate(p);
   float k = tessReliefFade(r.J, S);
   return vec3(r.h * k, r.grad * k);
+#endif
 }
 
 vec4 tessShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail) {
+#ifdef TESS_ATLAS_RELIEF
+  return tessAtlasShadeRelief(p, S, r, detail);
+#endif
   r = tessPlate(p);
   detail = 0.0;
   mat2 M = r.J * S;
