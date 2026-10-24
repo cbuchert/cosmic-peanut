@@ -305,7 +305,22 @@ void main() {
         stepLen -= omega * stepLen;
         omega = 1.0;
       } else {
-        if (shell && f < eps) { hit = true; break; }
+        if (shell && f < eps) {
+          hit = true;
+#ifdef TESS_RELIEF
+          // Past its budget an outside ray steps by the waves' bound, which can carry it through
+          // a cut side's edge into the block: bisect back to where it crossed (the edge a full
+          // march stops on) instead of shading the point it landed on.
+          if (near > RELIEF_STEPS_OUT && f < -eps && stepLen > 0.0) {
+            float ta = t - stepLen;
+            for (int j = 0; j < 6; j++) {
+              float tm = 0.5 * (ta + t);
+              if (reliefF(u_cam + rd * tm) < 0.0) t = tm; else ta = tm;
+            }
+          }
+#endif
+          break;
+        }
         stepLen = max(r, 0.5 * eps) * omega;
         minPx = min(minPx, est / max(t * pxAng, 1e-6));
       }

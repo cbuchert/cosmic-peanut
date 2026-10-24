@@ -15,7 +15,12 @@ before/after interleaved in one session (3 rounds, medians), GPU shared with ano
   spent outside ray still more than 1 px clear (its last sample's distance) searches the rest of
   its chord through the bounding sphere in 24 even steps; a crossing (the hole's far wall) is
   bisected and shaded as a hit, none is a miss inked from its closest approach like any other.
-  p50 / p99 16 / 20 → 17 / 20 ms (with the cut-side fix below; 1 ms is the timer's step).
+- **Tiled Torus, budget clipping** (outside, relief): past its 64 steps under the blocks an
+  outside ray steps by the waves' bound, which can carry it through a cut side's edge; it was
+  shaded where it landed, inside the block. A hit after the budget that lands more than eps deep
+  now bisects (6) back to the crossing. Against a reference march with no budget (4000 steps),
+  pixels off by > 24/255 at still=150: 3749 → 1883 (the rest are sub-tile grazing detail at the
+  hole's rim). Cost: only those few pixels.
 
 ## Shader compile check (2026-10-23)
 
