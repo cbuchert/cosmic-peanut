@@ -26,10 +26,12 @@
  * "mammals") or "all" prints the bestiary's animal tiles instead (plugins/builtin/tiles, through
  * the atlas motif: lib/atlas.js, lib/atlas-gl.js), morphing between compatible species on the
  * music's steps; "<group>/<name>" (e.g. p.creatures=fish/koi in the harness) shows one species.
- * Relief carves the abstract creatures only: while the bestiary shows, the print stays flat.
+ * Relief carves the animals too: each is a block bevelled along its outline, domed and with its
+ * fins raised and its scales carved by the species' height hints (the atlas's height channel),
+ * and the beat waves, pops and card turns move each animal as a whole.
  */
 import { createAtlas } from "./lib/atlas-gl.js";
-import { createCreatures, creatureList } from "./lib/atlas.js";
+import { atlasBlockMax, createCreatures, creatureList, hintMax } from "./lib/atlas.js";
 import { blendShapes, createShape, loadBestiary } from "./lib/bestiary.js";
 import { createTessPipeline } from "./lib/tess-gl.js";
 import { BLEND_PERIOD, createTessState, lightDir, reliefParam, renderScale, symmetryName } from "./lib/tess-music.js";
@@ -66,6 +68,7 @@ export default async function create(ctx) {
     reduceMotion: false,
     reduceFlashing: false,
     relief: 0,
+    reliefBlock: 1,
   };
   const light = new Float32Array(3);
   let ox = 0.37;
@@ -91,6 +94,8 @@ export default async function create(ctx) {
   let zoom = ZOOM;
   const basis = new Float64Array(4);
   let tileState = /** @type {ReturnType<typeof createTessState> | null} */ (null);
+  /** The tallest carved animal of the selection, in RELIEF_BLOCKs (the relief march's bound). */
+  let animalBlock = 1;
 
   async function select(/** @type {string} */ value) {
     selected = value;
@@ -109,6 +114,8 @@ export default async function create(ctx) {
     }
     const ids = creatureList(selected, bestiary.map((sp) => sp.id));
     creatures.setSpecies(bestiary.filter((sp) => ids.includes(sp.id)));
+    // Over the whole selection, so it holds through every morph (plain tiles have no hint).
+    animalBlock = atlasBlockMax(Math.max(0, ...bestiary.filter((sp) => ids.includes(sp.id)).map(hintMax)));
   }
   await select(String(ctx.params.creatures ?? "abstract"));
 
@@ -155,7 +162,9 @@ export default async function create(ctx) {
       opts.height = ctx.size.height;
       opts.reduceMotion = ctx.reduceMotion;
       opts.reduceFlashing = ctx.reduceFlashing;
-      opts.relief = atlasOn ? 0 : reliefParam(p.relief); // the atlas has no relief
+      opts.relief = reliefParam(p.relief);
+      // Carved animals stand taller where their hints raise them (the march starts above them).
+      opts.reliefBlock = atlasOn ? animalBlock : 1;
       lightDir(Number(p.light), light);
       const s = state.step(audio, dt, opts);
       tileState = s;
@@ -194,7 +203,7 @@ export default async function create(ctx) {
       cr = Math.cos(turn);
       sr = Math.sin(turn);
 
-      tess.render(s, surface);
+      tess.render(s, surface, atlasOn ? 1 : 0);
     },
 
     resize() {
