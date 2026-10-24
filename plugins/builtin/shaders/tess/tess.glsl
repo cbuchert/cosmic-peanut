@@ -343,6 +343,11 @@ vec2 tessFlipDir(vec2 c) {
 #ifndef TESS_FLIP_DIR
 #define TESS_FLIP_DIR(c) tessFlipDir(c)
 #endif
+// Optional hook: the id a tile's lift variation and pops hash (default its cell). A surface whose
+// charts meet at an edge returns one id for both halves of a tile split by it (Tiled Sphere).
+#ifndef TESS_CELL
+#define TESS_CELL(cell, c) (cell)
+#endif
 
 float tessRamp(float x, float w, out float slope) {
   float u = clamp(x / w, 0.0, 1.0);
@@ -401,7 +406,8 @@ TessPlate tessPlate(vec2 p) {
   float th = 3.14159265 * fade;
   float sn = sin(th);
   float cs = cos(th);
-  float lift = u_tRelief.x * (tessLiftAt(ring) * (1.0 - LIFT_VARY + 2.0 * LIFT_VARY * tessHash12(r.t.cell * 0.731 + 3.7)) + tessPopAt(r.t.cell, ring));
+  vec2 id = TESS_CELL(r.t.cell, r.t.centre);
+  float lift = u_tRelief.x * (tessLiftAt(ring) * (1.0 - LIFT_VARY + 2.0 * LIFT_VARY * tessHash12(id * 0.731 + 3.7)) + tessPopAt(id, ring));
   r.face = cs < 0.0 ? 1.0 : 0.0;
   r.pit = 0.0;
   float ac = 1.0;
