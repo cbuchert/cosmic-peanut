@@ -3,6 +3,50 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Tile Horizon: tiles rise off the floor (relief, 2026-10-23)
+
+Tile Horizon adopts the engine's relief (`{ relief: true }`, Relief and Light params as in
+Metamorphosis; Relief 0 runs the flat program and its `run.py --shots` stills, still=150, black
+and light, are byte-identical to 37ec0e2 by `cmp`). No engine change: the surface displaces the
+floor by `tessRelief` and raymarches it.
+
+- **Height map in the camera's perspective** (the height pass): the screen's columns, and the
+  rows `heightFrame` gives (`lib/tess-floor.js`, tested against plain 3D): from the lowest ground
+  footprint a ray can meet the relief at (a tile lifted in front of the bottom edge stands on
+  ground below the screen) up to the end of the relief straight ahead. A footprint is never further
+  out across than its pixel, so x needs no margin. A top-down map was the alternative; this one
+  puts its texels where the screen's pixels are.
+- **March**: from `marchTop` (the state's `reliefMax` × `reliefScale`, the relief full size down to
+  the default camera height and shrinking with it below, and never above 0.7 of the camera
+  height) down to the ground or the end of the relief, in `marchSteps`: no step longer than 0.08
+  plane units (a sixth of a tile) or 3 map texels, whichever is coarser, ≤ 32 (the defaults never
+  hit the cap over a 1440p view: tested), then 5 bisections.
+- **Exact sides**: the map turns a lifted tile's step into a ramp a texel wide, which at this
+  grazing view showed as a sawtooth along every lifted edge (plain wall colour didn't help: it is
+  the silhouette). Where the map's hit is more than 0.004 off the exact height, the pixel marches
+  the exact `tessRelief` 4 texels either side (6 steps) and bisects (6): the side stands at the
+  outline. The side is bare wood (`u_tAvg`, shaded as Metamorphosis's), facing out across the
+  outline (from the exact gradient), so the front tile's outline doesn't smear up it.
+- **Music**: rings are camera distance (as before), so every beat rolls a wave of tiles lifting
+  out towards the horizon, the spectrum heaves bass near and treble far, onsets pop single tiles,
+  and the figure/ground front tips cards over about axes across the radial from the camera
+  (`TESS_FLIP_DIR`), so they fall away from it. Light: 0–360° round the view, level with its
+  heading (90 from the horizon; default 135, far left), the engine's 32° elevation, shadows towards
+  the camera. Relief fades out over 4–7 camera heights (`reliefFade`), before the default fog's
+  ring 1, so the far floor is the flat block and distant tiles don't alias.
+- **Motion** (`motion_hook.py`, synth music, `reduce=0`; before = 37ec0e2): default loud 0.0252 →
+  0.0416, loud/silence 1.00 → 1.29. With Speed 0 the heading still sways, so music-only motion is
+  loud − silence: 0.00044 → 0.0233 (53×); loud 0.00628 → 0.0319. Beat ratio 1.02 → 0.78 (waves
+  overlap continuously, and motion just before a kick is the previous wave settling).
+- **Cost** (WebKit, 2560×1440, Quality high, `sync=1`, alternating with Metamorphosis on a GPU
+  shared with other agents, load 4–44): one frame per rAF p50 14–19 ms, p99 17–30 ms, 50–58.8 fps;
+  Metamorphosis 7–23 / 9–37 ms, 41.7–58.8 fps in the same runs. Ten per rAF: 11–21 vs 8–20 ms.
+  Roughly 1.0–1.4× Metamorphosis; a clean 60 fps couldn't be confirmed under the load. Flash
+  (10 Hz strobe): 0 /s at 5 %, Reduce flashing on and off (≤ 3 /s at 2 %).
+- **Known**: during a figure/ground front, edge-on cards in the distance read as a band of tall
+  blocks, and their silhouettes near the end of the relief are a little jagged (coarse map and
+  capped steps there). The cut sides show faint vertical striation from the jittered march.
+
 ## Lattice shading: the cinematic look (2026-10-23)
 
 Lattice and Tentacle Lattice gain **Look**: `classic` (the default) or `cinematic`.
@@ -786,6 +830,8 @@ in half-short-side units), so it spirals self-similarly into the centre and zoom
   0 flashes/s at a 5 % threshold, reduceFlashing on and off.
 
 ## Tessellations: Tile Horizon, the floor surface (2026-10-22)
+
+(Relief since 2026-10-23: see "Tile Horizon: tiles rise off the floor" above.)
 
 **Tile Horizon** (`tile-horizon`, webgl2) casts the engine's woodcut tiling onto an endless floor
 seen low in perspective, receding to a horizon that fades into the paper. Same motifs, palettes,
