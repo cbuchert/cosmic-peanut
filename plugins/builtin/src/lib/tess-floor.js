@@ -7,7 +7,7 @@
  * on it. Drag grabs the world (pan and tilt); on release the view eases back along a critically
  * damped spring, which leaves at rest and never overshoots. Pure; `step` allocates nothing.
  */
-import { BLEND_PERIOD } from "./tess-music.js";
+import { BLEND_PERIOD, lightDir, smooth } from "./tess-music.js";
 
 /** Camera height range (plane units; p4 tiles are half a unit) for Height 0–1. */
 export const HEIGHT_MIN = 0.25;
@@ -175,4 +175,81 @@ export function createFloorCamera() {
     },
   };
   return cam;
+}
+
+// ---- Relief: the carved block on the floor (shaders/tess/tile-horizon.frag, TESS_RELIEF) -------
+//
+// The relief is a height field over the ground. Each frame a height pass writes it into a map in
+// the camera's own perspective (a strip of the screen's rows, x as on screen); each pixel then
+// marches its ray down through it from the bound to the ground. These are the bounds the march
+// relies on, mirrored in the shader.
+
+/** The relief is full size from this camera height (Height 0.4) up, and shrinks with the camera below it. */
+export const RELIEF_REF_HEIGHT = cameraHeight(0.4);
+/** Height scale for camera height h, so a lifted tile is never more of the camera's height than at the default. @param {number} h */
+export const reliefScale = (h) => Math.min(1, h / RELIEF_REF_HEIGHT);
+/** The march never starts above this fraction of the camera height (higher tiles are clipped flat). */
+export const TOP_FRAC = 0.7;
+/**
+ * Where the march starts (plane units above the ground): the state's height bound (tess.js
+ * reliefBound, `reliefMax`) at the floor's scale, below the camera.
+ * @param {number} bound @param {number} h camera height
+ */
+export const marchTop = (bound, h) => Math.min(Math.max(0, bound) * reliefScale(h), TOP_FRAC * h);
+/** The relief fades out between these ground distances from the camera, in camera heights. */
+export const FADE_NEAR = 4;
+export const FADE_FAR = 7;
+/** Relief at ground distance r, 1 near … 0 far (smoothstep). @param {number} r @param {number} h */
+export const reliefFade = (r, h) => 1 - smooth((r / h - FADE_NEAR) / (FADE_FAR - FADE_NEAR));
+
+/**
+ * The screen rows the height map covers (half-short-side units, y up): from the lowest ground
+ * footprint a ray can meet the relief at (a tile lifted in front of the screen's bottom edge
+ * stands on ground below it) up to the farthest relief (FADE_FAR straight ahead), at most the
+ * screen's top. Across, the map is the screen's width: a footprint is never further out than its
+ * pixel (the ground under a point is further from the camera along the view).
+ * @param {number} h camera height @param {number} pitch below the horizon (rad) @param {number} focal
+ * @param {number} top marchTop @param {Float64Array} out [lo, hi]
+ */
+export function heightFrame(h, pitch, focal, top, out) {
+  const cp = Math.cos(pitch);
+  const sp = Math.sin(pitch);
+  // The bottom edge's ray at the bound: its footprint slides from the edge towards the nadir.
+  const t = (h - top) / (focal * sp + cp);
+  const lo = Math.min(-1, (focal * (-t - top * cp)) / (t * focal + top * sp));
+  const hi = Math.min(1, focal * Math.tan(pitch - Math.atan(1 / FADE_FAR)));
+  out[0] = lo;
+  out[1] = Math.max(hi, lo + 1e-3);
+  return out;
+}
+
+/** The march's step limits: on the ground (plane units, a tenth of a p4 tile) and in height-map texels. */
+export const STEP_GROUND = 0.05;
+export const STEP_TEXELS = 2;
+/** Most steps a ray takes (then bisection). */
+export const MARCH_MAX = 32;
+/**
+ * Steps for a ray segment `ground` plane units long that leans across `texels` height-map texels:
+ * enough that no step is longer than STEP_GROUND or STEP_TEXELS (whichever is coarser: the map
+ * can't hold finer detail, and a tenth of a tile is finer than any tile's top), 1 … MARCH_MAX.
+ * @param {number} ground @param {number} texels
+ */
+export const marchSteps = (ground, texels) =>
+  clamp(Math.ceil(Math.min(ground / STEP_GROUND, texels / STEP_TEXELS)), 1, MARCH_MAX);
+
+/**
+ * Towards the raking light, world frame: the Light param's angle round the view (0 from the
+ * right, 90 from straight ahead, counter-clockwise) at the engine's elevation, level with the
+ * view's heading (yaw) so the floor in view is always lit the same way.
+ * @param {number} deg @param {number} yaw @param {Float32Array} out length 3
+ */
+export function floorLight(deg, yaw, out) {
+  lightDir(deg, out);
+  const x = out[0];
+  const y = out[1];
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
+  out[0] = x * s + y * c;
+  out[1] = -x * c + y * s;
+  return out;
 }
