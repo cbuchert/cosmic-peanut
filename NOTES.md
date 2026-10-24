@@ -512,7 +512,7 @@ vec4 tessShadeRelief(vec2 p, mat2 S, out TessPlate r, out float detail);
 ```
 
 A surface either **displaces geometry** with `tessRelief(p, S).x` along its normal (floor, torus,
-sphere: raymarch with `u_tRelief.z` as the bound), or **shades it as relief** like Metamorphosis
+sphere: raymarch with `u_tRelief.z` as the bound; Tiled Sphere does, see its section), or **shades it as relief** like Metamorphosis
 (flat, zoom: height pass plus a per-pixel march). The state gains `relief`, `profile`, `lift`
 (32 bins), `pops` (3 × vec4), `flipHop`, `flipping` and `reliefMax`, and takes `relief` (0–1)
 in the options. Everything a flat surface reads is unchanged (tested frame by frame).
@@ -752,6 +752,54 @@ a later one. Surface: `shaders/tess/sphere.frag`; JS: `lib/cube-sphere.js`, `lib
   6 / 10, inside 14 / 25, 58.8 fps for each. Measured while other agents shared the GPU:
   Metamorphosis measured 15 / 20 in the same session (6–8 / 7–11 above), so the inside numbers
   are inflated by about the same factor.
+
+**Relief (2026-10-23).** Tiled Sphere adopts the engine's carved block (Relief 0–1, default 0.6;
+Light 0–360°, default 135°): the tiles lift off the globe along its normal, outward from outside
+and inward towards the camera from inside (the dome breathes round you), cast soft shadows and
+catch a raking light. Relief 0 is the flat program, byte-identical (`run.py --shots`,
+still=150 after the backdrop warm-up page, `cmp`: outside and inside, black and light), and so are
+Metamorphosis (default, relief on) and Poincaré Disk (its wall includes `sphere.glsl`).
+
+- **Height**: the sphere's `TESS_HEIGHT_PASS` writes the six face charts, each ATLAS_MARGIN (0.06
+  plane units) wider than its face, into a 3 × 2 atlas of the height target (2560×1440 high: ~298 ×
+  252 texels a face, ~40 a tile). `heightAt(dir)` picks the face as the colouring does. Heights
+  are plane units; `planeToWorld(N)` = π/2N converts them (a face's axes are linear in angle).
+- **March**: the ray's stretch through the shell (skin … radius 1 ± u_dispK × u_tRelief.z, the
+  tested bound) in ceil(texels crossed / 4) steps (1–12, jittered), then 5 bisections. A ray that
+  reaches the skin ends on solid ground (heights ≥ 0), so it always hits. Misses inside the shell
+  antialias from their least clearance; the paper round the sphere skips the print.
+- **Across the charts**: the height is continuous over cube edges and corners (tested from both
+  charts along all 24 sides, with the warp, a wave part way out, cards turning and pops:
+  `cube-sphere.js tileRelief`, the JS mirror of tessPlate with the sphere's hooks). Two things
+  needed it: a tile split by an edge hashed its cell (lift ± 30 %, pops) in each chart's own
+  coordinates, so its halves stood at different heights; and a card's turning axis must be one
+  direction. `sphCell` keys a tile by its owner's cell (faces 64 apart) and `sphFlipDir` turns
+  cards away from the pole (the fronts' direction, a terminator sweep via `TESS_RING`), taken in
+  the owner's chart and turned back by the crossing's quarter turns.
+- **Engine change (tiny, additive)**: an optional `TESS_CELL(cell, c)` hook in tess.glsl (default
+  `cell`) for the id tessPlate hashes. Every other surface compiles as before.
+- **Clearance**: `reliefScale(dist, reliefMax, N)` keeps the shell CLEARANCE (0.12) from the eye:
+  full at D_OUT and D_IN (even at Relief 1 with loud music), flattening as the push nears the
+  skin and 0 within CLEARANCE of it, so the tiles turn from outward to inward unseen. Tested over
+  a whole push, frame to frame, and at the tallest possible block.
+- **Light**: `viewLight` turns lightDir round the view (so it rakes alike whichever way the camera
+  looks). Shading: a flat top where the light stands ≥ 30° high prints at its colour, darkening
+  towards the terminator; cut sides, grooves (AO), shadows (≤ 8 steps), a faint sheen; the old
+  limb shade on top.
+- **Motion** (`motion_hook.py tiled-sphere --query "reduce=0&p.view=…"`, before → after): outside
+  loud 0.0022 → 0.0091, loud/silence 0.90 → 3.05; inside loud 0.0182 → 0.0235, beat ratio 1.02 →
+  1.31. With the turn stopped (Speed 0), only the music moves it: outside 0.00017 → 0.0085 (50×),
+  inside 0.0014 → 0.0170 (12×). Outside the beat ratio is 1.26 → 0.76: the waves overlap
+  continuously and a front reaches the visible side some way after the onset, as the pole turns
+  with the sphere.
+- **Cost** (WebKit, 2560×1440, Quality high, `sync=1`, interleaved with Metamorphosis on a GPU
+  heavily shared with other agents: Metamorphosis 7–16 / 11–35 ms p50 / p99, against 6–8 in its
+  notes): outside 4–9 / 11–17 ms, 58.8 fps; inside 11–18 / 13–33 ms, mostly 58.8 fps, dips to
+  42–53 fps in the most contended runs (Metamorphosis 55.6–58.8 in the same minutes). Inside is
+  roughly 1.3–1.5× Metamorphosis; not measured unloaded or on the M1 reference machine. Flash
+  check (`--flash`): outside 1 /s at 2 %, 0 at 5 %; inside 2 and 0; Reduce flashing 0–1 and 0.
+- **Known**: the jittered march leaves fine grain on cut sides at grazing angles near the limb;
+  the thumbnail is still the flat print.
 
 ## Tessellations: Endless Zoom (2026-10-22)
 
