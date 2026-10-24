@@ -389,7 +389,7 @@
     {
       "id": "endless-zoom",
       "name": "Endless Zoom",
-      "description": "The woodcut tiling wound into a log-polar spiral that zooms without end into a soft vanishing point: bass and the beat set the pace, the tiles keep changing shape with the music, figure/ground fronts ripple along the spiral, and a drag moves the vanishing point.",
+      "description": "The woodcut tiling, carved like a woodblock under a raking light, wound into a log-polar spiral that zooms without end into a soft vanishing point: bass and the beat set the pace, every beat lifts a wave of tiles that ripples along the spiral, onsets pop single tiles, the tiles keep changing shape with the music and turn over like cards on phrase changes, and a drag moves the vanishing point.",
       "author": "Tidalviz",
       "entry": "src/endless-zoom.js",
       "renderer": "webgl2",
@@ -402,6 +402,8 @@
         { "id": "morph", "type": "number", "label": "Morph", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
         { "id": "ink", "type": "number", "label": "Ink", "min": 0, "max": 2, "step": 0.05, "default": 1 },
         { "id": "hatching", "type": "number", "label": "Hatching", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "relief", "type": "number", "label": "Relief", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "light", "type": "number", "label": "Light", "min": 0, "max": 360, "step": 1, "default": 135 },
         { "id": "spiral", "type": "select", "label": "Spiral", "options": ["none", "gentle", "medium", "strong"], "default": "gentle" },
         { "id": "zoom", "type": "number", "label": "Zoom speed", "min": 0, "max": 2, "step": 0.01, "default": 1 },
         { "id": "direction", "type": "select", "label": "Direction", "options": ["in", "out"], "default": "in" },

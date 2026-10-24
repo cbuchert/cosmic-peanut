@@ -944,9 +944,11 @@ def test_endless_zoom_manifest():
         "thumbs/endless-zoom.jpg",
     )
     params = {p["id"]: p for p in v["params"]}
-    # Metamorphosis's params, plus the surface's own before Quality.
+    # Metamorphosis's params, Relief and Light included (the carved block through the zoom; Relief
+    # 0 is the flat print), plus the surface's own before Quality.
     (m,) = [v for v in _manifest("builtin")["visualizers"] if v["id"] == "metamorphosis"]
-    shared = [p for p in m["params"] if p["id"] not in ("quality", "creatures", *RELIEF_PARAMS)]
+    shared = [p for p in m["params"] if p["id"] not in ("quality", "creatures")]
+    assert [p["id"] for p in shared][-2:] == list(RELIEF_PARAMS)
     assert v["params"][: len(shared)] == shared
     assert list(params)[len(shared) :] == ["spiral", "zoom", "direction", "quality"]
     # Option order is lib/tess-zoom.js SPIRALS and DIRECTIONS (default DEFAULT_SPIRAL).
