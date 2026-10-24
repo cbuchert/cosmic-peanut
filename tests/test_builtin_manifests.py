@@ -824,8 +824,8 @@ def test_tentacle_lattice_manifest():
     assert params["material"]["default"] == "auto"
 
 
-# The relief's params: Metamorphosis's, and the surfaces that have adopted it (Endless Zoom,
-# Tiled Sphere).
+# The relief's params: Metamorphosis's, and the surfaces that have adopted it (Tile Horizon,
+# Endless Zoom, Tiled Sphere).
 RELIEF_PARAMS = ("relief", "light")
 
 
@@ -907,7 +907,8 @@ def test_tile_horizon_manifest():
         "thumbs/tile-horizon.jpg",
     )
     params = {p["id"]: p for p in v["params"]}
-    # Metamorphosis's params, plus the floor's camera (lib/tess-floor.js maps them, 0-1).
+    # Metamorphosis's params with its Relief and Light (the carved block, raised off the floor),
+    # plus the floor's camera (lib/tess-floor.js maps them, 0-1).
     assert list(params) == [
         "symmetry",
         "palette",
@@ -916,6 +917,8 @@ def test_tile_horizon_manifest():
         "morph",
         "ink",
         "hatching",
+        "relief",
+        "light",
         "height",
         "tilt",
         "fog",
@@ -923,7 +926,7 @@ def test_tile_horizon_manifest():
     ]
     (meta,) = [m for m in _manifest("builtin")["visualizers"] if m["id"] == "metamorphosis"]
     for p in meta["params"]:
-        if p["id"] in RELIEF_PARAMS or p["id"] == "creatures":  # Metamorphosis-only for now
+        if p["id"] == "creatures":  # Metamorphosis-only for now
             continue
         assert params[p["id"]] == p, p["id"]
     for name in ("height", "tilt", "fog"):

@@ -367,7 +367,7 @@
     {
       "id": "tile-horizon",
       "name": "Tile Horizon",
-      "description": "An endless woodcut tiling seen low in perspective: the view glides with the bass and the beat towards a horizon that fades into the paper, and figure/ground fronts sweep outwards across the floor.",
+      "description": "An endless woodcut tiling carved like a woodblock, seen low in perspective under a raking light: the view glides with the bass and the beat towards a horizon that fades into the paper, every beat rolls a wave of tiles lifting off the floor towards the horizon, the spectrum heaves them and phrase changes turn them over like cards.",
       "author": "Tidalviz",
       "entry": "src/tile-horizon.js",
       "renderer": "webgl2",
@@ -380,6 +380,8 @@
         { "id": "morph", "type": "number", "label": "Morph", "min": 0, "max": 1, "step": 0.01, "default": 0.7 },
         { "id": "ink", "type": "number", "label": "Ink", "min": 0, "max": 2, "step": 0.05, "default": 1 },
         { "id": "hatching", "type": "number", "label": "Hatching", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "relief", "type": "number", "label": "Relief", "min": 0, "max": 1, "step": 0.01, "default": 0.6 },
+        { "id": "light", "type": "number", "label": "Light", "min": 0, "max": 360, "step": 1, "default": 135 },
         { "id": "height", "type": "number", "label": "Height", "min": 0, "max": 1, "step": 0.01, "default": 0.4 },
         { "id": "tilt", "type": "number", "label": "Tilt", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
         { "id": "fog", "type": "number", "label": "Fog", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },

@@ -9,10 +9,29 @@
  * (lib/tess-floor.js). Drag pans and tilts the view and eases back after release. Rings are by
  * distance from the camera, so figure/ground fronts and the spectrum rings sweep outwards across
  * the floor. frame() allocates nothing.
+ *
+ * Relief (the engine's carved block, TESS_RELIEF, as in Metamorphosis): the floor is the block
+ * and its tiles rise off it, raymarched through a height map in the camera's perspective, with
+ * soft shadows under a low raking light (the Light param, round the view). Every beat rolls a wave
+ * of tiles lifting off the floor out towards the horizon, the spectrum heaves the rings (bass
+ * near, treble far), onsets pop single tiles, and the figure/ground front tips the tiles over
+ * like cards, away from the camera. The relief fades out with distance well before the horizon.
+ * Relief 0 is the flat floor, unchanged.
  */
 import { createTessPipeline } from "./lib/tess-gl.js";
-import { basePitch, cameraHeight, createFloorCamera, fogDistance } from "./lib/tess-floor.js";
-import { createTessState, renderScale, symmetryName } from "./lib/tess-music.js";
+import {
+  basePitch,
+  cameraHeight,
+  createFloorCamera,
+  FADE_FAR,
+  FADE_NEAR,
+  floorLight,
+  fogDistance,
+  heightFrame,
+  marchTop,
+  reliefScale,
+} from "./lib/tess-floor.js";
+import { createTessState, reliefParam, renderScale, symmetryName } from "./lib/tess-music.js";
 
 /** Focal length in half-short-side units (~32° half the short side's field of view). */
 const FOCAL = 1.6;
@@ -21,7 +40,7 @@ const RING_SPAN = 0.6;
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
-  const tess = await createTessPipeline(ctx, "shaders/tess/tile-horizon.frag");
+  const tess = await createTessPipeline(ctx, "shaders/tess/tile-horizon.frag", { relief: true });
   const state = createTessState();
   const camera = createFloorCamera();
   const opts = {
@@ -35,9 +54,15 @@ export default async function create(ctx) {
     height: 1,
     reduceMotion: false,
     reduceFlashing: false,
+    relief: 0,
   };
   const camIn = { travel: 0, height: 1, pitch: 0.3, reduceMotion: false, basis: state.group.basis };
   let fog = 1;
+  const light = new Float32Array(3);
+  const frame = new Float64Array(2);
+  let scale = 1;
+  let top = 0;
+  let hsPrint = 1;
 
   tess.resize(renderScale(ctx.params.quality));
 
@@ -50,6 +75,12 @@ export default async function create(ctx) {
     gl.uniform3fv(u.u_up, camera.up);
     gl.uniform1f(u.u_focal, FOCAL);
     gl.uniform1f(u.u_fog, fog);
+    // Relief programs only (null on the flat one: a no-op).
+    gl.uniform2f(u.u_hFrame, frame[0], frame[1]);
+    gl.uniform2f(u.u_rel, scale, top);
+    gl.uniform2f(u.u_fadeR, FADE_NEAR * camera.h, FADE_FAR * camera.h);
+    gl.uniform1f(u.u_hsPrint, hsPrint);
+    gl.uniform3fv(u.u_light, light);
   };
 
   return {
@@ -65,6 +96,7 @@ export default async function create(ctx) {
       opts.height = ctx.size.height;
       opts.reduceMotion = ctx.reduceMotion;
       opts.reduceFlashing = ctx.reduceFlashing;
+      opts.relief = reliefParam(p.relief);
       const s = state.step(audio, time.dt, opts);
 
       camIn.travel = s.travel;
@@ -74,6 +106,11 @@ export default async function create(ctx) {
       camIn.basis = s.group.basis;
       camera.step(time.dt, camIn);
       fog = fogDistance(p.fog, camIn.height);
+      scale = reliefScale(camera.h);
+      top = marchTop(s.reliefMax, camera.h);
+      heightFrame(camera.h, camera.pitch, FOCAL, top, frame);
+      floorLight(Number(p.light), camera.yaw, light);
+      hsPrint = 0.5 * Math.min(ctx.size.width, ctx.size.height) * renderScale(p.quality);
 
       tess.render(s, surface);
     },
