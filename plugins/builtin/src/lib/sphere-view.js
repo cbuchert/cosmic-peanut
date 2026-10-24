@@ -4,7 +4,7 @@
  * phrase changes), drag to orbit or look around with an eased return, the sphere's turn, and the
  * param mapping onto the shared tess state. Everything steps in place; nothing allocates per frame.
  */
-import { classColors, smooth } from "./tess-music.js";
+import { classColors, lightDir, reliefParam, smooth } from "./tess-music.js";
 
 /** View param options. */
 export const VIEWS = ["outside", "inside", "auto"];
@@ -268,7 +268,47 @@ export function fillOptions(ctx, o) {
   o.height = ctx.size.height;
   o.reduceMotion = ctx.reduceMotion;
   o.reduceFlashing = ctx.reduceFlashing;
+  o.relief = reliefParam(p.relief);
   return o;
+}
+
+/**
+ * World units per plane unit of the cube-sphere's charts: a face of n cells spans a quarter turn,
+ * linear in angle along its axes, so this is the arc a plane unit covers there (the relief's
+ * heights are plane units). @param {number} n cells per face
+ */
+export const planeToWorld = (n) => Math.PI / (2 * n);
+
+/** The relief never comes nearer the eye than this (world; the sphere's radius is 1). */
+export const CLEARANCE = 0.12;
+
+/**
+ * The relief's world displacement per plane unit of height, for a camera `dist` from the centre:
+ * planeToWorld(n) wherever the shell (radius 1 … 1 + scale × bound outside, 1 − scale × bound … 1
+ * inside) keeps CLEARANCE from the eye, less as the camera nears the skin, 0 within CLEARANCE of
+ * it, so the push-through flattens the tiles while it crosses and they can turn inward unseen.
+ * @param {number} dist @param {number} bound the height bound (plane units; the state's reliefMax)
+ * @param {number} n cells per face
+ */
+export function reliefScale(dist, bound, n) {
+  const full = planeToWorld(n);
+  const room = Math.max(0, Math.abs(dist - 1) - CLEARANCE);
+  return bound * full <= room ? full : room / bound;
+}
+
+/**
+ * Towards the raking light (world, unit): the Light param's `deg` round the view (0 from the right,
+ * counter-clockwise; lib/tess-music.js lightDir), LIGHT_ELEVATION towards the viewer, so it rakes
+ * the same way whichever way the camera looks. @param {number} deg
+ * @param {Float32Array} basis cameraBasis's eye, right, up, forward @param {Float32Array} out length 3
+ */
+export function viewLight(deg, basis, out) {
+  lightDir(deg, out);
+  const x = out[0];
+  const y = out[1];
+  const z = out[2];
+  for (let i = 0; i < 3; i++) out[i] = x * basis[3 + i] + y * basis[6 + i] - z * basis[9 + i];
+  return out;
 }
 
 /**
