@@ -6,14 +6,20 @@ import {
   faceJacobian,
   faceOf,
   FACES,
+  flipDir,
   fromFace,
+  hash12,
+  poleRing,
   sphereTables,
   tileColor,
+  tileKey,
+  tileRelief,
   toFace,
   transitions,
   turn,
 } from "./cube-sphere.js";
-import { BLEND_PERIOD } from "./tess-music.js";
+import { createWarp, fieldAt, groupOf, RELIEF_BLOCK, reliefProfile } from "./tess.js";
+import { BLEND_PERIOD, LIFT_VARY } from "./tess-music.js";
 
 const N = 3;
 
@@ -260,5 +266,173 @@ describe("tile colours across the cube", () => {
       expect(tab.nb[k * 4 + 1]).toBe(T[k].k);
       expect(tab.nbT[k * 2]).toBe(T[k].tx);
     }
+  });
+});
+
+describe("relief across the cube (the tiles lift off the globe with no step at an edge)", () => {
+  const tab = sphereTables(N);
+  const T = transitions(N);
+  const M = 2 * N;
+  const g4 = groupOf("p4");
+  const warp = createWarp(g4);
+  // The sphere's blend runs in time only (u_tBlend.xy = 0), so the field is one mix everywhere.
+  const still = { kx: 0, ky: 0, phase: 0.4 };
+  warp.set([0.5, 0.2, 0.1, 0.2], 0.3, [0.1, 0.6, 0.3, 0], 1.1, still);
+  const fd = [0, 0];
+  /** tess.glsl tessWarp: TESS_STEPS (4) steps of the field, composed. */
+  function warpPoint(/** @type {number} */ x, /** @type {number} */ y, /** @type {number[]} */ out) {
+    out[0] = x;
+    out[1] = y;
+    for (let i = 0; i < 4; i++) {
+      fieldAt(g4, warp.ab, still, out[0], out[1], fd);
+      out[0] += fd[0];
+      out[1] += fd[1];
+    }
+    return out;
+  }
+  const pole = [0.3, -0.5, 0.81];
+  const pl = Math.hypot(...pole);
+  pole.forEach((v, i) => (pole[i] = v / pl));
+  /** The music's state, as a function of the ring: a wave front part way out, a card flip under way. */
+  const music = {
+    relief: 0.8,
+    profile: 0.35,
+    pole,
+    liftAt: (/** @type {number} */ ring) => 0.12 * Math.exp(-(((ring - 0.45) / 0.2) ** 2)) + 0.03 * ring,
+    front: 0.55,
+    width: 0.35,
+    hop: 0.08,
+    pops: [0.05, 0.5, 3.3, 0, 0, 0, 0, 0, 0.04, 0.3, 7.1, 0],
+  };
+  const key = [0, 0, 0];
+  const other = [0, 0, 0];
+  const b = [0, 0];
+  const b2 = [0, 0];
+  const c = [0, 0];
+
+  /** The tile across side s of face f's cell (i, j): neighbour face and its cell there. */
+  function across(/** @type {number} */ f, /** @type {number} */ i, /** @type {number} */ j, /** @type {number} */ s) {
+    const di = [1, -1, 0, 0][s];
+    const dj = [0, 0, 1, -1][s];
+    const t = T[f * 4 + s];
+    turn((i + di + 0.5) / 2, (j + dj + 0.5) / 2, t.k, c);
+    return { g: t.g, k: t.k, i: Math.floor(2 * (c[0] + t.tx)), j: Math.floor(2 * (c[1] + t.ty)) };
+  }
+
+  it("keys each tile by its owner: the same id (and ring) seen from either face", () => {
+    const seen = new Set();
+    for (let f = 0; f < 6; f++) {
+      for (let s = 0; s < 4; s++) {
+        for (let a = 0; a < M; a++) {
+          const [i, j] = [
+            [M, a],
+            [-1, a],
+            [a, M],
+            [a, -1],
+          ][s];
+          const o = across(f, i - [1, -1, 0, 0][s], j - [0, 0, 1, -1][s], s);
+          tileKey(tab, N, f, (i + 0.5) / 2, (j + 0.5) / 2, key);
+          tileKey(tab, N, o.g, (o.i + 0.5) / 2, (o.j + 0.5) / 2, other);
+          expect([key[0], key[1]]).toEqual([other[0], other[1]]);
+          expect(poleRing(tab, N, f, (i + 0.5) / 2, (j + 0.5) / 2, pole)).toBeCloseTo(poleRing(tab, N, o.g, (o.i + 0.5) / 2, (o.j + 0.5) / 2, pole), 12);
+        }
+      }
+      for (let i = 0; i < M; i++) for (let j = 0; j < M; j++) seen.add(tileKey(tab, N, f, (i + 0.5) / 2, (j + 0.5) / 2, key).slice(0, 2).join());
+    }
+    // One id per tile of the sphere: 6 faces × M² tiles, none shared.
+    expect(seen.size).toBe(6 * M * M);
+  });
+
+  it("turns cards across the front's direction, away from the pole, the same tile alike from either face", () => {
+    const d = [0, 0, 0];
+    const J = new Float64Array(6);
+    for (let f = 0; f < 6; f++) {
+      for (let s = 0; s < 4; s++) {
+        for (let a = 0; a < M; a++) {
+          const [i, j] = [
+            [M, a],
+            [-1, a],
+            [a, M],
+            [a, -1],
+          ][s];
+          const o = across(f, i - [1, -1, 0, 0][s], j - [0, 0, 1, -1][s], s);
+          flipDir(tab, N, f, (i + 0.5) / 2, (j + 0.5) / 2, pole, b);
+          flipDir(tab, N, o.g, (o.i + 0.5) / 2, (o.j + 0.5) / 2, pole, b2);
+          expect(Math.hypot(b[0], b[1])).toBeCloseTo(1, 12);
+          // Chart vectors carry across the edge by the crossing's quarter turn.
+          turn(b[0], b[1], o.k, c);
+          expect(c[0]).toBeCloseTo(b2[0], 9);
+          expect(c[1]).toBeCloseTo(b2[1], 9);
+        }
+      }
+      // On a face, a small step along it moves away from the pole.
+      for (let i = 0; i < M; i++) {
+        for (let j = 0; j < M; j++) {
+          const cx = (i + 0.5) / 2;
+          const cy = (j + 0.5) / 2;
+          flipDir(tab, N, f, cx, cy, pole, b);
+          fromFace(f, cx, cy, N, d);
+          faceJacobian(f, d[0], d[1], d[2], N, J);
+          const r0 = poleRing(tab, N, f, cx, cy, pole);
+          const r1 = poleRing(tab, N, f, cx + 1e-4 * b[0], cy + 1e-4 * b[1], pole);
+          if (r0 > 0.02 && r0 < 0.98) expect(r1).toBeGreaterThan(r0);
+        }
+      }
+    }
+  });
+
+  it("displaces continuously across every cube edge and at the corners: either chart gives one height", () => {
+    const r = rng(11);
+    const pf = [0, 0];
+    const pg = [0, 0];
+    const qf = [0, 0];
+    const qg = [0, 0];
+    let lifted = 0;
+    let carded = 0;
+    for (let f = 0; f < 6; f++) {
+      for (let s = 0; s < 4; s++) {
+        const t = T[f * 4 + s];
+        for (let n = 0; n < 160; n++) {
+          // Along the whole edge, its two ends (the cube corners) included.
+          const along = n < 8 ? (n % 2 ? N - 1e-3 * r() : 1e-3 * r()) : r() * N;
+          const e = [
+            [N, along],
+            [0, along],
+            [along, N],
+            [along, 0],
+          ][s];
+          pf[0] = e[0];
+          pf[1] = e[1];
+          turn(pf[0], pf[1], t.k, pg);
+          pg[0] += t.tx;
+          pg[1] += t.ty;
+          warpPoint(pf[0], pf[1], qf);
+          warpPoint(pg[0], pg[1], qg);
+          const hf = tileRelief(tab, N, f, qf[0], qf[1], music);
+          const hg = tileRelief(tab, N, t.g, qg[0], qg[1], music);
+          expect(hf).toBeCloseTo(hg, 9);
+          if (hf > music.relief * 0.08) lifted++;
+          const ring = poleRing(tab, N, f, qf[0], qf[1], pole);
+          if (Math.abs(ring - music.front) < music.width / 2) carded++;
+        }
+      }
+    }
+    // The checks ran over lifted tiles and turning cards, not just the bare groove.
+    expect(lifted).toBeGreaterThan(200);
+    expect(carded).toBeGreaterThan(100);
+  });
+
+  it("is the engine's height on a face (tess.glsl tessPlate): the block, the lift, the card", () => {
+    // A flat music state: no lift, no card, no pop; the block alone, at the tile's centre and outline.
+    const flat = { ...music, liftAt: () => 0, front: -1, pops: [] };
+    const cx = 1.25;
+    const cy = 1.75;
+    expect(tileRelief(tab, N, 4, cx, cy, flat)).toBeCloseTo(flat.relief * RELIEF_BLOCK * reliefProfile(0.25, flat.profile), 12);
+    expect(tileRelief(tab, N, 4, 1.0 + 1e-9, cy, flat)).toBeCloseTo(0, 6);
+    // Lift: a ring's lift × the tile's own 1 ± LIFT_VARY, hashed from its key.
+    const lift = { ...flat, liftAt: () => 0.1 };
+    tileKey(tab, N, 4, cx, cy, key);
+    const vary = 1 - LIFT_VARY + 2 * LIFT_VARY * hash12(key[0] * 0.731 + 3.7, key[1] * 0.731 + 3.7);
+    expect(tileRelief(tab, N, 4, cx, cy, lift) - tileRelief(tab, N, 4, cx, cy, flat)).toBeCloseTo(lift.relief * 0.1 * vary, 12);
   });
 });

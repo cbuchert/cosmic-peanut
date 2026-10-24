@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   cameraAt,
   cameraBasis,
+  CLEARANCE,
   createDrag,
   createPush,
   D_IN,
@@ -13,14 +14,18 @@ import {
   MIN_DWELL,
   PHRASE_STEPS,
   PITCH_LIMIT,
+  planeToWorld,
   REDUCED_TRANSIT,
+  reliefScale,
   sphereFrame,
   threeClassColors,
   TRANSIT,
   VIEWS,
+  viewLight,
   viewName,
 } from "./sphere-view.js";
-import { paletteOf, MAX_TILE_COLORS } from "./tess.js";
+import { CARD_HALF, CARD_RISE, paletteOf, MAX_TILE_COLORS, RELIEF_BLOCK } from "./tess.js";
+import { FLIP_HOP, LIGHT_DEFAULT, LIGHT_ELEVATION, LIFT_GAIN, LIFT_VARY, POP_GAIN, POP_SLOTS } from "./tess-music.js";
 
 const DT = 1 / 60;
 const quiet = (/** @type {string} */ view, stepped = false, reduceMotion = false) => ({ view, stepped, reduceMotion });
@@ -263,11 +268,36 @@ describe("sphere frame", () => {
 
 describe("param mapping", () => {
   it("fills the tess options: always p4 (the cube's quarter turns), numbers from the params", () => {
-    const o = { symmetry: "", palette: "", reactivity: 0, speed: 0, morph: 0, ink: 0, hatching: 0, height: 0, reduceMotion: false, reduceFlashing: false };
-    const ctx = { params: { symmetry: "p3", palette: "dusk", reactivity: "1.5", speed: 0.5, morph: 0.2, ink: 1.2, hatching: 0.4 }, size: { height: 1440 }, reduceMotion: true, reduceFlashing: false };
+    const o = { symmetry: "", palette: "", reactivity: 0, speed: 0, morph: 0, ink: 0, hatching: 0, height: 0, reduceMotion: false, reduceFlashing: false, relief: 0 };
+    const ctx = { params: { symmetry: "p3", palette: "dusk", reactivity: "1.5", speed: 0.5, morph: 0.2, ink: 1.2, hatching: 0.4, relief: "0.6" }, size: { height: 1440 }, reduceMotion: true, reduceFlashing: false };
     fillOptions(ctx, o);
-    expect(o).toEqual({ symmetry: "p4", palette: "dusk", reactivity: 1.5, speed: 0.5, morph: 0.2, ink: 1.2, hatching: 0.4, height: 1440, reduceMotion: true, reduceFlashing: false });
+    expect(o).toEqual({ symmetry: "p4", palette: "dusk", reactivity: 1.5, speed: 0.5, morph: 0.2, ink: 1.2, hatching: 0.4, height: 1440, reduceMotion: true, reduceFlashing: false, relief: 0.6 });
   });
+
+  it("maps Relief onto 0–1 (0 is the flat print, as before relief; junk is 0)", () => {
+    const o = { symmetry: "", palette: "", reactivity: 0, speed: 0, morph: 0, ink: 0, hatching: 0, height: 0, reduceMotion: false, reduceFlashing: false, relief: 0 };
+    const at = (/** @type {unknown} */ relief) => fillOptions({ params: { relief }, size: { height: 720 }, reduceMotion: false, reduceFlashing: false }, o).relief;
+    expect(at(0)).toBe(0);
+    expect(at(1)).toBe(1);
+    expect(at(0.25)).toBe(0.25);
+    expect(at(3)).toBe(1);
+    expect(at(-1)).toBe(0);
+    expect(at("x")).toBe(0);
+    expect(at(undefined)).toBe(0);
+  });
+
+  it("turns Light round the view: a unit vector LIGHT_ELEVATION towards the viewer, upper left by default", () => {
+    const basis = cameraBasis(D_OUT, 0.4, 0.2, 0, 0, new Float32Array(12));
+    const L = viewLight(LIGHT_DEFAULT, basis, new Float32Array(3));
+    const along = (/** @type {number} */ o) => L[0] * basis[o] + L[1] * basis[o + 1] + L[2] * basis[o + 2];
+    expect(Math.hypot(L[0], L[1], L[2])).toBeCloseTo(1, 6);
+    expect(along(3)).toBeLessThan(0); // left
+    expect(along(6)).toBeGreaterThan(0); // up
+    expect(-along(9)).toBeCloseTo(Math.sin(LIGHT_ELEVATION), 6); // towards the viewer
+    const R = viewLight(0, basis, new Float32Array(3));
+    expect(R[0] * basis[3] + R[1] * basis[4] + R[2] * basis[5]).toBeCloseTo(Math.cos(LIGHT_ELEVATION), 6);
+  });
+
 
   it("gives three classes distinct linear colours that move one palette slot per shift", () => {
     const pal = new Float32Array(6 + MAX_TILE_COLORS * 3);
@@ -283,5 +313,57 @@ describe("param mapping", () => {
     const shifted = new Float32Array(9);
     threeClassColors(pal, n, 1, shifted, next);
     for (let i = 0; i < 6; i++) expect(shifted[i]).toBeCloseTo(now[i + 3], 6);
+  });
+});
+
+
+describe("relief clearance (the tiles lift outward outside, inward inside)", () => {
+  const N = 3;
+  const cam = { dist: 0, fov: 0, veil: 0, inside: 0 };
+  // The tallest the block can stand (lib/tess-music.js reliefBound at Relief 1, Reactivity 2, every
+  // pop at once, a card turning): the clearance must hold even then.
+  const most = RELIEF_BLOCK + 2 * LIFT_GAIN * 1.5 * (1 + LIFT_VARY) + 0.14 + POP_SLOTS * POP_GAIN * 2 + CARD_RISE * (2 * CARD_HALF + FLIP_HOP);
+
+  it("converts plane units to world units by the face's angle: N cells span a quarter turn", () => {
+    expect(planeToWorld(N)).toBeCloseTo(Math.PI / 2 / N, 12);
+  });
+
+  it("keeps full relief where the camera sits outside and inside", () => {
+    for (const bound of [0.05, 0.2, 0.4]) {
+      expect(reliefScale(D_OUT, bound, N)).toBeCloseTo(planeToWorld(N), 12);
+      expect(reliefScale(D_IN, bound, N)).toBeCloseTo(planeToWorld(N), 12);
+    }
+    // Loud music at Relief 1 (a bar's beat at the lift cap, heave, a card turning): still full.
+    const loud = RELIEF_BLOCK + LIFT_GAIN * 1.5 * (1 + LIFT_VARY) + 0.07 + CARD_RISE * (2 * CARD_HALF + FLIP_HOP);
+    expect(reliefScale(D_IN, loud, N)).toBeCloseTo(planeToWorld(N), 12);
+    expect(reliefScale(D_OUT, most, N)).toBeCloseTo(planeToWorld(N), 12);
+    // Even the tallest block, inside, stays CLEARANCE from the eye.
+    expect(1 - D_IN - reliefScale(D_IN, most, N) * most).toBeGreaterThanOrEqual(CLEARANCE - 1e-12);
+  });
+
+  it("never brings the relief within CLEARANCE of the eye, all the way through a push", () => {
+    for (const bound of [0, 0.01, 0.1, 0.3, most]) {
+      let last = reliefScale(cameraAt(0, cam).dist, bound, N);
+      for (let i = 0; i <= 2000; i++) {
+        cameraAt(i / 2000, cam);
+        const k = reliefScale(cam.dist, bound, N);
+        expect(k).toBeGreaterThanOrEqual(0);
+        expect(k).toBeLessThanOrEqual(planeToWorld(N) + 1e-12);
+        // The shell spans radius 1 … 1 + k·bound outside, 1 − k·bound … 1 inside.
+        const shell = k * bound;
+        expect(shell).toBeLessThanOrEqual(Math.max(0, Math.abs(cam.dist - 1) - CLEARANCE) + 1e-12);
+        // It flattens and comes back smoothly: no jump from frame to frame of a 6 s push.
+        expect(Math.abs(k * bound - last * bound)).toBeLessThan(0.01);
+        last = k;
+      }
+    }
+  });
+
+  it("is flat as the camera crosses the skin, so turning the tiles inward there shows no jump", () => {
+    for (const bound of [0.1, most]) {
+      expect(reliefScale(1, bound, N)).toBe(0);
+      expect(reliefScale(1 + 0.5 * CLEARANCE, bound, N)).toBe(0);
+      expect(reliefScale(1 - 0.5 * CLEARANCE, bound, N)).toBe(0);
+    }
   });
 });

@@ -18,7 +18,8 @@
  * This module is used at runtime for the shader's tables (sphereTables) and holds the JS mirror
  * of the shader's chart and tile colouring that the tests check.
  */
-import { BLEND_PERIOD } from "./tess-music.js";
+import { BLEND_PERIOD, LIFT_VARY, tileFade } from "./tess-music.js";
+import { cardHeight, createTile, groupOf, RELIEF_BLOCK, reliefProfile, tileAt } from "./tess.js";
 
 const QUARTER = Math.PI / 4;
 
@@ -203,32 +204,45 @@ export function sphereTables(n) {
 }
 
 /**
- * A tile's colour class 0–2 (mirrors sphere.frag sphClass): half-unit cell (i, j) of face f's
- * chart, possibly just beyond the face, with its checkerboard class `cls` in that chart.
- * @param {ReturnType<typeof sphereTables>} tab @param {number} n
- * @param {number} f @param {number} i @param {number} j @param {number} cls
+ * The face that owns the tile centred at (cx, cy) of face f's chart (possibly just beyond the
+ * face): the face whose square holds the centre, the furthest-out side near a corner (mirrors
+ * sphere.glsl sphOwnerK). @param {ReturnType<typeof sphereTables>} tab @param {number} n
+ * @param {number} f @param {number} cx @param {number} cy
+ * @param {number[]} out receives the owner g, the centre in g's chart, and the quarter turns k
+ *   from f's chart to g's (a chart vector v_f carries over as turn(v_f, k))
  */
-export function tileColor(tab, n, f, i, j, cls) {
-  let cx = (i + 0.5) / 2;
-  let cy = (j + 0.5) / 2;
-  // The owner: the face whose square holds the centre (the furthest-out side, near a corner).
+export function ownerOf(tab, n, f, cx, cy, out) {
   let s = -1;
   let e = 0;
   if (cx - n > e) [s, e] = [0, cx - n];
   if (-cx > e) [s, e] = [1, -cx];
   if (cy - n > e) [s, e] = [2, cy - n];
   if (-cy > e) [s, e] = [3, -cy];
-  let g = f;
-  let c = cls;
+  out[0] = f;
+  out[1] = cx;
+  out[2] = cy;
+  out[3] = 0;
   if (s >= 0) {
     const k = f * 4 + s;
     const r = turn(cx, cy, tab.nb[k * 4 + 1], [0, 0]);
-    cx = r[0] + tab.nbT[k * 2];
-    cy = r[1] + tab.nbT[k * 2 + 1];
-    c ^= tab.nb[k * 4 + 1] & 1;
-    g = tab.nb[k * 4];
+    out[0] = tab.nb[k * 4];
+    out[1] = r[0] + tab.nbT[k * 2];
+    out[2] = r[1] + tab.nbT[k * 2 + 1];
+    out[3] = tab.nb[k * 4 + 1];
   }
-  const col = c ^ tab.flip[g];
+  return out;
+}
+
+/**
+ * A tile's colour class 0–2 (mirrors sphere.frag sphClass): half-unit cell (i, j) of face f's
+ * chart, possibly just beyond the face, with its checkerboard class `cls` in that chart.
+ * @param {ReturnType<typeof sphereTables>} tab @param {number} n
+ * @param {number} f @param {number} i @param {number} j @param {number} cls
+ */
+export function tileColor(tab, n, f, i, j, cls) {
+  // The owner: the face whose square holds the centre (the furthest-out side, near a corner).
+  const [g, cx, cy, k] = ownerOf(tab, n, f, (i + 0.5) / 2, (j + 0.5) / 2, [0, 0, 0, 0]);
+  const col = cls ^ (k & 1) ^ tab.flip[g];
   const ci = Math.floor(2 * cx);
   const cj = Math.floor(2 * cy);
   const last = 2 * n - 1;
@@ -239,4 +253,127 @@ export function tileColor(tab, n, f, i, j, cls) {
     if (touches && col === (tab.nb[k * 4 + 3] ? 0 : 1)) return 2;
   }
   return col;
+}
+
+// ---- Relief on the sphere (mirrors sphere.glsl sphCell, sphFlipDir and tess.glsl tessPlate) ----
+
+/** Owner faces are this many cells apart in a tile id (a face has 2N ≤ 64 tiles a side). */
+export const CELL_STRIDE = 64;
+/** tess.glsl tessPopAt: a pop lifts tiles within this ring distance of its ring, this share of them. */
+export const POP_BAND = 0.08;
+export const POP_DENSITY = 0.3;
+
+const fract = (/** @type {number} */ x) => x - Math.floor(x);
+/** tess.glsl tessHash12, in doubles. @param {number} x @param {number} y */
+export function hash12(x, y) {
+  let a = fract(x * 0.1031);
+  let b = fract(y * 0.1031);
+  let c = fract(x * 0.1031);
+  const d = a * (b + 33.33) + b * (c + 33.33) + c * (a + 33.33);
+  a += d;
+  b += d;
+  c += d;
+  return fract((a + b) * c);
+}
+
+/**
+ * The tile's id for its hashes (lift variation, pops), from its owner so a tile split by an edge
+ * hashes alike on both sides (sphere.glsl sphCell, the engine's TESS_CELL hook): the owner's
+ * half-unit cell, faces CELL_STRIDE apart. @param {ReturnType<typeof sphereTables>} tab
+ * @param {number} n @param {number} f @param {number} cx @param {number} cy tile centre in f's chart
+ * @param {number[]} out id x, id y, owner
+ */
+export function tileKey(tab, n, f, cx, cy, out) {
+  const o = ownerOf(tab, n, f, cx, cy, [0, 0, 0, 0]);
+  out[0] = Math.floor(2 * o[1]) + CELL_STRIDE * o[0];
+  out[1] = Math.floor(2 * o[2]);
+  out[2] = o[0];
+  return out;
+}
+
+/**
+ * A tile's ring: its centre's angle from the pole / π (sphere.glsl sphRing), so fronts sweep the
+ * sphere like a terminator. @param {ReturnType<typeof sphereTables>} tab @param {number} n
+ * @param {number} f @param {number} cx @param {number} cy @param {number[]} pole unit, sphere frame
+ */
+export function poleRing(tab, n, f, cx, cy, pole) {
+  const o = ownerOf(tab, n, f, cx, cy, [0, 0, 0, 0]);
+  const d = fromFace(o[0], o[1], o[2], n, [0, 0, 0]);
+  return Math.acos(Math.max(-1, Math.min(1, d[0] * pole[0] + d[1] * pole[1] + d[2] * pole[2]))) / Math.PI;
+}
+
+/**
+ * The direction across a turning card's axis (sphere.glsl sphFlipDir, the engine's TESS_FLIP_DIR
+ * hook): along the sphere away from the pole, the way the front travels, as a unit vector of f's
+ * chart. Taken in the owner's chart and turned back, so both halves of an edge tile turn as one.
+ * @param {ReturnType<typeof sphereTables>} tab @param {number} n @param {number} f
+ * @param {number} cx @param {number} cy @param {number[]} pole @param {number[]} out
+ */
+export function flipDir(tab, n, f, cx, cy, pole, out) {
+  const o = ownerOf(tab, n, f, cx, cy, [0, 0, 0, 0]);
+  const d = fromFace(o[0], o[1], o[2], n, [0, 0, 0]);
+  const dp = d[0] * pole[0] + d[1] * pole[1] + d[2] * pole[2];
+  const J = faceJacobian(o[0], d[0], d[1], d[2], n, [0, 0, 0, 0, 0, 0]);
+  let bx = 0;
+  let by = 0;
+  for (let i = 0; i < 3; i++) {
+    const a = d[i] * dp - pole[i];
+    bx += J[i] * a;
+    by += J[3 + i] * a;
+  }
+  const l = Math.hypot(bx, by);
+  if (l < 1e-6) [bx, by] = [1, 0];
+  else [bx, by] = [bx / l, by / l];
+  return turn(bx, by, -o[3], out);
+}
+
+const P4 = groupOf("p4");
+
+/**
+ * @typedef {object} SphereMusic the relief's state (lib/tess-music.js createTessState's fields)
+ * @property {number} relief @property {number} profile @property {number[]} pole
+ * @property {(ring: number) => number} liftAt lift per ring (u_tLift, interpolated)
+ * @property {number} front @property {number} width the figure/ground front (u_tInvert)
+ * @property {number} hop the card's hop @property {ArrayLike<number>} pops u_tPop, 4 per slot
+ */
+
+/**
+ * Height of the carved block (plane units) at warped point (qx, qy) of face f's chart: tess.glsl
+ * tessPlate with the sphere's hooks. The test of record for the displacement's continuity across
+ * the cube's edges. Allocates; tests only. @param {ReturnType<typeof sphereTables>} tab
+ * @param {number} n @param {number} f @param {number} qx @param {number} qy @param {SphereMusic} m
+ */
+export function tileRelief(tab, n, f, qx, qy, m) {
+  const t = tileAt(P4, qx, qy, createTile());
+  const i = Math.floor(2 * qx);
+  const j = Math.floor(2 * qy);
+  const cx = (i + 0.5) / 2;
+  const cy = (j + 0.5) / 2;
+  const ring = poleRing(tab, n, f, cx, cy, m.pole);
+  const theta = Math.PI * tileFade(m.front, m.width, ring);
+  const sn = Math.sin(theta);
+  const cs = Math.cos(theta);
+  // Hashed by the owner's key, not this chart's cell: a tile split by an edge lifts as one.
+  const id = tileKey(tab, n, f, cx, cy, [0, 0, 0]);
+  let pop = 0;
+  for (let k = 0; k + 3 < m.pops.length; k += 4) {
+    if (m.pops[k] > 0 && Math.abs(ring - m.pops[k + 1]) < POP_BAND && hash12(id[0] * 1.7 + m.pops[k + 2], id[1] * 1.7 + m.pops[k + 2]) < POP_DENSITY) pop += m.pops[k];
+  }
+  const vary = 1 - LIFT_VARY + 2 * LIFT_VARY * hash12(id[0] * 0.731 + 3.7, id[1] * 0.731 + 3.7);
+  let h = m.relief * (m.liftAt(ring) * vary + pop);
+  let ac = 1;
+  let dist = t.dist;
+  if (sn > 1e-3) {
+    const b = flipDir(tab, n, f, cx, cy, m.pole, [0, 0]);
+    ac = Math.max(Math.abs(cs), 0.02);
+    const x = (qx - cx) * b[0] + (qy - cy) * b[1];
+    const xc = x / ac;
+    const x2 = qx + b[0] * (xc - x);
+    const y2 = qy + b[1] * (xc - x);
+    if (Math.floor(2 * x2) !== i || Math.floor(2 * y2) !== j) return 0;
+    dist = tileAt(P4, x2, y2, createTile()).dist;
+    h += cardHeight(xc, theta, m.hop);
+  }
+  h += m.relief * RELIEF_BLOCK * ac * reliefProfile(dist, m.profile);
+  return Math.max(0, h);
 }

@@ -824,7 +824,8 @@ def test_tentacle_lattice_manifest():
     assert params["material"]["default"] == "auto"
 
 
-# Metamorphosis's own params until the other surfaces adopt the relief.
+# The relief's params: Metamorphosis's, and the surfaces that have adopted it (Endless Zoom,
+# Tiled Sphere).
 RELIEF_PARAMS = ("relief", "light")
 
 
@@ -983,8 +984,16 @@ def test_tiled_sphere_manifest():
         "morph",
         "ink",
         "hatching",
+        "relief",
+        "light",
         "quality",
     ]
+    # The carved block lifting off the globe: Metamorphosis's Relief (0 is the flat print, as
+    # before relief) and Light, the same definitions.
+    (meta,) = [m for m in _manifest("builtin")["visualizers"] if m["id"] == "metamorphosis"]
+    for p in meta["params"]:
+        if p["id"] in RELIEF_PARAMS:
+            assert params[p["id"]] == p, p["id"]
     # Option order is lib/sphere-view.js VIEWS, lib/tess.js PALETTES, tess-music QUALITIES.
     assert params["view"]["options"] == ["outside", "inside", "auto"]
     assert params["view"]["default"] == "auto"
