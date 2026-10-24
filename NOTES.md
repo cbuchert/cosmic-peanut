@@ -3,6 +3,48 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Endless Zoom in relief (2026-10-23)
+
+Endless Zoom adopts the carved block (Relief 0–1, default 0.6; Light 0–360°, default 135°), shaded
+like Metamorphosis (height pass, per-pixel relief march, soft shadow, cut sides) but through the
+log-polar map.
+
+- **Through the map**: the map is conformal, locally the similarity α / z, so plane-unit heights
+  and slopes carry over and only turn by arg(α / z) into the screen frame. View rays lean
+  radially outward by a constant 0.5 per unit of descent (as if seen from above the vanishing
+  point): along log r that is a translation of the plane along α, so parallax scales with the
+  tiles at every radius (self-similar under the zoom) and nothing depends on the angle. The march
+  runs by log-radius offset s (z0 e^s), the height pass is in screen space (× 1.12 margin, read
+  by screen point), S at the hit is the analytic Jacobian (`zoomJ`), and the shadow steps
+  |Z| / |α| screen units per plane unit towards a light fixed to the screen.
+- **Seam closure of the height**: the engine varies each tile's lift (± 30 %) and picks pops by a
+  hash of its integer cell id, which one turn shifts (p4: 2·(6, b); p3: 3·(6, b)) and each wrap
+  of O shifts too, so a lifted tile was cut in two along the seam ray and every tile's variation
+  jumped at a wrap. The surface now hashes a cell key: id + the wraps' accumulated base, reduced
+  modulo one turn (`lib/tess-zoom.js cellKey`/`seamCells`, `createZoom().cellBase`; tested across
+  the seam for both groups and every spiral, and across wraps). **Engine change (tiny, additive):**
+  `tess.glsl` gains the optional hook `TESS_CELL_KEY(cell)` (default the id itself) used by the
+  lift hash and `tessPopAt`; Metamorphosis (relief on), Tile Horizon and Tiled Sphere stills are
+  byte-identical to 37ec0e2.
+- **Ripples**: lifts, heave, pops and card turns run on the existing log-radius `TESS_RING`, so they
+  ripple along the spiral, outward zooming in and inward zooming out. Cards turn radially
+  (`TESS_FLIP_DIR` = α̂, the same round every turn).
+- **Centre**: on top of the engine's fade (3–10 px tiles), relief fades out between 48 and 12
+  full-resolution px of tile (both passes, so march and print agree); the resting-top reference
+  and the groove shading fade with it, so the centre is the flat print.
+- **Relief 0** runs the plain program: `run.py --shots` (still=150, black and light) are
+  byte-identical (`cmp`) to 37ec0e2.
+- **Motion** (`motion_hook.py`, `reduce=0`, before → after): loud 0.0252 → 0.0330, beat ratio
+  1.01 → 1.32, loud/silence 0.93 → 0.98 (the zoom itself moves the view in silence). With Speed
+  0 (only the music moves it): loud 0.00158 → 0.0304 (19×).
+- **Cost** (WebKit harness, 2560×1440, Quality high, `sync=1`, two runs alternating with
+  Metamorphosis on a GPU shared with other agents): p50 8–9 ms, p99 11 ms, 58.8 fps;
+  Metamorphosis 8–10 / 9–13 ms, 58.8 fps. Flash check (10 Hz strobe): 0 /s at 5 % with Reduce
+  flashing on and off (2–3 /s at 2 %). Param flips: no errors.
+- **Known**: a Direction change flips the ring order at once if a lift wave is under way (only the
+  figure/ground front waits), so the lifts jump once on that param change. The cell base grows
+  along α while zooming (about 0.4 ids/s); the hash stays well conditioned for days.
+
 ## Lattice shading: the cinematic look (2026-10-23)
 
 Lattice and Tentacle Lattice gain **Look**: `classic` (the default) or `cinematic`.
