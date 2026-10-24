@@ -517,6 +517,70 @@ sphere: raymarch with `u_tRelief.z` as the bound), or **shades it as relief** li
 (32 bins), `pops` (3 × vec4), `flipHop`, `flipping` and `reliefMax`, and takes `relief` (0–1)
 in the options. Everything a flat surface reads is unchanged (tested frame by frame).
 
+## Poincaré Disk: carved kites, relief on the coin (2026-10-23)
+
+The Poincaré Disk adopts the engine's relief (Relief 0–1, default 0.6; Light). **Relief 0 is
+byte-identical** to the build before (`run.py --shots`, still=150, sphere and flat, black and light,
+`cmp` against stills of 37ec0e2): every new line of shader code is under `#ifdef TESS_RELIEF`, and
+`diskShade` was split into `diskKite` + `tessPrint` (byte-identical too).
+
+- **Carved kites** (`disk.glsl diskRelief`, mirrored by `lib/disk-relief.js kiteHeight`, tested):
+  the engine's `tessProfile` of the kite's own tile distance, with gouges and features from
+  `tessPrintFill`'s marks. Heights are world units = tile units × the kite's size √A (1 − |w|²)
+  (per pixel for the groove, per kite centre for lifts), so kites are carved alike in the hyperbolic
+  plane. Resting tops lie on the face plane, the groove is cut below it (the coin is 0.1 thick), the
+  music lifts whole kites above it. The carving fades out under 3–8 height texels per half kite
+  (`kiteFade`): the rim stays clean. Fine carving is shaded analytically (a V across each gouge
+  line, a bevel on feature edges from finite differences of `tessFeatures`): disk3d.frag shades the
+  face inside branches, where `dFdx` is undefined.
+- **Height map in disk space**: the relief pipeline's height pass (`{ relief: true }`, unchanged
+  engine) renders the face's height over the disk's square [−1, 1]² (camera-independent, stretched
+  over the target), normalized by `u_kH` (lo, span from `kiteBound`). Both scenes march their ray
+  through it (16 steps by lean, 5 bisections, jittered) and print the kite where it lands; soft
+  shadows march towards the light through it.
+- **Cut sides**: in the skim close-up a height texel is ~20 px, and lifted kites' sides showed a
+  sawtooth. Where the map has a step (> 0.006 world per texel) the sphere refines the hit against
+  the exact height (6 steps over ± 2 texels, 3 bisections): clean sides, the extra folds paid only
+  there. The flat scene (~5 px per texel) doesn't need it.
+- **Per-kite identity**: `kiteIds` (RGBA16UI, laid out as the colour table) gives each kite its
+  quotient id (normalized matIndex): one id per kite whichever diamond reaches it, consistent
+  through rebases (e0). It seeds ± LIFT_VARY and which kites a pop picks. Card axes need the
+  kite's centre on the face: Φ (face → frame) is pinned down by Φ(0) = oz and Φ′(w) = D T′(w), so
+  Φ⁻¹(cK) is closed-form (`faceCentre`, tested against random automorphisms).
+- **Music, merged** (sphere): the disk's ripple and heave no longer swell the face; they lift whole
+  kites (`reliefMix`: all kites from Relief 0.25, a blend below, so the slider is continuous to the
+  old swell). Ripple: `KITE_BEAT` 0.5 tile units × Reactivity at the crest, rippleLift's timing
+  (80 ms smoothstep rise, gone by 0.9 beat, 3 hyperbolic units/s) with its own reach 2.2 (the
+  swell's 1.1). **The previous impact is tracked too** (`view.trackedPrev`, rebased with
+  `tracked`; `u_I2` folded alongside): without it a ripple vanished when the next beat moved the
+  impact, which read as a snap. Heave `KITE_HEAVE` 0.16 by ring from the centre. Onset pops: the
+  engine's, × 1.5, on the ring the ripple's front had reached when each started (`createKitePops`).
+  Cards: the figure/ground front turns kites over, squeezed on the face about their axis radial
+  from the centre; the card's point is refolded, a different id there is the bare bed. Lifted
+  tops lighten (×1 + 0.5 lift/0.2). Reduce flashing: kite lifts × 0.4. Kicks unchanged. Flat
+  scene: the engine's waves and pops by ring (hyperbolic from the centre), × Relief.
+- **Lighting**: the coin keeps its light (0.66 + 0.34 N₀·L) times the carving's (0.4 + 0.6 × the
+  facet's light over a flat top's, shadowed), grooves darker (AO by profile), cut sides 0.55;
+  the lacquer (GGX on the carved normal, Fresnel wall reflection, faded on slopes) on top, its
+  highlight dimmed in shadow. Light turns the key light round world up by (Light − 135)°, so the
+  default is exactly the old light. The flat scene is Metamorphosis's block under a raking light
+  (camera 2.2 half-short-sides up).
+- **Motion** (`motion_hook.py`, `reduce=0`, Speed 0, Relief 0 vs 0.6). Whole frame barely moves
+  (the coin is small; the camera and coin motion dominate). Face region of the still camera
+  (0.36–0.64): loud 0.0360 → 0.0412 (+14 %); skim close-up (move forced by a private hook): 0.0501
+  → 0.0595 (+19 %). The kick lurch slides every pixel and dominates; with it switched off
+  (private hook) the music's share (loud − silence) is 0.0160 → 0.0238 (+49 %) on the face and
+  0.0304 → 0.0422 (+39 %) in the skim. Flat, Speed 0: 0.00007 → 0.0024. Beat ratios don't rise:
+  the ripples overlap continuously, as in Metamorphosis.
+- **Cost** (WebKit, 2560×1440, Quality high, `sync=1`, GPU shared): one render per vsync 58.8 fps
+  for relief, Relief 0, flat and Metamorphosis; p50/p99 relief 8–15 / 10–26 ms, Relief 0 13–14 /
+  26–31, Metamorphosis 8–13 / 11–27 in the same runs. Two per vsync: relief ~10.5 ms each, Relief 0
+  ~7.5, flat relief ~7.5 (Metamorphosis 18.5 under contention then). Flash (`--flash`): 0 /s at
+  5 % with Reduce flashing on and off, both scenes (1 /s at 2 % with it on).
+- **Known/open**: smaller fringes remain on far cut sides; the refinement isn't in the flat scene;
+  card turns are untested in stills (a phrase change past still=150); not measured on the M1.
+  Tiled Sphere's `sphere.glsl` is untouched; no engine change.
+
 ## Tessellations: Poincaré Disk, the hyperbolic surface (2026-10-22)
 
 **Poincaré Disk** (`poincare-disk`, webgl2) prints interlocking creatures tiling the hyperbolic
