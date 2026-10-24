@@ -235,18 +235,16 @@ export function dispAt(h, theta, phi, amp) {
   return amp * v;
 }
 
+/** Scratch for the gradient bound's two components (no allocation per frame). */
+const grad = { theta: 0, phi: 0 };
+
 /**
- * The raymarch's step factor 1 / √(1 + G²): the displaced surface is f = sdTorus − disp(θ, φ),
- * and disp's gradient is tangent to the tube, so |∇f| ≤ √(1 + G²) with G a bound on |∇disp|
- * on the displaced shell (tube distance ≥ k − D, axis distance ≥ 1 − k − D, D = liveDisp: the
- * march only uses the factor inside that shell). G comes from the
- * history as it is now: the steepest step between columns (round θ) and between rows (across
- * φ, LAP_ROWS rows per 2π), plus the hand-over just past the hole (the largest difference
- * between a newborn row and the one a lap older that it replaces, over BIRTH of a lap,
- * smoothstep slope 1.5). Run once per frame, O(ROWS + BIRTH × LAP_ROWS × COLS).
- * @param {ReturnType<typeof createWaveHistory>} h @param {number} amp waveAmp @param {number} k tube radius
+ * The bound G on |∇disp| (see stepFactor), as its components round θ and across φ, into `grad`;
+ * false where the surface is flat. `extra` widens the shell by more displacement on top of the
+ * waves' (the relief, lib/torus-relief.js), where the angles' gradients are steeper.
+ * @param {ReturnType<typeof createWaveHistory>} h @param {number} amp @param {number} k @param {number} extra
  */
-export function stepFactor(h, amp, k) {
+function slopeOf(h, amp, k, extra) {
   let sc = 0;
   let sr = 0;
   let peak = 0; // largest hand-over difference
@@ -264,14 +262,38 @@ export function stepFactor(h, amp, k) {
       if (d > peak) peak = d;
     }
   }
-  if (amp <= 0 || (sc === 0 && sr === 0 && peak === 0)) return 1;
-  const D = liveDisp(h, amp);
+  if (amp <= 0 || (sc === 0 && sr === 0 && peak === 0)) return false;
+  const D = liveDisp(h, amp) + extra;
   const q = Math.max(1e-3, k - D);
   const rho = Math.max(1e-3, 1 - k - D);
-  const gTheta = (amp * h.cols * sc) / (2 * Math.PI * rho);
-  const gPhi = (amp * (LAP_ROWS * sr + (1.5 * peak) / BIRTH)) / (2 * Math.PI * q);
-  return 1 / Math.sqrt(1 + gTheta * gTheta + gPhi * gPhi);
+  grad.theta = (amp * h.cols * sc) / (2 * Math.PI * rho);
+  grad.phi = (amp * (LAP_ROWS * sr + (1.5 * peak) / BIRTH)) / (2 * Math.PI * q);
+  return true;
 }
+
+/**
+ * The raymarch's step factor 1 / √(1 + G²): the displaced surface is f = sdTorus − disp(θ, φ),
+ * and disp's gradient is tangent to the tube, so |∇f| ≤ √(1 + G²) with G a bound on |∇disp|
+ * on the displaced shell (tube distance ≥ k − D, axis distance ≥ 1 − k − D, D = liveDisp +
+ * extra: the march only uses the factor inside that shell). G comes from the
+ * history as it is now: the steepest step between columns (round θ) and between rows (across
+ * φ, LAP_ROWS rows per 2π), plus the hand-over just past the hole (the largest difference
+ * between a newborn row and the one a lap older that it replaces, over BIRTH of a lap,
+ * smoothstep slope 1.5). Run once per frame, O(ROWS + BIRTH × LAP_ROWS × COLS).
+ * @param {ReturnType<typeof createWaveHistory>} h @param {number} amp waveAmp @param {number} k tube radius
+ * @param {number} [extra] more displacement on the shell (the relief's), 0 without
+ */
+export function stepFactor(h, amp, k, extra = 0) {
+  if (!slopeOf(h, amp, k, extra)) return 1;
+  return 1 / Math.sqrt(1 + grad.theta * grad.theta + grad.phi * grad.phi);
+}
+
+/**
+ * G itself, the bound on |∇disp| over the shell widened by `extra` (0 where flat): the relief's
+ * march adds the relief's own slope to it (lib/torus-relief.js reliefStep).
+ * @param {ReturnType<typeof createWaveHistory>} h @param {number} amp @param {number} k @param {number} [extra]
+ */
+export const waveSlope = (h, amp, k, extra = 0) => (slopeOf(h, amp, k, extra) ? Math.hypot(grad.theta, grad.phi) : 0);
 
 /**
  * Round a ring in place: two circular [1 2 1] / 4 passes (wrapping round θ, so the seam stays

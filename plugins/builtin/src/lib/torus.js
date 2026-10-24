@@ -11,7 +11,7 @@
  * the outer equator, and the tiling closes because lx and ly are periods of the warped, coloured
  * tiling (and the twist tw shifts t by a whole number of them per lap).
  */
-import { BLEND_PERIOD } from "./tess-music.js";
+import { BLEND_PERIOD, LIGHT_DEFAULT, RELIEF_DEFAULT } from "./tess-music.js";
 
 const S3 = Math.sqrt(3);
 /** Lattice steps around the major circle the counts aim for (p4: twice as many tiles). */
@@ -434,6 +434,9 @@ export function mapParams(p, out) {
   o.detail = num(p.detail, 0, 1, 0.15);
   o.spin = num(p.spin, -2, 2, 1);
   o.twist = num(p.twist, 0, 2, 0);
+  // The carved block (lib/torus-relief.js): Relief 0 is the smooth print, as before relief.
+  o.relief = num(p.relief, 0, 1, RELIEF_DEFAULT);
+  o.light = num(p.light, 0, 360, LIGHT_DEFAULT);
   return out;
 }
 /**

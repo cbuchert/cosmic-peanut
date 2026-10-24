@@ -354,8 +354,9 @@ vec2 tessFlipDir(vec2 c) {
 #define TESS_CELL(cell, c) (cell)
 #endif
 // The id a tile's lift variation and pop choice hash, from its identity above. Optional hook: a
-// surface whose map identifies cells (e.g. one turn of a log-polar map) defines TESS_CELL_KEY(cell)
-// to reduce it.
+// surface whose map identifies cells (e.g. one turn of a log-polar map, Endless Zoom) or whose
+// seams show one tile through two plane copies (Tiled Torus) defines TESS_CELL_KEY(cell) to
+// reduce it.
 #ifndef TESS_CELL_KEY
 #define TESS_CELL_KEY(cell) (cell)
 #endif

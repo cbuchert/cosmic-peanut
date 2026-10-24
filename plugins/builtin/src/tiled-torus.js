@@ -15,12 +15,20 @@
  * figure/ground front travels around the ring from the camera. The waveform deforms the surface
  * (lib/torus-wave.js): each ring born at the hole rolls a full lap round the tube, stamped by the
  * beat it was laid down on. frame() allocates nothing.
+ *
+ * Relief (the engine's carved block, TESS_RELIEF; lib/torus-relief.js): the tiles become raised,
+ * carved blocks riding the waves, spinning and flowing with the tiles while the waves stay on the
+ * geometry. Every beat sends a wave of lifting tiles round the ring from the camera, the
+ * spectrum heaves the rings, onsets pop single tiles and the figure/ground front turns them over
+ * like cards, under the Light param's raking light. Inside the tube the blocks stand in from the
+ * walls. Relief 0 is the smooth print, unchanged.
  */
 import { createProgram } from "./lib/gl.js";
-import { createTessPipeline } from "./lib/tess-gl.js";
-import { createTessState, renderScale } from "./lib/tess-music.js";
+import { createTessPipeline, HEIGHT_UNIT } from "./lib/tess-gl.js";
+import { createTessState, lightDir, renderScale } from "./lib/tess-music.js";
 import { createTorusCamera, insideScale, latticeCounts, mapParams, twistTurns } from "./lib/torus.js";
-import { BIRTH, COLS, createWaveHistory, LAP_ROWS, liveDisp, ROWS, stepFactor, waveAmp } from "./lib/torus-wave.js";
+import { RELIEF_CAP, RELIEF_SCALE, reliefShell, reliefSlope, reliefStep, ringWindow, STEP_REACH } from "./lib/torus-relief.js";
+import { BIRTH, COLS, createWaveHistory, LAP_ROWS, liveDisp, ROWS, stepFactor, waveAmp, waveSlope } from "./lib/torus-wave.js";
 
 /** March steps per Quality (low, medium, high): the displaced shell takes short steps. */
 const STEPS = { low: 96, medium: 128, high: 160 };
@@ -33,7 +41,7 @@ const MAP_H = 256;
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
-  const tess = await createTessPipeline(ctx, "shaders/tess/torus.frag");
+  const tess = await createTessPipeline(ctx, "shaders/tess/torus.frag", { relief: true });
   const state = createTessState();
   const cam = createTorusCamera();
   const counts = { nu: 0, nv: 0, lx: 0, ly: 0 };
@@ -52,6 +60,8 @@ export default async function create(ctx) {
     detail: 0.15,
     spin: 1,
     twist: 0,
+    relief: 0.6,
+    light: 135,
     height: 1,
     reduceMotion: false,
     reduceFlashing: false,
@@ -113,6 +123,11 @@ export default async function create(ctx) {
   let amp = 0;
   let dmax = 0;
   let stepK = 1;
+  let tw = 0;
+  // Relief: its shell (world), the step factor inside it, the light (view frame).
+  let relD = 0;
+  let relK = 1;
+  const light = new Float32Array(3);
   let steps = STEPS.high;
 
   // Inside the tube the print renders at insideScale; the switch happens as the camera crosses
@@ -136,7 +151,7 @@ export default async function create(ctx) {
     gl.uniform1f(u.u_tan, cam.tanHalf);
     gl.uniform1f(u.u_k, p.thickness);
     gl.uniform2f(u.u_flow, cam.fu, cam.fv);
-    gl.uniform1f(u.u_twist, twistTurns(p.twist, counts.nv));
+    gl.uniform1f(u.u_twist, tw);
     gl.uniform1f(u.u_side, cam.side);
     gl.uniform1f(u.u_mix, cam.mix);
     gl.uniform1f(u.u_fade, cam.fade);
@@ -148,6 +163,17 @@ export default async function create(ctx) {
     gl.uniform1f(u.u_amp, amp);
     gl.uniform1f(u.u_dmax, dmax);
     gl.uniform1f(u.u_stepK, stepK);
+    // Relief programs only (null elsewhere: no-ops). The height map repeats over (a, b); the
+    // pipeline has just bound it on HEIGHT_UNIT.
+    gl.uniform4f(u.u_rel, (RELIEF_SCALE * 2 * Math.PI) / counts.lx, RELIEF_CAP * p.thickness, relD, relK);
+    gl.uniform2f(u.u_relWin, ringWindow(p.thickness, dmax, counts.lx), STEP_REACH);
+    gl.uniform3fv(u.u_light, light);
+    if (u.u_tHeight) {
+      gl.activeTexture(gl.TEXTURE0 + HEIGHT_UNIT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+      gl.activeTexture(gl.TEXTURE0);
+    }
   };
 
   return {
@@ -156,8 +182,10 @@ export default async function create(ctx) {
       p.height = ctx.size.height;
       p.reduceMotion = ctx.reduceMotion;
       p.reduceFlashing = ctx.reduceFlashing;
+      lightDir(p.light, light);
       const s = state.step(audio, time.dt, p);
       latticeCounts(p.symmetry, p.thickness, counts);
+      tw = twistTurns(p.twist, counts.nv);
       camIn.view = p.view;
       camIn.thickness = p.thickness;
       camIn.stepped = s.stepped;
@@ -178,8 +206,18 @@ export default async function create(ctx) {
       waveIn.reactivity = audio.silent ? 0 : p.reactivity;
       history.step(audio.waveform, time.dt, waveIn);
       amp = canMap ? waveAmp(p.wave, p.thickness) : 0;
-      dmax = liveDisp(history, amp); // ≤ maxDisp (≤ 0.45 k): the inside camera stays clear
-      stepK = stepFactor(history, amp, p.thickness);
+      const waves = liveDisp(history, amp); // ≤ maxDisp (≤ 0.45 k): the inside camera stays clear
+      if (s.relief > 0) {
+        // The block rides the waves: the shell widens by the relief's tallest point now (≤ 0.25 k,
+        // so ≥ 0.3 k of clearance stays), and inside the relief's own shell the slopes add.
+        relD = reliefShell(s.reliefMax, p.thickness, counts.lx);
+        dmax = waves + relD;
+        stepK = stepFactor(history, amp, p.thickness, relD);
+        relK = reliefStep(waveSlope(history, amp, p.thickness, relD), reliefSlope(s.reliefMax, p.thickness, counts, tw, dmax));
+      } else {
+        dmax = waves;
+        stepK = stepFactor(history, amp, p.thickness);
+      }
       if (canMap) renderMap();
       tess.render(s, surface);
     },
