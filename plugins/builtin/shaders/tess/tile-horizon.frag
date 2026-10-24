@@ -259,7 +259,7 @@ void main() {
   vec3 V = normalize(E - P);
   g_aoP = P.xy;
   float ao = mix(1.0, tessHorizonAO(P.z, pl.grad, AO_RADIUS, jit), fade);
-  vec3 lit = tessLookShade(c.rgb, g_tessPaper, wall, tessEndGrain(P, fp), N, vec3(0.0, 0.0, 1.0), V, L, shadow, ao, 0.36, 0.64, L.z);
+  vec3 lit = tessLookShade(c.rgb, g_tessPaper, wall, tessWood(wall, P, fp), N, vec3(0.0, 0.0, 1.0), V, L, shadow, ao, 0.36, 0.64, L.z);
   o = vec4(tessAtmos(lit, a, a), tessCoC(t1 * u_focal));
 #else
   float diff = max(dot(N, L), 0.0) / L.z;              // a flat top in full light prints as it is

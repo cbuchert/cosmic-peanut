@@ -152,9 +152,9 @@ export const SAMPLE_CAPS = Object.freeze({ aoDirs: 8, aoSteps: 4, dofTaps: 32, s
  * 60 fps is the target there), medium and low trade samples for time.
  */
 const SAMPLES = {
-  low: Object.freeze({ aoDirs: 2, aoSteps: 2, dofTaps: 8, shadow: 4 }),
-  medium: Object.freeze({ aoDirs: 3, aoSteps: 2, dofTaps: 12, shadow: 6 }),
-  high: Object.freeze({ aoDirs: 4, aoSteps: 3, dofTaps: 20, shadow: 8 }),
+  low: Object.freeze({ aoDirs: 2, aoSteps: 2, dofTaps: 6, shadow: 4 }),
+  medium: Object.freeze({ aoDirs: 3, aoSteps: 2, dofTaps: 10, shadow: 6 }),
+  high: Object.freeze({ aoDirs: 4, aoSteps: 2, dofTaps: 16, shadow: 8 }),
 };
 /** @param {unknown} quality the Quality param (unknown → high, the tess default) */
 export function lookSamples(quality) {

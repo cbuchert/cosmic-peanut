@@ -430,7 +430,7 @@ void main() {
       g_aoAB = ab;
       float ao = tessHorizonAO(Hm, pl.grad, AO_RADIUS, fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))));
       float px = sqrt(abs(determinant(S)));
-      vec3 wood = tessEndGrain(vec3(p, Hm), px);
+      vec3 wood = tessWood(wall, vec3(p, Hm), px);
       vec3 outC = tessLookShade(col, g_tessPaper, wall, wood, Nc, N0c, -rd, L, 0.5 + 0.5 * shadow, ao, 0.64, 0.42, 1.0) * (0.86 + 0.14 * (w / q));
       vec3 inC = tessLookShade(col, g_tessPaper, wall, wood, Nc, N0c, -rd, -rd, 1.0, ao, 0.62, 0.45, 1.0);
       col = mix(outC, inC, u_mix) * clamp(1.0 + 1.8 * relief, 0.45, 1.5);

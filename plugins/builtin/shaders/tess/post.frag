@@ -47,8 +47,9 @@ void main() {
   if (u_bloomN > 0.0) c += u_bloomK * texture(u_bloom, v_uv).rgb / u_bloomN;
   vec2 frag = gl_FragCoord.xy;
   float fib = fibre(frag);
-  // The fibres' relief: their slope towards the light lifts them, away darkens (a raking light).
-  float lit = dot(vec2(fibre(frag + vec2(1.0, 0.0)) - fib, fibre(frag + vec2(0.0, 1.0)) - fib), u_lightScr);
+  // The fibres' relief: their slope towards the light lifts them, away darkens (a raking light;
+  // one difference along the light's screen direction).
+  float lit = fibre(frag + u_lightScr) - fib;
   float tooth = hash12(floor(frag)) - 0.5;
   float mottle = vnoise(frag * 0.008) - 0.5;
   float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));

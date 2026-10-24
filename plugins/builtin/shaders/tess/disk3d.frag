@@ -290,7 +290,7 @@ vec3 shadeFace(vec2 w, float eta, float sc, mat2 Jpx, float side, vec3 pw, vec3 
     wall = smoothstep(0.004, 0.014, (eta - hk) / max(r.scale, 1e-5)) * r.kPx;
 #ifdef TESS_CINEMATIC
     // Cinematic (look.glsl): bare end grain on the cut sides, horizon AO from the height map.
-    base = mix(base, tessEndGrain(vec3(w * u_coinG.x, eta) / max(r.scale, 1e-5), px * u_coinG.x / max(r.scale, 1e-5)), wall);
+    base = mix(base, tessWood(wall, vec3(w * u_coinG.x, eta) / max(r.scale, 1e-5), px * u_coinG.x / max(r.scale, 1e-5)), wall);
     g_aoW = w;
     ao = mix(1.0, tessHorizonAO(eta, grad, AO_RADIUS, jit), r.kPx * min(1.0, u_tRelief.x / 0.25));
     paperW = g_tessPaper * shown;

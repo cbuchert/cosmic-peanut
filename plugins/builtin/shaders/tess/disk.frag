@@ -48,6 +48,13 @@ float diskKiteLift() {
   return u_tRelief.x * (tessLiftAt(ring) * vary + tessPopAt(vec2(id, 0.37), ring));
 }
 #endif
+#if defined(TESS_CINEMATIC) && defined(TESS_RELIEF) && !defined(TESS_HEIGHT_PASS)
+// The cinematic Look's horizon AO reads the face's height map (disk units) round g_aoW.
+vec2 g_aoW;
+#define TESS_AO_HEIGHT(o) diskHeightAt(g_aoW + (o))
+#define AO_RADIUS 0.03
+#endif
+// #include look
 
 #if defined(TESS_HEIGHT_PASS)
 void main() {
@@ -100,6 +107,10 @@ void main() {
   vec2 grad = vec2(0.0);
   float ao = 1.0;
   float wall = 0.0;
+#ifdef TESS_CINEMATIC
+  vec3 wood = vec3(0.0);
+  float paperW = 0.0;
+#endif
   if (tileSize > 0.6 * fpx) {
     mat2 Jpx = mat2(sc);
     DiskRelief r = diskRelief(w, R, Jpx, texel);
@@ -117,7 +128,15 @@ void main() {
     ao = mix(1.0, 0.72 + 0.28 * r.prof, r.kPx * min(1.0, u_tRelief.x / 0.25));
     // Where the ray met the side of a taller neighbour: the block's cut side, in the shade of its top.
     wall = smoothstep(0.004, 0.014, (P.z - r.h) / max(r.scale, 1e-5)) * r.kPx;
+#ifdef TESS_CINEMATIC
+    // Cinematic (look.glsl): bare end grain on the cut sides, horizon AO from the height map.
+    wood = tessWood(wall, vec3(w, P.z) / max(r.scale, 1e-5), sc / (R * max(r.scale, 1e-5)));
+    g_aoW = w;
+    ao = mix(1.0, tessHorizonAO(P.z, r.grad, AO_RADIUS, jit), r.kPx * min(1.0, u_tRelief.x / 0.25));
+    paperW = g_tessPaper * shown;
+#else
     col *= 1.0 - 0.45 * wall;
+#endif
   }
   vec3 N = normalize(vec3(-grad, 1.0));
   if (wall > 0.0) {
@@ -129,6 +148,9 @@ void main() {
   float shadow = 1.0;
   float reach = max(H - P.z, 0.0) / L.z;
   int ns = int(clamp(ceil(reach * length(L.xy) / texel / 4.0), 0.0, 8.0));
+#ifdef TESS_CINEMATIC
+  ns = tessShadowSteps(ns);
+#endif
   for (int i = 1; i <= 8; i++) {
     if (i > ns) break;
     float t = reach * ((float(i) - jit) / float(ns)) + texel;
@@ -137,11 +159,16 @@ void main() {
     shadow = min(shadow, clamp(0.5 + 6.0 * clear / t, 0.0, 1.0));
   }
   shadow = smoothstep(0.0, 1.0, shadow);
+#ifdef TESS_CINEMATIC
+  // Physically based print materials (look.glsl): satin ink, paper in the cuts, end grain.
+  col = tessLookShade(col, paperW, wall, wood, N, vec3(0.0, 0.0, 1.0), normalize(E - P), L, shadow, ao, 0.36, 0.64, L.z);
+#else
   float diff = max(dot(N, L), 0.0) / L.z;          // a flat top in full light prints as it is
   float shade = 0.36 + 0.64 * min(diff * shadow, 1.6);
   vec3 V = normalize(E - P);
   float sheen = pow(max(dot(reflect(-L, N), V), 0.0), 24.0) * shadow * 0.08;
   col = col * shade * ao + sheen;
+#endif
   col = mix(u_tPaper, col, clamp((1.0 - rw) * R + 0.5, 0.0, 1.0));
   o = vec4(col, 1.0);
 }

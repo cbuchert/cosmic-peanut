@@ -34,12 +34,13 @@ int tessShadowSteps(int n) { return min(n, u_kSamples.z); }
 
 #define K_PI 3.14159265359
 #define INK_F0 0.045
+#define INK_F90 0.3
 #define INK_ROUGH 0.55      // perceptual roughness of the ink film: satin
 #define INK_SHEEN 0.7       // the lobe's strength (1: the physical key light)
 #define INK_DIFF_ROUGH 0.6  // Burley's roughness for the ink's diffuse
 #define PAPER_WRAP 0.35     // Green's wrap for the paper
 #define PAPER_FIBRE 0.06    // fibre relief on the paper's light
-#define WOOD_DARK 0.6       // bare wood against the paper tone
+#define WOOD_DARK 0.75      // end grain drinks the light: darker than the plank's face
 
 float tessGGX(float nh, float a) {
   float a2 = a * a;
@@ -53,10 +54,12 @@ float tessSmithVis(float nl, float nv, float a) {
   float gl = nv * sqrt(nl * nl * (1.0 - a2) + a2);
   return 0.5 / max(gv + gl, 1e-5);
 }
-float tessSchlick(float f0, float vh) {
+// Schlick's Fresnel towards f90 at grazing: 1 for a smooth film; a satin ink's micro-roughness
+// scatters the grazing reflection, so it rises only to INK_F90 (no glassy haze on the far floor).
+float tessSchlick(float f0, float f90, float vh) {
   float m = 1.0 - vh;
   float m2 = m * m;
-  return f0 + (1.0 - f0) * m2 * m2 * m;
+  return f0 + (f90 - f0) * m2 * m2 * m;
 }
 // Burley's diffuse × N·L (without the 1/π, which the key's normalisation absorbs).
 float tessBurley(float nl, float nv, float lh, float r) {
@@ -73,7 +76,7 @@ float tessWrap(float nl, float w) { return max(0.0, (nl + w) / (1.0 + w)); }
 // Bare end grain at a point of the block (plane xy, height z; px = plane units per target px):
 // annual rings across the block and open pores, fading to the plain wood tone before they alias.
 vec3 tessEndGrain(vec3 P, float px) {
-  vec3 wood = mix(u_tPaper * vec3(0.92, 0.78, 0.6), u_tAvg, 0.3) * WOOD_DARK;
+  vec3 wood = mix(vec3(0.42, 0.27, 0.15), u_tAvg, 0.25) * WOOD_DARK;   // pear wood, a little ink-stained
   float wob = tessNoise(P.xy * 3.1) * 1.6;
   float ring = 0.5 + 0.5 * sin(TAU * (length(P.xy * vec2(1.0, 0.37) + 7.3) * 21.0 + wob));
   float pore = tessNoise(vec2(P.x + P.y, P.z * 0.4) * 230.0);
@@ -81,6 +84,9 @@ vec3 tessEndGrain(vec3 P, float px) {
   float pvis = smoothstep(1.5, 3.0, (1.0 / 230.0) / max(px, 1e-6));
   return wood * (1.0 - 0.16 * vis * smoothstep(0.55, 1.0, ring) - 0.22 * pvis * smoothstep(0.62, 0.9, pore));
 }
+
+// End grain only where there is a cut side (the caller's weight): the rest pays nothing for it.
+vec3 tessWood(float wall, vec3 P, float px) { return wall > 0.0 ? tessEndGrain(P, px) : vec3(0.0); }
 
 // The lit print. c: the print's colour; paper: how much of it is paper showing through the cuts
 // (tessPrintFill's g_tessPaper); wood: how much is a bare cut side (its colour is `woodCol`);
@@ -103,12 +109,15 @@ vec3 tessLookShade(vec3 c, float paper, float wood, vec3 woodCol, vec3 N, vec3 N
   float dWood = nl / nl0c;
   float d = mix(mix(dInk, dPaper, paper), dWood, wood);
   vec3 alb = mix(c, woodCol, wood);
-  vec3 col = alb * (amb * ao + key * min(d * shadow, 1.6));
+  // Micro-shadowing: the AO's cone also hides some of the key light in the grooves (Chan,
+  // "Material Advances in Call of Duty: WWII", SIGGRAPH 2018 Advances: saturate(|N·L| + 2 ao² − 1)).
+  float micro = clamp(abs(dot(N, L)) + 2.0 * ao * ao - 1.0, 0.0, 1.0);
+  vec3 col = alb * (amb * ao + key * min(d * shadow * micro, 1.6));
   // The ink's satin lobe, under the same key: E = π key / nl0 (the diffuse's normalisation).
   float a = INK_ROUGH * INK_ROUGH;
-  float spec = tessGGX(nh, a) * tessSmithVis(nl, nv, a) * tessSchlick(INK_F0, lh) * nl;
+  float spec = tessGGX(nh, a) * tessSmithVis(nl, nv, a) * tessSchlick(INK_F0, INK_F90, lh) * nl;
   float inked = (1.0 - paper) * (1.0 - wood);
-  col += vec3(spec * inked * INK_SHEEN * K_PI * key / nl0c * shadow * mix(1.0, ao, 0.5));
+  col += vec3(spec * inked * INK_SHEEN * K_PI * key / nl0c * shadow * micro);
   return col;
 }
 
